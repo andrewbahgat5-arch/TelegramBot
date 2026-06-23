@@ -1,0 +1,30 @@
+"""ORM model for ``broadcasts`` (MASTER_PLAN 10.9)."""
+
+from __future__ import annotations
+
+import datetime
+
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
+
+from infrastructure.database.models.base import Base
+
+
+class Broadcast(Base):
+    __tablename__ = "broadcasts"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    created_by: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    target_language: Mapped[str | None] = mapped_column(String(10))
+    target_role: Mapped[str | None] = mapped_column(String(20))
+    message_text: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    total_sent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    total_failed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))

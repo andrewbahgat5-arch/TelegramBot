@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 1 (Foundation) — code complete, awaiting Owner sign-off at stop point |
-| Sprints completed | 1 / 13 (Sprint 0 approved by Owner; Sprint 1 under review) |
-| Tasks completed | 19 / 105 (Sprint 0: 10/10; Sprint 1: 9/9) |
+| Current sprint | Sprint 3 (Cache and Queue) — in progress (Owner pre-authorized S2→S3 without stop) |
+| Sprints completed | 2 / 13 (Sprint 0, 1 approved; Sprint 2 complete, Owner pre-authorized continuation) |
+| Tasks completed | 28 / 105 (S0: 10/10; S1: 9/9; S2: 9/9) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions) |
-| Last code change | 2026-06-23 — Sprint 1 `core/` (config, logging, sentry, uuid7, constants) + `domain/` (enums, exceptions) |
-| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 1; Section 9.7 `Constants` card added |
-| Next recommended action | **Owner reviews a sample JSON log line and approves the `SensitiveScrubber` redaction key list (Sprint 1 stop point).** Then authorize Sprint 2 (Persistence Layer). Still-open Owner items: run the `docker compose up` smoke (Docker Desktop); confirm OQ-2 (CI provider). |
+| Last code change | 2026-06-23 — Sprint 2 persistence (Alembic schema, 13 ORM models, 12 repositories, partitioning) |
+| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 2 |
+| Next recommended action | Continue Sprint 3 (Cache and Queue), then stop for combined Owner review of Sprints 2+3. Docker Desktop now running — full `docker compose` stack verified up. |
 
 ---
 
@@ -68,9 +68,9 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Sprint | Title | Status | Completion | Tasks | Blocker |
 |---|---|---|---|---|---|
 | 0 | Bootstrap | `[x]` Completed | 100% | 10 / 10 | — |
-| 1 | Foundation | `[~]` Under Review | 100% | 9 / 9 | awaiting Owner sign-off |
-| 2 | Persistence Layer | `[ ]` Not Started | 0% | 0 / 9 | depends on S1 |
-| 3 | Cache and Queue | `[ ]` Not Started | 0% | 0 / 7 | depends on S2 |
+| 1 | Foundation | `[x]` Completed | 100% | 9 / 9 | — |
+| 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
+| 3 | Cache and Queue | `[~]` In Progress | 0% | 0 / 7 | — |
 | 4 | User Identity | `[ ]` Not Started | 0% | 0 / 9 | depends on S2, S3 |
 | 5 | URL Analyzer + Provider Abstraction | `[ ]` Not Started | 0% | 0 / 11 | depends on S2, S3 |
 | 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | depends on S4, S5 |
@@ -178,26 +178,32 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 9) |
+| **Status** | `[x]` Completed (Owner pre-authorized S2→S3 continuation) |
+| **Completion** | 100% (9 / 9) |
 | **Goal** | Postgres holds every V1 table; repositories are tested against a real database. |
-| **Stop Point** | Owner inspects schema and approves partition naming scheme. |
+| **Stop Point** | Owner inspects schema and approves partition naming scheme (`{table}_y{YYYY}m{MM}`). |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **2.1** Configure Alembic; connection from `core/config.py`.
-- [ ] **2.2** Baseline migration: tables 1–12 per Section 10; monthly partitions for `downloads`/`jobs`/`error_logs`; all indexes and FKs.
-- [ ] **2.3** Seed migration: settings keys (Section 13.4) + Owner user.
-- [ ] **2.4** `infrastructure/database/engine.py` and `session.py` (async).
-- [ ] **2.5** ORM models in `infrastructure/database/models/` (one per table).
-- [ ] **2.6** Repository protocols in `domain/protocols/repositories.py`.
-- [ ] **2.7** Repository implementations in `infrastructure/database/repositories/` (all 12 + `JobWaiterRepository`).
-- [ ] **2.8** Partition rollover helper (`ensure_partitions_for_next_n_months`).
-- [ ] **2.9** Integration tests against postgres-15 (CI service container).
+- [x] **2.1** Alembic configured (`alembic.ini`, async `migrations/env.py` building the URL from `core/config.py`; timestamp-prefixed filenames).
+- [x] **2.2** Baseline migration `202606230001_initial_schema` — all 12 tables per Section 10; `downloads`/`jobs`/`error_logs` monthly RANGE-partitioned with a 13-month seeded window; 31 indexes; all FKs with correct ON DELETE actions.
+- [x] **2.3** Seed migration `202606230002_seed_settings_and_owner` — 24 Section 13.4 settings keys + Owner user (Telegram id from env); idempotent (ON CONFLICT DO NOTHING).
+- [x] **2.4** `infrastructure/database/engine.py` (async engine, `statement_cache_size=0` for PgBouncer) + `session.py` (async_sessionmaker).
+- [x] **2.5** 13 ORM models in `infrastructure/database/models/` (one per table; composite PKs for partitioned tables).
+- [x] **2.6** Repository protocols in `domain/protocols/repositories.py` (generic over entity type to respect the domain→infra boundary).
+- [x] **2.7** 12 repositories in `infrastructure/database/repositories/` (generic base + entity-specific queries; repos flush, never commit).
+- [x] **2.8** `partitioning.py` — naming/SQL helpers + `ensure_partitions_for_next_n_months` rollover helper (fake-clock injectable).
+- [x] **2.9** Integration tests against live postgres-15 (transaction-rollback isolation; auto-skip when DB unavailable).
 
-**Validation Results:** pending.
-**Known Issues:** none.
-**Next Recommended Action:** wait for Sprint 1 approval.
+**Validation Results (verified against live postgres:15 via docker-compose):**
+- `alembic upgrade head` — clean; 12 base tables, 3 partitioned, 39 partitions (3×13), 31 indexes, 24 settings, owner user.
+- Schema introspection test — columns, FK ON DELETE actions (Section 10.14), and all 31 indexes match Section 10.
+- Repository CRUD + behavior tests — 72 tests pass; repositories coverage 97.70% (≥80% exit criterion).
+- Lazy daily-reset (D-012), `JobRepository` accepts external UUIDv7, partition rollover with fake clock — all verified.
+- All gates: ruff, ruff-format, mypy --strict (90 files), import-linter (6 contracts), bandit (0), pip-audit (clean).
+
+**Known Issues:** none. `infrastructure/database/session.py` `create_session_factory` covered by unit test; integration suite auto-skips without a migrated DB.
+**Partition naming (for Owner approval):** `{table}_y{YYYY}m{MM}` — e.g. `downloads_y2026m07`.
 
 ---
 
@@ -456,7 +462,8 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
-| 2026-06-23 | — (uncommitted) | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
+| 2026-06-23 | — (uncommitted) | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
+| 2026-06-23 | `78af6ed` | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
 | 2026-06-23 | `93524d6` | `.gitignore`, `pyproject.toml`, `mypy.ini`, `.importlinter`, `.pre-commit-config.yaml`, `.env.example`, `README.md`, `.github/workflows/ci.yml`, `deploy/docker-compose.yml`, `deploy/pgbouncer.ini`, `deploy/Dockerfile.{bot,worker,api}`, `tests/conftest.py`, 31 package `__init__.py` placeholders; `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` (Sprint 0 records) | Sprint 0 / 0.1–0.10 | Implementation agent |
 | 2026-06-23 | — | `MASTER_PLAN.md` (v2.1 → v2.2: Section 25 rewritten; D-031–D-039 added; Sprint 10 narrowed; Sprint 11 inserted; Sprint 11→12 renamed; DoD expanded to 19 items), `PROJECT_PROGRESS.md` (sprint structure + counts + new session handoff), `TEST_RESULTS.md` (created), `SECURITY_REPORT.md` (created), `PERFORMANCE_REPORT.md` (created) | Pre-Sprint 0 | Planning agent |
 | 2026-06-23 | — | `MASTER_PLAN.md` (created, v2.0 → v2.1), `PROJECT_PROGRESS.md` (created), `database_reference.md` (marked superseded), `project_reference.md` (marked superseded) | Pre-Sprint 0 | Planning agent |
@@ -469,6 +476,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-23 | Sprint 2 / 2.1–2.9 | Unit + Integration (72 tests, live postgres:15) + all gates | PASS | Repositories coverage 97.70% (≥80%). Schema introspection vs Section 10 passes. |
 | 2026-06-23 | Sprint 1 / 1.1–1.9 | Unit (44 tests) + all gates (ruff, mypy --strict, import-linter, bandit, pip-audit) | PASS | `core/` coverage 99.26% (≥90%). See `TEST_RESULTS.md` 2026-06-23 Sprint 1 entry. |
 | 2026-06-23 | Sprint 0 / 0.1–0.10 | Tooling gates (ruff, ruff-format, mypy --strict, import-linter, pytest, pip-audit, bandit) | PASS | See `TEST_RESULTS.md` 2026-06-23 entry. `docker compose up` deferred (daemon not running). |
 | — | — | — | — | No business test suites have run yet. |
@@ -497,6 +505,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 2 Persistence Layer implemented
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 2 (Persistence Layer) → continuing into Sprint 3 (Owner pre-authorized) |
+| **Tasks moved** | Sprint 1 → `[x]` Completed (Owner approved). Sprint 2 tasks 2.1–2.9 all `[x]`; Sprint 2 → `[x]` Completed. Sprint 3 starting. |
+| **Files modified** | Alembic (`alembic.ini`, `migrations/env.py`, `script.py.mako`, 2 versioned migrations); `infrastructure/database/{engine,session,partitioning}.py`; 13 ORM models + base; 12 repositories + base; `domain/protocols/repositories.py`; 6 test modules (2 unit, 4 integration); `pyproject.toml` (sqlalchemy 2.0.36, asyncpg 0.30.0, alembic 1.14.0, greenlet 3.1.1, redis 5.2.1, hiredis 3.1.0, orjson 3.11.5). |
+| **Decisions added** | None. All deps pre-approved in Section 6.1/6.2; orjson bumped 3.10.12→3.11.5 to clear PYSEC-2026-107. |
+| **Validation** | All gates PASS against live postgres:15 (docker-compose). 72 tests; repositories coverage 97.70%. `alembic upgrade head` verified: 12 tables, 39 partitions, 31 indexes, 24 settings, owner. Schema introspection matches Section 10 (columns, FK ON DELETE, indexes). mypy --strict 90 files, import-linter 6 contracts, bandit 0, pip-audit clean. |
+| **Current state** | Full V1 schema lives in Postgres via one baseline + one seed migration. Partitioned `downloads`/`jobs`/`error_logs` with a rolling 13-month window and a fake-clock-testable rollover helper. 12 repositories over a generic async base (flush-only; caller owns the transaction). Docker Desktop is running; the full infra stack (postgres/redis/pgbouncer/uptime-kuma) is up. |
+| **Completed work** | Tasks 2.1–2.9. Resolved during the run: (1) `id_column` stored as `InstrumentedAttribute` class attr triggered the descriptor protocol on a non-mapped class → switched to `id_attr` name + `getattr`; (2) settings upsert returned the stale identity-mapped row → rewrote as an ORM update; (3) asyncpg returns `char` as bytes → cast `confdeltype::text` in the FK test; (4) a test used a date outside the seeded partition window → switched to now-based timestamps. |
+| **Remaining work** | Sprint 3 (Cache and Queue): Redis client, typed cache, distributed locks, Lua-atomic queue, cache/queue/settings services, Redis integration tests. Then stop for combined Owner review of Sprints 2+3. |
+| **Known issues** | None. Integration suite auto-skips when Postgres/migrated schema is unavailable (so unit-only/CI-without-DB runs don't fail). |
+| **Recommended next task** | Sprint 3 Task 3.1 (`infrastructure/redis/client.py`). |
+| **Notes for the next agent** | Repositories never commit — `add`/`flush` only; the entry point owns the unit of work. The integration `db_session` fixture wraps each test in a connection transaction rolled back afterward (`join_transaction_mode="create_savepoint"`); use `db_session.begin_nested()` to assert IntegrityError without poisoning the outer txn. The seeded partition window starts at the current month — tests must use in-window timestamps. CI must run `alembic upgrade head` before the integration job. Redis key scheme is LOCKED in Section 11.4; callers must never pass raw keys (Sprint 3 enforces typed methods only). |
 
 ### Session Handoff — 2026-06-23 — Sprint 1 Foundation implemented
 

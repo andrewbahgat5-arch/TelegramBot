@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-23 | PASS (44) | core/ 99.26% | Sprint 1 |
-| Integration | — | — | — | (Sprint 2) |
+| Unit | 2026-06-23 | PASS (52) | core/ 99.26% | Sprint 1 |
+| Integration | 2026-06-23 | PASS (20) | repos 97.70% | Sprint 2 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,32 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-23 — Unit + Integration — Sprint 2 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree; follows Sprint 1 commit 78af6ed) |
+| Environment | local (Windows 11, Python 3.13.11) + postgres:15 via docker-compose |
+| Suite | unit + integration |
+| Sprint | 2 |
+| Triggered by | Sprint 2 exit checklist |
+| Total tests | 72 (52 unit, 20 integration) |
+| Passed | 72 |
+| Failed | 0 |
+| Skipped | 0 (integration auto-skips only when DB unavailable) |
+| Duration | ~7 s |
+| Coverage (overall) | `infrastructure/database/repositories` 97.70% (≥80% exit criterion); `infrastructure/database` 97% |
+| Notes | Integration tests run against live postgres:15 with per-test transaction rollback. Verified: `alembic upgrade head` → 12 tables, 39 partitions (3×13), 31 indexes, 24 seeded settings, owner user; schema introspection vs Section 10 (columns, FK ON DELETE actions, indexes); repository CRUD + lazy daily reset (D-012) + UUIDv7 job create + partition rollover (fake clock). Gates: ruff, ruff-format, mypy --strict (90 files), import-linter (6 contracts), bandit (0), pip-audit (clean). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- Integration suite skips wholesale when Postgres/migrated schema is unavailable (keeps unit-only/CI-without-DB runs green).
+
+---
 
 ### 2026-06-23 — Unit — Sprint 1 exit
 
