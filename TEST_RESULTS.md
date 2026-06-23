@@ -20,7 +20,7 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | — | — | — | (assigned in Sprint 1) |
+| Unit | 2026-06-23 | PASS (44) | core/ 99.26% | Sprint 1 |
 | Integration | — | — | — | (Sprint 2) |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
@@ -66,6 +66,33 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-23 — Unit — Sprint 1 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree; follows Sprint 0 commit 93524d6) |
+| Environment | local (Windows 11, Python 3.13.11) |
+| Suite | unit |
+| Sprint | 1 |
+| Triggered by | Sprint 1 exit checklist |
+| Total tests | 44 |
+| Passed | 44 |
+| Failed | 0 |
+| Skipped | 0 |
+| Duration | ~1.0 s |
+| Coverage (overall) | core/ 99.26% branch coverage (`--cov-fail-under=90` satisfied) |
+| Coverage by path | core/config 100%, core/logging 100%, core/sentry 100%, core/uuid7 100%, core/constants 100%, core/__main__ 85% (only the `__main__` guard line) |
+| Notes | Modules under test: `core/{config,logging,sentry,uuid7,constants,__main__}`, `domain/{exceptions,enums}`. All gates green alongside: ruff, ruff-format, mypy --strict (53 files), import-linter (6 contracts kept), bandit (0 findings), pip-audit (clean). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None.
+
+---
 
 ### 2026-06-23 — Tooling Gates — Sprint 0 exit
 

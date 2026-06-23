@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 0 (Bootstrap) — code complete, awaiting Owner sign-off at stop point |
-| Sprints completed | 0 / 13 (Sprint 0 under review) |
-| Tasks completed | 10 / 105 (all Sprint 0 tasks) |
+| Current sprint | Sprint 1 (Foundation) — code complete, awaiting Owner sign-off at stop point |
+| Sprints completed | 1 / 13 (Sprint 0 approved by Owner; Sprint 1 under review) |
+| Tasks completed | 19 / 105 (Sprint 0: 10/10; Sprint 1: 9/9) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions) |
-| Last code change | 2026-06-23 — Sprint 0 scaffold (layout, tooling, CI, Docker, `.env.example`) |
-| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 0 completion |
-| Next recommended action | **Owner reviews `pyproject.toml`, `deploy/docker-compose.yml`, `.github/workflows/ci.yml` and approves Sprint 0.** Then start Sprint 1 Task 1.1. Owner action still open: start Docker Desktop to run the `docker compose up` smoke; confirm OQ-2 (CI provider). |
+| Last code change | 2026-06-23 — Sprint 1 `core/` (config, logging, sentry, uuid7, constants) + `domain/` (enums, exceptions) |
+| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 1; Section 9.7 `Constants` card added |
+| Next recommended action | **Owner reviews a sample JSON log line and approves the `SensitiveScrubber` redaction key list (Sprint 1 stop point).** Then authorize Sprint 2 (Persistence Layer). Still-open Owner items: run the `docker compose up` smoke (Docker Desktop); confirm OQ-2 (CI provider). |
 
 ---
 
@@ -67,8 +67,8 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 
 | Sprint | Title | Status | Completion | Tasks | Blocker |
 |---|---|---|---|---|---|
-| 0 | Bootstrap | `[~]` Under Review | 100% | 10 / 10 | awaiting Owner sign-off |
-| 1 | Foundation | `[ ]` Not Started | 0% | 0 / 9 | depends on S0 |
+| 0 | Bootstrap | `[x]` Completed | 100% | 10 / 10 | — |
+| 1 | Foundation | `[~]` Under Review | 100% | 9 / 9 | awaiting Owner sign-off |
 | 2 | Persistence Layer | `[ ]` Not Started | 0% | 0 / 9 | depends on S1 |
 | 3 | Cache and Queue | `[ ]` Not Started | 0% | 0 / 7 | depends on S2 |
 | 4 | User Identity | `[ ]` Not Started | 0% | 0 / 9 | depends on S2, S3 |
@@ -138,26 +138,39 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 9) |
+| **Status** | `[~]` Under Review (code complete; awaiting Owner sign-off) |
+| **Completion** | 100% (9 / 9) |
 | **Goal** | `core/` is real, useful, and tested. |
 | **Stop Point** | Owner reviews sample JSON log line and `SensitiveScrubber` redaction list. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **1.1** Implement `core/config.py` (pydantic-settings, all env keys, secret redaction in `__repr__`).
-- [ ] **1.2** Implement `core/logging.py` (structlog, `SensitiveScrubber`, JSON/console toggle, correlation context).
-- [ ] **1.3** Implement `core/sentry.py` (SDK init guarded on DSN; integrations; `before_send` scrubber).
-- [ ] **1.4** Implement `core/uuid7.py` (D-013, D-023).
-- [ ] **1.5** Implement `core/constants.py` (priorities, role values, etc.).
-- [ ] **1.6** Implement `domain/exceptions.py` matching Section 15.4 hierarchy.
-- [ ] **1.7** Implement `domain/enums/` (`JobStatus`, `UserRole`, `MediaFormat`, `Quality`, `ErrorType`, `AdType`).
-- [ ] **1.8** Wire `core/logging.py` into a tiny `__main__` test entry that emits one structured log line.
-- [ ] **1.9** Unit tests for each `core/` module (coverage ≥ 90%).
+- [x] **1.1** `core/config.py` — pydantic-settings `Settings` over all 36 Section 13.2 keys; `SecretStr` secrets + redacting `__repr__`/`__str__`; validators (log level, sample-rate range, webhook-secret-required, empty-int→None); `sentry_enabled`/`use_webhook` helpers.
+- [x] **1.2** `core/logging.py` — structlog config, `SensitiveScrubber` (recursive key redaction), JSON/console toggle, correlation-ID contextvars (`bind`/`clear`/`correlation_context`).
+- [x] **1.3** `core/sentry.py` — DSN-guarded `init_sentry`; availability-guarded integrations (asyncio/fastapi/sqlalchemy/redis); `before_send` secret scrubber; `send_default_pii=False`.
+- [x] **1.4** `core/uuid7.py` — pure RFC-9562 v7, process-monotonic (thread-locked counter + ms borrow on overflow); `uuid7()` / `uuid7_str()` (D-013, D-023).
+- [x] **1.5** `core/constants.py` — priority bands + `priority_score`, secret-key lists, standard log fields, layered timeouts (D-025), debounce window. (Enums live in `domain/enums/` per Section 7.1; constants holds primitives only.)
+- [x] **1.6** `domain/exceptions.py` — exact Section 15.4 hierarchy; each leaf carries an `ErrorType`; `DuplicateDownloadError(job_id=...)`.
+- [x] **1.7** `domain/enums/` — `JobStatus` (+ `is_terminal`), `UserRole` (+ `is_staff`), `MediaFormat`, `Quality`, `ErrorType`, `AdType` (all `StrEnum`).
+- [x] **1.8** `core/__main__.py` — `python -m core` configures logging and emits one structured line (binds a UUIDv7 correlation id).
+- [x] **1.9** Unit tests under `tests/unit/` — 44 tests; `core/` coverage 99.26% (≥ 90%).
 
-**Validation Results:** pending.
-**Known Issues:** none.
-**Next Recommended Action:** wait for Sprint 0 approval.
+**Validation Results:**
+- `ruff check .` / `ruff format --check .` — clean (53 files).
+- `mypy --strict .` — no issues in 53 source files.
+- `lint-imports` — 6 contracts kept, 0 broken.
+- `pytest` — 44 passed; `core/` branch coverage 99.26% (`--cov-fail-under=90` satisfied).
+- `bandit -r . -c pyproject.toml` — 0 findings (B108/B104 configurable-default defaults annotated `# nosec`).
+- `pip-audit` — no known vulnerabilities (sentry-sdk 2.20.0 pinned; pre-approved in Section 6.1).
+- `python -m core` — emits a single JSON log line with all Section 15.1 standard fields.
+
+**Known Issues:** none. Only uncovered `core/` line is the `if __name__ == "__main__"` guard in `core/__main__.py`.
+**Next Recommended Action:** Owner reviews a sample JSON log line + approves the `SensitiveScrubber` key list, then authorizes Sprint 2.
+
+**Sample JSON log line (for Owner review):**
+`{"component":"core","note":"structured logging is wired","event":"logging_smoke_ok","correlation_id":"019ef2a0-f755-7228-9396-8159953b01b0","logger":"core.__main__","level":"info","timestamp":"2026-06-23T03:58:15.908211Z"}`
+
+**`SensitiveScrubber` redaction key list (substring match, case-insensitive):** `secret`, `token`, `password`, `passwd`, `dsn`, `api_key`, `apikey`, `authorization`.
 
 ---
 
@@ -443,7 +456,8 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
-| 2026-06-23 | — (uncommitted) | `.gitignore`, `pyproject.toml`, `mypy.ini`, `.importlinter`, `.pre-commit-config.yaml`, `.env.example`, `README.md`, `.github/workflows/ci.yml`, `deploy/docker-compose.yml`, `deploy/pgbouncer.ini`, `deploy/Dockerfile.{bot,worker,api}`, `tests/conftest.py`, 31 package `__init__.py` placeholders; `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` (Sprint 0 records) | Sprint 0 / 0.1–0.10 | Implementation agent |
+| 2026-06-23 | — (uncommitted) | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
+| 2026-06-23 | `93524d6` | `.gitignore`, `pyproject.toml`, `mypy.ini`, `.importlinter`, `.pre-commit-config.yaml`, `.env.example`, `README.md`, `.github/workflows/ci.yml`, `deploy/docker-compose.yml`, `deploy/pgbouncer.ini`, `deploy/Dockerfile.{bot,worker,api}`, `tests/conftest.py`, 31 package `__init__.py` placeholders; `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` (Sprint 0 records) | Sprint 0 / 0.1–0.10 | Implementation agent |
 | 2026-06-23 | — | `MASTER_PLAN.md` (v2.1 → v2.2: Section 25 rewritten; D-031–D-039 added; Sprint 10 narrowed; Sprint 11 inserted; Sprint 11→12 renamed; DoD expanded to 19 items), `PROJECT_PROGRESS.md` (sprint structure + counts + new session handoff), `TEST_RESULTS.md` (created), `SECURITY_REPORT.md` (created), `PERFORMANCE_REPORT.md` (created) | Pre-Sprint 0 | Planning agent |
 | 2026-06-23 | — | `MASTER_PLAN.md` (created, v2.0 → v2.1), `PROJECT_PROGRESS.md` (created), `database_reference.md` (marked superseded), `project_reference.md` (marked superseded) | Pre-Sprint 0 | Planning agent |
 
@@ -455,6 +469,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-23 | Sprint 1 / 1.1–1.9 | Unit (44 tests) + all gates (ruff, mypy --strict, import-linter, bandit, pip-audit) | PASS | `core/` coverage 99.26% (≥90%). See `TEST_RESULTS.md` 2026-06-23 Sprint 1 entry. |
 | 2026-06-23 | Sprint 0 / 0.1–0.10 | Tooling gates (ruff, ruff-format, mypy --strict, import-linter, pytest, pip-audit, bandit) | PASS | See `TEST_RESULTS.md` 2026-06-23 entry. `docker compose up` deferred (daemon not running). |
 | — | — | — | — | No business test suites have run yet. |
 
@@ -482,6 +497,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 1 Foundation implemented
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 1 (Foundation) |
+| **Tasks moved** | Sprint 0 → `[x]` Completed (Owner authorized proceeding). Sprint 1 tasks 1.1–1.9 all `[ ]` → `[x]`; Sprint 1 → `[~]` Under Review (100%, awaiting Owner sign-off at stop point). |
+| **Files modified** | New: `core/{config,logging,sentry,uuid7,constants,__main__}.py`; `domain/exceptions.py`; `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`; 8 `tests/unit/test_*.py`; `.gitattributes`. Updated: `pyproject.toml` (sentry-sdk==2.20.0 pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md`. |
+| **Decisions added** | None. sentry-sdk pinned 2.20.0 (pre-approved in Section 6.1, not a new dependency). |
+| **Validation** | All gates PASS: ruff, ruff-format, mypy --strict (53 files), import-linter (6 contracts), bandit (0 findings), pip-audit (clean), pytest (44 passed). `core/` coverage 99.26% (≥90% exit criterion met). `python -m core` emits a valid JSON log line. |
+| **Current state** | `core/` is complete and tested: typed config with secret redaction, structured logging with scrubber + correlation IDs, DSN-guarded Sentry, monotonic UUIDv7, shared constants. `domain/` enums and exception hierarchy match Sections 9.4 and 15.4. No infrastructure/services/bot code yet. Sprint 0 + Sprint 1 work committed/uncommitted: Sprint 0 is commit `93524d6`; Sprint 1 working tree is **uncommitted** pending Owner instruction. |
+| **Completed work** | Tasks 1.1–1.9. Resolved during the run: (1) `.env.example` empty-valued keys with inline comments broke dotenv parsing → rewrote with full-line comments + added empty-string→None validator for `telegram_alerts_chat_id`; (2) bumped to pytest 9 already done in S0; (3) annotated two bandit medium false-positives (`/tmp/downloads`, `0.0.0.0` configurable defaults) with `# nosec`. |
+| **Remaining work** | Sprint 1 stop-point items for the Owner: review the sample JSON log line and approve the `SensitiveScrubber` redaction key list (both recorded in the Sprint 1 detail section above). Then authorize Sprint 2 (Persistence Layer). |
+| **Known issues** | Only uncovered `core/` line is the `__main__` `if __name__` guard. `docker compose up` smoke still pending Docker Desktop (carried from Sprint 0). |
+| **Recommended next task** | Owner sign-off on Sprint 1, then Sprint 2 Task 2.1 (configure Alembic). |
+| **Notes for the next agent** | `Settings` uses `SecretStr` for secrets — call `.get_secret_value()`. Build test Settings via `Settings(_env_file=...)` and override with `monkeypatch.setenv` (needs `# type: ignore[call-arg]` for `_env_file`). Every `AppError` subclass exposes `.error_type` (an `ErrorType`) — reuse this when persisting to `error_logs` in Sprint 2. Enums are `StrEnum`; compare `.value` to a literal in tests to satisfy mypy's strict-equality. UUIDv7 monotonicity is process-local and thread-safe via a lock. |
 
 ### Session Handoff — 2026-06-23 — Sprint 0 Bootstrap implemented
 

@@ -1,0 +1,11 @@
+# Normalize line endings: keep LF in the repo so ruff/mypy/pytest behave
+# identically on Windows and Linux CI. Without this, Git's autocrlf turns
+# checked-out files into CRLF and `ruff format --check` can disagree with CI.
+* text=auto eol=lf
+
+# Binary types never get line-ending conversion.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary

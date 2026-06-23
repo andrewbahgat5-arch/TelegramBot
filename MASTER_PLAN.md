@@ -1013,6 +1013,13 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Can Modify:** Tweak random bits if a hot collision is observed.
 - **Must Never Modify:** The time component (must be monotonic-millisecond).
 
+#### Component: `Constants`
+- **Purpose:** Framework-free primitive constants shared across layers (priority bands, secret-redaction key list, standard log fields, layered timeouts).
+- **Files/Folders:** `core/constants.py`
+- **Related Services:** `QueueService` (priority bands), `Logging`/`Sentry` (secret keys), `RateLimitService`/`UserService` (timeouts, debounce).
+- **Can Modify:** Add new primitives; tune timeout/debounce constants.
+- **Must Never Modify:** Priority band base scores without a Section 12.2 update; the secret-key list without a Section 14.3 update. No enums here — those live in `domain/enums/`.
+
 ---
 
 ## 10. Locked Database Schema
