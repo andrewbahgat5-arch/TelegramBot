@@ -61,6 +61,18 @@ class JobWaiterRepositoryProtocol(Repository[T], Protocol[T]):
     async def delete_for_job(self, job_id: uuid.UUID) -> int: ...
 
 
+class SettingsStoreProtocol(Protocol):
+    """The settings persistence surface that ``SettingsService`` depends on.
+
+    Returns are ``Any`` (a settings-row-like object exposing ``value: str`` and
+    ``value_type: str``). ``Any`` avoids coupling the protocol to the ORM model,
+    whose ``Mapped[str]`` columns do not structurally match a ``str`` attribute.
+    """
+
+    async def get_by_key(self, key: str) -> Any: ...
+    async def upsert(self, key: str, value: str, *, updated_by: int | None = None) -> Any: ...
+
+
 class SettingsRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_key(self, key: str) -> T | None: ...
     async def upsert(self, key: str, value: str, *, updated_by: int | None = None) -> T: ...

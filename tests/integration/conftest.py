@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from core.config import Settings
 from infrastructure.database.engine import create_engine
+from infrastructure.redis.client import RedisClients, create_redis_clients
 
 ENV_EXAMPLE = str(Path(__file__).resolve().parents[2] / ".env.example")
 
@@ -64,3 +65,20 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 def telegram_id() -> int:
     """A random Telegram id, avoiding collisions with seeded/owner rows."""
     return random.randint(1_000_000_000, 9_999_999_999)  # noqa: S311 - test data, not crypto
+
+
+@pytest_asyncio.fixture
+async def redis_clients() -> AsyncIterator[RedisClients]:
+    clients = create_redis_clients(_settings())
+    try:
+        await clients.cache.ping()
+    except Exception:  # Redis not running -> skip the Redis suites
+        await clients.aclose()
+        pytest.skip("Redis not available for integration tests")
+    # Isolate each test: start and end with empty cache/queue databases.
+    await clients.cache.flushdb()
+    await clients.queue.flushdb()
+    yield clients
+    await clients.cache.flushdb()
+    await clients.queue.flushdb()
+    await clients.aclose()

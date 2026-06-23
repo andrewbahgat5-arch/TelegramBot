@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-23 | PASS (52) | core/ 99.26% | Sprint 1 |
-| Integration | 2026-06-23 | PASS (20) | repos 97.70% | Sprint 2 |
+| Unit | 2026-06-23 | PASS (53) | core/ 99.26% | Sprint 1 |
+| Integration | 2026-06-23 | PASS (39) | redis 100%, repos 97.70% | Sprint 2-3 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,32 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-23 — Unit + Integration — Sprint 3 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree; follows Sprint 2 commit 8ccd1e6) |
+| Environment | local (Windows 11, Python 3.13.11) + redis:7 + postgres:15 via docker-compose |
+| Suite | unit + integration |
+| Sprint | 3 |
+| Triggered by | Sprint 3 exit checklist |
+| Total tests | 92 (53 unit, 39 integration) |
+| Passed | 92 |
+| Failed | 0 |
+| Skipped | 0 (auto-skip only when Redis/Postgres unavailable) |
+| Duration | ~13 s |
+| Coverage (overall) | `infrastructure/redis` 100% (≥80% exit criterion); `services` 92–100% |
+| Notes | Verified: queue priority ordering + FIFO-within-band + 1000-job concurrent dequeue across 3 tasks with zero duplicates; lock acquire/foreign-release-rejection; `SettingsService` read-through cache + write-through invalidation + int/bool/json casts; all Section 11.4 keys emitted by exactly one `RedisKeys` helper. Gates: ruff, ruff-format, mypy --strict (105 files), import-linter (6 contracts), bandit (0), pip-audit (clean). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None (full stack was up for this run).
+
+---
 
 ### 2026-06-23 — Unit + Integration — Sprint 2 exit
 

@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 3 (Cache and Queue) — in progress (Owner pre-authorized S2→S3 without stop) |
-| Sprints completed | 2 / 13 (Sprint 0, 1 approved; Sprint 2 complete, Owner pre-authorized continuation) |
-| Tasks completed | 28 / 105 (S0: 10/10; S1: 9/9; S2: 9/9) |
+| Current sprint | Sprint 3 (Cache and Queue) — code complete + verified; awaiting combined Owner review of Sprints 2+3 |
+| Sprints completed | 3 / 13 (S0, S1 approved; S2 complete; S3 under review) |
+| Tasks completed | 35 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions) |
-| Last code change | 2026-06-23 — Sprint 2 persistence (Alembic schema, 13 ORM models, 12 repositories, partitioning) |
-| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 2 |
-| Next recommended action | Continue Sprint 3 (Cache and Queue), then stop for combined Owner review of Sprints 2+3. Docker Desktop now running — full `docker compose` stack verified up. |
+| Last code change | 2026-06-23 — Sprint 3 cache/queue (Redis client, typed cache, locks, Lua queue, cache/queue/settings services) |
+| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 3 |
+| Next recommended action | **Stop for combined Owner review of Sprints 2 + 3** (schema/partition naming; queue priority behavior). On approval, start Sprint 4 (User Identity). |
 
 ---
 
@@ -70,7 +70,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 0 | Bootstrap | `[x]` Completed | 100% | 10 / 10 | — |
 | 1 | Foundation | `[x]` Completed | 100% | 9 / 9 | — |
 | 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
-| 3 | Cache and Queue | `[~]` In Progress | 0% | 0 / 7 | — |
+| 3 | Cache and Queue | `[~]` Under Review | 100% | 7 / 7 | awaiting Owner sign-off |
 | 4 | User Identity | `[ ]` Not Started | 0% | 0 / 9 | depends on S2, S3 |
 | 5 | URL Analyzer + Provider Abstraction | `[ ]` Not Started | 0% | 0 / 11 | depends on S2, S3 |
 | 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | depends on S4, S5 |
@@ -211,23 +211,30 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 7) |
+| **Status** | `[~]` Under Review (code complete + integration verified; awaiting Owner sign-off) |
+| **Completion** | 100% (7 / 7) |
 | **Goal** | Every Redis interaction goes through the documented key scheme and is testable. |
 | **Stop Point** | Owner confirms queue priorities behave correctly under mixed-batch hand test. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **3.1** `infrastructure/redis/client.py` (connection manager, separate DBs).
-- [ ] **3.2** `infrastructure/redis/cache.py` (`CacheProtocol`; typed methods only — no raw keys from callers).
-- [ ] **3.3** `infrastructure/redis/locks.py` (distributed lock + token foreign-release rejection).
-- [ ] **3.4** `infrastructure/redis/queue.py` (`QueueProtocol`; atomic dequeue via Lua).
-- [ ] **3.5** `services/cache_service.py` and `services/queue_service.py` (thin wrappers).
-- [ ] **3.6** `services/settings_service.py` (read-through cache, type-cast, write-through invalidation).
-- [ ] **3.7** Integration tests against real Redis.
+- [x] **3.1** `infrastructure/redis/client.py` — `create_redis_clients` builds cache (DB 0) + queue (DB 1) clients (`decode_responses=True`).
+- [x] **3.2** `infrastructure/redis/cache.py` — `RedisCache` implements `CacheProtocol` primitives (`get`/`set`/`delete`/`incr_with_ttl`); keys built only via `core/redis_keys.RedisKeys`.
+- [x] **3.3** `infrastructure/redis/locks.py` — `RedisLock` (`SET NX EX` + token); release is a compare-and-delete Lua script (foreign-release rejection).
+- [x] **3.4** `infrastructure/redis/queue.py` — `RedisQueue` implements `QueueProtocol`; Lua-atomic dequeue (ZPOPMIN + SADD active).
+- [x] **3.5** `services/cache_service.py` (typed methods only — no raw keys) + `services/queue_service.py` (priority-band scoring, Section 12.2).
+- [x] **3.6** `services/settings_service.py` — read-through cache, type-cast by `value_type`, write-through invalidation.
+- [x] **3.7** Integration tests under `tests/integration/` (cache, locks, queue incl. 1000-job concurrent dequeue, settings service) against real Redis + Postgres.
+- Plus: `core/redis_keys.py` (LOCKED Section 11.4 scheme, one helper per key); `domain/protocols/{cache,queue}.py`.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Validation Results (verified against live redis:7 + postgres:15):**
+- 92 tests pass (53 unit, 39 integration). `infrastructure/redis` coverage 100% (≥80% exit criterion); services 92–100%.
+- Queue priority ordering (HIGH<NORMAL<LOW at same instant), FIFO within band, and 1000-job concurrent dequeue across 3 tasks with zero duplicates — all verified.
+- Lock acquire blocks a second acquire; correct-token release frees it; foreign-token release rejected.
+- `SettingsService.get("free_daily_limit")` returns int 10 (cast from text); read-through cache serves until `set` invalidates it.
+- All gates: ruff, ruff-format, mypy --strict (105 files), import-linter (6 contracts), bandit (0), pip-audit (clean).
+
+**Known Issues:** none. (Docker Desktop daemon on the build host was flaky mid-session — stopped twice — but the full stack is up and all integration tests executed green.)
 
 ---
 
@@ -462,7 +469,8 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
-| 2026-06-23 | — (uncommitted) | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
+| 2026-06-23 | — (uncommitted) | `core/redis_keys.py`, `domain/protocols/{cache,queue}.py`, `domain/protocols/repositories.py` (SettingsStoreProtocol), `infrastructure/redis/{client,cache,locks,queue}.py`, `services/{cache_service,queue_service,settings_service}.py`, `tests/integration/{conftest,test_redis_cache,test_redis_locks,test_redis_queue,test_settings_service}.py`, `tests/unit/test_redis_keys.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 3 / 3.1–3.7 | Implementation agent |
+| 2026-06-23 | `8ccd1e6` | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
 | 2026-06-23 | `78af6ed` | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
 | 2026-06-23 | `93524d6` | `.gitignore`, `pyproject.toml`, `mypy.ini`, `.importlinter`, `.pre-commit-config.yaml`, `.env.example`, `README.md`, `.github/workflows/ci.yml`, `deploy/docker-compose.yml`, `deploy/pgbouncer.ini`, `deploy/Dockerfile.{bot,worker,api}`, `tests/conftest.py`, 31 package `__init__.py` placeholders; `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` (Sprint 0 records) | Sprint 0 / 0.1–0.10 | Implementation agent |
 | 2026-06-23 | — | `MASTER_PLAN.md` (v2.1 → v2.2: Section 25 rewritten; D-031–D-039 added; Sprint 10 narrowed; Sprint 11 inserted; Sprint 11→12 renamed; DoD expanded to 19 items), `PROJECT_PROGRESS.md` (sprint structure + counts + new session handoff), `TEST_RESULTS.md` (created), `SECURITY_REPORT.md` (created), `PERFORMANCE_REPORT.md` (created) | Pre-Sprint 0 | Planning agent |
@@ -476,6 +484,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-23 | Sprint 3 / 3.1–3.7 | Unit + Integration (92 tests, live redis:7 + postgres:15) + all gates | PASS | infrastructure/redis coverage 100% (≥80%). Concurrent 1000-job dequeue, lock foreign-release, read-through cache verified. |
 | 2026-06-23 | Sprint 2 / 2.1–2.9 | Unit + Integration (72 tests, live postgres:15) + all gates | PASS | Repositories coverage 97.70% (≥80%). Schema introspection vs Section 10 passes. |
 | 2026-06-23 | Sprint 1 / 1.1–1.9 | Unit (44 tests) + all gates (ruff, mypy --strict, import-linter, bandit, pip-audit) | PASS | `core/` coverage 99.26% (≥90%). See `TEST_RESULTS.md` 2026-06-23 Sprint 1 entry. |
 | 2026-06-23 | Sprint 0 / 0.1–0.10 | Tooling gates (ruff, ruff-format, mypy --strict, import-linter, pytest, pip-audit, bandit) | PASS | See `TEST_RESULTS.md` 2026-06-23 entry. `docker compose up` deferred (daemon not running). |
@@ -505,6 +514,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 3 Cache and Queue implemented
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 3 (Cache and Queue) — STOP for combined Owner review of Sprints 2 + 3 |
+| **Tasks moved** | Sprint 2 → `[x]` Completed. Sprint 3 tasks 3.1–3.7 all `[x]`; Sprint 3 → `[~]` Under Review (100%). |
+| **Files modified** | New: `core/redis_keys.py`; `domain/protocols/{cache,queue}.py`; `infrastructure/redis/{client,cache,locks,queue}.py`; `services/{cache_service,queue_service,settings_service}.py`; 5 integration test modules + `tests/unit/test_redis_keys.py`. Updated: `domain/protocols/repositories.py` (added `SettingsStoreProtocol`); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md`. |
+| **Decisions added** | None. No new dependencies (redis/hiredis/orjson were added in Sprint 2). |
+| **Validation** | 92 tests pass (53 unit, 39 integration) against live redis:7 + postgres:15. `infrastructure/redis` coverage 100%; services 92–100%. All gates: ruff, ruff-format, mypy --strict (105 files), import-linter (6 contracts), bandit (0), pip-audit (clean). |
+| **Current state** | Every Redis interaction flows through the LOCKED Section 11.4 key scheme (one helper per key in `core/redis_keys.py`). Typed `CacheService` (no raw keys), token-tagged distributed `RedisLock`, Lua-atomic priority `RedisQueue`, and a read-through/write-through `SettingsService`. Full infra stack (postgres/redis/pgbouncer/uptime-kuma) is up. |
+| **Completed work** | Tasks 3.1–3.7. Resolved during the run: (1) redis-py async methods are typed `Awaitable[T] | T` → targeted `# type: ignore[misc]`/`[no-untyped-call]` in the adapters; (2) `Setting.value` is `Mapped[str]`, not `str`, so it can't structurally match a `value: str` protocol attribute → `SettingsStoreProtocol` returns `Any`; (3) Docker Desktop daemon dropped twice mid-session → restarted; integration suites auto-skip when Redis/DB are down. |
+| **Remaining work** | Owner review of Sprints 2 + 3, then Sprint 4 (User Identity: UserService, RateLimitService, bot middlewares, start/help handlers, `bot/main.py` composition root). |
+| **Known issues** | Build-host Docker Desktop is flaky; not a code issue. |
+| **Recommended next task** | After Owner sign-off: Sprint 4 Task 4.1 (`services/user_service.py`). |
+| **Notes for the next agent** | Build Redis keys ONLY via `core.redis_keys.RedisKeys` — never inline strings. `CacheService` exposes typed methods (`get_file_id`, `get_user`, `acquire_download_lock`, …); callers never pass raw keys. `QueueService.enqueue(job_id, priority=…)` scores via Section 12.2 (lower = sooner); dequeue is Lua-atomic and moves the member to `queue:active` (call `ack` when done). `SettingsService.get` returns the typed value cast from `value_type`; `set` writes through and invalidates. CI must start both postgres and redis service containers and run `alembic upgrade head` before integration tests. |
 
 ### Session Handoff — 2026-06-23 — Sprint 2 Persistence Layer implemented
 
