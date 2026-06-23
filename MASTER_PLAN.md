@@ -1362,6 +1362,7 @@ On job completion, `DownloadService` reads all waiters for the job, inserts one 
 | `queue:active` | (set) | in-flight job IDs |
 | `job:{job_id}` | `job:01J...` | job detail mirror |
 | `worker:heartbeat:{worker_id}` | `worker:heartbeat:dl-1` | liveness |
+| `provider:health:{name}` | `provider:health:ytdlp` | provider health record (Section 12.6.4) |
 | `bcast:progress:{broadcast_id}` | `bcast:progress:7` | broadcast progress |
 | `ad_counter:{user_id}` | `ad_counter:123` | ad pacing (V2 candidate) |
 

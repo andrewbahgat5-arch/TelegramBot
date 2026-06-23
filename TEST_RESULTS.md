@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-23 | PASS (101) | Sprint-4 services + entity 100%; middlewares/handlers/filter 97–100% | Sprint 1–4 |
-| Integration | 2026-06-23 | PASS (39) | redis 100%, repos 97.70% | Sprint 2-3 |
+| Unit | 2026-06-23 | PASS (168) | Sprint-5 services 100%, registry 91%, provider ~90%, bot UI 92–100% | Sprint 1–5 |
+| Integration | 2026-06-23 | PASS (40) | redis 100%, repos 97.70%; +provider-settings adapter | Sprint 2-5 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,34 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-23 — Unit + Integration — Sprint 5 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree; follows `0e5f301`) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 5 |
+| Triggered by | Sprint 5 exit (URL Analyzer + Provider Abstraction) |
+| Total tests | 208 |
+| Passed | 208 |
+| Failed | 0 |
+| Skipped | 0 (with infra up; integration auto-skips when pg/redis absent) |
+| XFail / XPass | 0 / 0 |
+| Duration | unit ~4 s; integration ~10 s |
+| Coverage (overall) | Sprint-5 modules ~90% |
+| Coverage by path | core.urls 95%, services.url_analyzer 100%, services.format_extraction 100%, infrastructure.downloader.registry 91%, providers.ytdlp_provider ~90%, bot.callbacks 92%, bot.keyboards 94%, bot.handlers.download ~90%; provider_settings via integration |
+| Notes | 67 new unit tests + 1 integration. Registry: priority order, failover on `ProviderRetryElsewhere` (DEGRADED at threshold), `ProviderUnsupported` skip, content-error stop, failover-disabled single attempt, cooldown skip/recovery, Redis health persistence. yt-dlp parsing/error-mapping via faked subprocess. Signed callbacks reject tamper/wrong-key/malformed. Gates: ruff, ruff-format (146), mypy --strict (146), import-linter (7 contracts), bandit (0 — removed a B101 assert), pip-audit (no new deps). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None when infra is up. The integration suite auto-skips without Postgres/Redis.
+
+---
 
 ### 2026-06-23 — Unit + Integration — Sprint 4 exit
 

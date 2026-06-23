@@ -96,3 +96,22 @@ ignore_imports =
     bot.main -> infrastructure.**
     api.main -> infrastructure.**
     workers.main -> infrastructure.**
+
+[importlinter:contract:providers-only-via-registry]
+name = download providers are reached only through the registry (D-029, Section 12.6.9)
+type = forbidden
+source_modules =
+    services
+    bot
+    workers
+    api
+forbidden_modules =
+    infrastructure.downloader.providers
+# yt-dlp is invoked as a subprocess (no `import yt_dlp` anywhere), so only the
+# providers package needs guarding. The composition roots legitimately register the
+# provider class; everything else must go through DownloaderRegistry.
+unmatched_ignore_imports_alerting = none
+ignore_imports =
+    bot.main -> infrastructure.downloader.providers.**
+    workers.main -> infrastructure.downloader.providers.**
+    api.main -> infrastructure.downloader.providers.**

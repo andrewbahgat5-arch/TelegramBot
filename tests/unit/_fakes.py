@@ -1,4 +1,4 @@
-"""In-memory fakes for Sprint 4 unit tests (not a test module).
+"""In-memory fakes for Sprint 4-5 unit tests (not a test module).
 
 These let the services run without Postgres or Redis while still exercising the
 real ``CacheService`` / ``SettingsService`` logic (key building, type casting). The
@@ -15,6 +15,9 @@ from typing import Any
 
 from core.config import Settings
 from core.uuid7 import uuid7_str
+from domain.entities.media import DownloadedFile, MediaInfo
+from domain.enums import MediaFormat, Quality
+from domain.protocols.downloader import Capability, ProviderHealth
 from services.cache_service import CacheService
 
 ENV_EXAMPLE = str(Path(__file__).resolve().parents[2] / ".env.example")
@@ -192,3 +195,151 @@ DEFAULT_RATE_SETTINGS: dict[str, tuple[str, str]] = {
     "download_cooldown_seconds": ("30", "int"),
     "premium_download_cooldown_seconds": ("5", "int"),
 }
+
+
+# --- Downloader fakes (Sprint 5) ------------------------------------------
+class FakeProvider:
+    """A ``DownloaderProtocol`` whose outcomes are scripted by the test."""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        priority: int = 100,
+        platforms: set[str] | None = None,
+        result: MediaInfo | None = None,
+        error: Exception | None = None,
+        health: ProviderHealth = ProviderHealth.OK,
+    ) -> None:
+        self.name = name
+        self.priority = priority
+        self.supported_platforms = platforms if platforms is not None else {"*"}
+        self.capabilities = {Capability.VIDEO}
+        self._result = result
+        self._error = error
+        self._health = health
+        self.calls = 0
+
+    async def extract_info(self, url: str) -> MediaInfo:
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return self._result or MediaInfo(
+            platform="generic", video_id="vid", title="T", source_url=url
+        )
+
+    async def download(
+        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+    ) -> DownloadedFile:
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        return DownloadedFile(path=dest, size_bytes=1, format=format_, quality=quality)
+
+    async def health_check(self) -> ProviderHealth:
+        return self._health
+
+
+class FakeProviderSettings:
+    """An in-memory ``ProviderSettingsProtocol`` (Section 12.6.7)."""
+
+    def __init__(
+        self,
+        *,
+        enabled: dict[str, bool] | None = None,
+        overrides: dict[str, int] | None = None,
+        failover: bool = True,
+        cooldown: int = 60,
+        threshold: int = 3,
+    ) -> None:
+        self._enabled = enabled if enabled is not None else {}
+        self._overrides = overrides or {}
+        self._failover = failover
+        self._cooldown = cooldown
+        self._threshold = threshold
+
+    async def providers_enabled(self) -> dict[str, bool]:
+        return self._enabled
+
+    async def priority_overrides(self) -> dict[str, int]:
+        return self._overrides
+
+    async def failover_enabled(self) -> bool:
+        return self._failover
+
+    async def cooldown_seconds(self) -> int:
+        return self._cooldown
+
+    async def failure_threshold(self) -> int:
+        return self._threshold
+
+
+@dataclass
+class FakeMediaRow:
+    id: int
+    platform: str
+    video_id: str
+    title: str
+    source_url: str
+    duration: int | None = None
+    thumbnail_url: str | None = None
+    metadata_json: dict[str, Any] | None = None
+
+
+class FakeMediaRepo:
+    """In-memory ``MediaRepositoryProtocol[FakeMediaRow]``."""
+
+    def __init__(self) -> None:
+        self.by_key: dict[tuple[str, str], FakeMediaRow] = {}
+        self.by_id: dict[int, FakeMediaRow] = {}
+        self._next_id = 1
+        self.upserts = 0
+
+    async def add(self, entity: FakeMediaRow) -> FakeMediaRow:
+        self.by_id[entity.id] = entity
+        self.by_key[(entity.platform, entity.video_id)] = entity
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeMediaRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[FakeMediaRow]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: FakeMediaRow) -> None:
+        self.by_id.pop(entity.id, None)
+        self.by_key.pop((entity.platform, entity.video_id), None)
+
+    async def get_by_platform_video(self, platform: str, video_id: str) -> FakeMediaRow | None:
+        return self.by_key.get((platform, video_id))
+
+    async def upsert_metadata(
+        self,
+        *,
+        platform: str,
+        video_id: str,
+        title: str,
+        source_url: str,
+        duration: int | None = None,
+        thumbnail_url: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> FakeMediaRow:
+        self.upserts += 1
+        existing = self.by_key.get((platform, video_id))
+        if existing is None:
+            row = FakeMediaRow(
+                id=self._next_id,
+                platform=platform,
+                video_id=video_id,
+                title=title,
+                source_url=source_url,
+                duration=duration,
+                thumbnail_url=thumbnail_url,
+                metadata_json=metadata_json,
+            )
+            self._next_id += 1
+            self.by_id[row.id] = row
+            self.by_key[(platform, video_id)] = row
+            return row
+        existing.metadata_json = {**(metadata_json or {}), **(existing.metadata_json or {})}
+        return existing

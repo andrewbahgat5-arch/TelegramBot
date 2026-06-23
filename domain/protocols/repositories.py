@@ -48,6 +48,17 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
 
 class MediaRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_platform_video(self, platform: str, video_id: str) -> T | None: ...
+    async def upsert_metadata(
+        self,
+        *,
+        platform: str,
+        video_id: str,
+        title: str,
+        source_url: str,
+        duration: int | None = None,
+        thumbnail_url: str | None = None,
+        metadata_json: dict[str, Any] | None = None,
+    ) -> T: ...
 
 
 class CachedFileRepositoryProtocol(Repository[T], Protocol[T]):

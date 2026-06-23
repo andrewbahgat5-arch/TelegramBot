@@ -55,3 +55,9 @@ class RedisKeys:
     @staticmethod
     def worker_heartbeat(worker_id: str) -> str:
         return f"worker:heartbeat:{worker_id}"
+
+    @staticmethod
+    def provider_health(name: str) -> str:
+        # Provider health record (MASTER_PLAN 12.6.4). No TTL; overwritten by
+        # health updates. Persisted form of the in-memory mirror (D-028).
+        return f"provider:health:{name}"

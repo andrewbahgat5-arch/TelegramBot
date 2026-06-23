@@ -23,6 +23,8 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.callbacks.factory import CallbackSigner
+from bot.handlers import download as download_handler
 from bot.handlers import help as help_handler
 from bot.handlers import start as start_handler
 from bot.middlewares.auth import AuthMiddleware
@@ -33,15 +35,20 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry
 from infrastructure.database.engine import create_engine
+from infrastructure.database.repositories.media import MediaRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.session import create_session_factory
+from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
+from infrastructure.downloader.providers.ytdlp_provider import YtdlpProvider
+from infrastructure.downloader.registry import DownloaderRegistry
 from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.locks import RedisLock
 from services.cache_service import CacheService
 from services.rate_limit_service import RateLimitService
 from services.settings_service import SettingsService
+from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
 
 _log = get_logger("bot.main")
@@ -52,10 +59,15 @@ def build_dispatcher(
     *,
     user_service_factory: Callable[[AsyncSession], UserService],
     rate_limit_service_factory: Callable[[AsyncSession], RateLimitService],
+    analyzer_factory: Callable[[AsyncSession], URLAnalyzerService],
+    callback_signer: CallbackSigner,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> Dispatcher:
     """Build the dispatcher and install the Section 9.1 middleware stack."""
     dp = Dispatcher()
+    # Workflow data injected into handlers by parameter name (download handlers).
+    dp["analyzer_factory"] = analyzer_factory
+    dp["callback_signer"] = callback_signer
 
     dp.update.outer_middleware(LoggingMiddleware())
     dp.update.outer_middleware(DbSessionMiddleware(session_factory))
@@ -68,6 +80,7 @@ def build_dispatcher(
 
     dp.include_router(start_handler.router)
     dp.include_router(help_handler.router)
+    dp.include_router(download_handler.router)
     return dp
 
 
@@ -86,6 +99,14 @@ async def main() -> None:
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
 
+    # The registry is a process singleton (holds provider health state). It reads
+    # provider settings via an adapter that opens its own short-lived sessions.
+    registry = DownloaderRegistry(
+        ProviderSettingsAdapter(session_factory), redis=redis_clients.cache
+    )
+    registry.register(YtdlpProvider(settings.ytdlp_path))
+    callback_signer = CallbackSigner(settings.bot_token.get_secret_value())
+
     def make_user_service(session: AsyncSession) -> UserService:
         return UserService(
             UserRepository(session),
@@ -99,6 +120,9 @@ async def main() -> None:
         )
         return RateLimitService(settings_service, cache_service, UserRepository(session))
 
+    def make_url_analyzer(session: AsyncSession) -> URLAnalyzerService:
+        return URLAnalyzerService(registry, cache_service, MediaRepository(session))
+
     bot = Bot(
         token=settings.bot_token.get_secret_value(),
         default=DefaultBotProperties(parse_mode=settings.bot_parse_mode),
@@ -107,6 +131,8 @@ async def main() -> None:
         settings,
         user_service_factory=make_user_service,
         rate_limit_service_factory=make_rate_limit_service,
+        analyzer_factory=make_url_analyzer,
+        callback_signer=callback_signer,
         session_factory=session_factory,
     )
 

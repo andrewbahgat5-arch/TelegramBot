@@ -12,8 +12,10 @@ from typing import cast
 from aiogram import Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
 from services.rate_limit_service import RateLimitService
+from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
 from tests.unit._fakes import load_settings
 
@@ -26,13 +28,19 @@ def _rate_factory(session: AsyncSession) -> RateLimitService:
     return cast(RateLimitService, None)
 
 
+def _analyzer_factory(session: AsyncSession) -> URLAnalyzerService:
+    return cast(URLAnalyzerService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
         user_service_factory=_user_factory,
         rate_limit_service_factory=_rate_factory,
+        analyzer_factory=_analyzer_factory,
+        callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
     )
     assert isinstance(dp, Dispatcher)
-    # start + help routers are both included.
-    assert len(dp.sub_routers) == 2
+    # start + help + download routers are all included.
+    assert len(dp.sub_routers) == 3

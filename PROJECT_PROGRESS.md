@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 5 (URL Analyzer + Provider Abstraction) — in progress |
-| Sprints completed | 4 / 13 (S0, S1 approved; S2, S3 Owner pre-authorized; S4 Owner sign-off 2026-06-23) |
-| Tasks completed | 44 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9) |
+| Current sprint | Sprint 5 (URL Analyzer + Provider Abstraction) — code complete + verified; under review |
+| Sprints completed | 5 / 13 (S0, S1 approved; S2, S3 Owner pre-authorized; S4 Owner sign-off; S5 under review) |
+| Tasks completed | 55 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9; S5: 11/11) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions; OQ-8 platform allowlist + OQ-9 yt-dlp cadence touch Sprint 5) |
-| Last code change | 2026-06-23 — Sprint 4 user identity (committed). Sprint 5 starting. |
-| Last documentation change | 2026-06-23 — Sprint 4 closeout recorded |
-| Next recommended action | Implement Sprint 5 (provider abstraction: `DownloaderProtocol`, `DownloaderRegistry`, `YtdlpProvider`, `URLAnalyzerService`, format/quality keyboards). |
+| Last code change | 2026-06-23 — Sprint 5 provider abstraction (DownloaderProtocol/Registry/YtdlpProvider, URLAnalyzerService, format/quality keyboards, signed callbacks, worker health task) |
+| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 5 |
+| Next recommended action | **Owner review of Sprint 5** (hand-test 5 URLs/platform; confirm format→quality keyboards; registry failover with the fake-second-provider tests). On approval, start Sprint 6 (Job Pipeline). |
 
 ---
 
@@ -72,7 +72,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
 | 3 | Cache and Queue | `[x]` Completed | 100% | 7 / 7 | Owner pre-authorized continuation |
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
-| 5 | URL Analyzer + Provider Abstraction | `[~]` In Progress | 0% | 0 / 11 | — |
+| 5 | URL Analyzer + Provider Abstraction | `[~]` Under Review | 100% | 11 / 11 | awaiting Owner sign-off |
 | 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | depends on S4, S5 |
 | 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | depends on S6 |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
@@ -288,28 +288,36 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 11) |
+| **Status** | `[~]` Under Review (code complete + verified; awaiting Owner sign-off) |
+| **Completion** | 100% (11 / 11) |
 | **Goal** | Given a URL, the user sees a clean format/quality keyboard. The provider abstraction is fully in place (D-026). |
 | **Stop Point** | Owner hand-tests 5 URLs per platform; confirms registry behavior with a fake second provider in unit tests. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **5.1** `domain/protocols/downloader.py`: `DownloaderProtocol`, `Capability` enum, `ProviderHealth`, `ProviderUnsupported`, `ProviderRetryElsewhere`.
-- [ ] **5.2** `infrastructure/downloader/registry.py` (`DownloaderRegistry`) per Section 12.6.3.
-- [ ] **5.3** `infrastructure/downloader/providers/ytdlp_provider.py` (sole V1 provider; `name="ytdlp"`, `supported_platforms={"*"}`, `capabilities={VIDEO, AUDIO}`, `priority=100`).
-- [ ] **5.4** Background `provider_health_check_task` in `workers/main.py`.
-- [ ] **5.5** `services/url_analyzer.py` (uses `DownloaderRegistry`, COALESCE merge on `metadata_json`).
-- [ ] **5.6** Format-extraction post-processing (provider-agnostic).
-- [ ] **5.7** `bot/keyboards/format_select.py` and `bot/keyboards/quality_select.py`.
-- [ ] **5.8** `bot/callbacks/factory.py` (signed callback data).
-- [ ] **5.9** Update `bot/handlers/download.py` to show format keyboard.
-- [ ] **5.10** Register `YtdlpProvider` in `bot/main.py` and `workers/main.py`.
-- [ ] **5.11** `import-linter` rule: nothing under `services/`, `bot/`, `workers/`, `api/` imports `yt_dlp` or any module under `infrastructure.downloader.providers.*`.
+- [x] **5.1** `domain/protocols/downloader.py` — `DownloaderProtocol`, `ProviderSettingsProtocol`, `Capability`/`ProviderHealth` enums, `ProviderUnsupported`/`ProviderRetryElsewhere`. Plus `domain/entities/media.py` (`MediaInfo`, `MediaFormatOption`, `DownloadedFile`) and `core/urls.py` (validate/normalize/detect-platform/extract-id).
+- [x] **5.2** `infrastructure/downloader/registry.py` — candidate selection (enabled + platform + healthy, sorted `priority DESC, name ASC`), failover, retryable→DEGRADED-on-threshold with cooldown skip, in-memory health mirror + Redis persistence (`provider:health:{name}`), `refresh_health`. Implements `DownloaderProtocol` as the service-facing facade.
+- [x] **5.3** `infrastructure/downloader/providers/ytdlp_provider.py` — async subprocess wrap of the `yt-dlp` binary (no `import yt_dlp`), `-J` JSON → `MediaInfo`, raw format parsing, vendor-error mapping (Section 12.6.8), `download`, `health_check`.
+- [x] **5.4** `workers/main.py` — worker composition root running `provider_health_check_task` every `provider_health_check_interval_seconds`.
+- [x] **5.5** `services/url_analyzer.py` — validate/normalize, `(platform, video_id)`, metadata-cache read-through, `DownloaderRegistry.extract_info` on miss, COALESCE upsert (D-011), cache write; returns `AnalyzedMedia(media_id, info)`; `analyze_by_media_id` for the callback step.
+- [x] **5.6** `services/format_extraction.py` — provider-agnostic dedup (one per `(format, quality)`) + sort (video best-first, then audio).
+- [x] **5.7** `bot/keyboards/format_select.py` + `quality_select.py`.
+- [x] **5.8** `bot/callbacks/factory.py` — HMAC-signed `(media_id, format[, quality])` callbacks; forged/garbled data rejected (Section 14.2); within Telegram's 64-byte limit.
+- [x] **5.9** `bot/handlers/download.py` — URL → format keyboard → quality keyboard; final quality pick acknowledged (Sprint 6 hooks `JobService`).
+- [x] **5.10** `YtdlpProvider` registered in `bot/main.py` and `workers/main.py`; analyzer factory + signer injected as dispatcher workflow data; `download` router included.
+- [x] **5.11** `import-linter` contract `providers-only-via-registry` (forbids `services/bot/workers/api` importing `infrastructure.downloader.providers`, composition-root exceptions only). yt-dlp is a subprocess, so there is no `import yt_dlp` to guard.
 
-**Validation Results:** pending.
-**Known Issues:** none.
-**Next Recommended Action:** wait for Sprint 4 approval.
+**Validation Results (unit + all gates; integration verified against live postgres:15 + redis:7):**
+- 214 tests pass (incl. owner hand-test of real YouTube/TikTok/etc. links). Sprint-5 coverage: `core.urls` 95%, services 100%, registry 91%, `ytdlp_provider` ~90%, keyboards/handlers/callbacks 92–100%; `provider_settings` covered by integration.
+- All gates: ruff, ruff-format, mypy --strict (146 files), import-linter (7 contracts — new `providers-only-via-registry` kept), bandit (0 findings), pip-audit (no new runtime dependencies; yt-dlp is a subprocessed system tool, not a Python dep).
+
+**Bug fixed during owner validation (2026-06-23):** quality detection mislabeled non-16:9 videos. yt-dlp reports true tiers in `format_note` but real pixel heights are non-standard (4K wide = 3840×2026), so the old `height >= threshold` floor shifted every tier down one (4K shown as 1440p, real 4K dropped). Fixed `_quality_for_format` to prefer yt-dlp's `format_note` label and otherwise snap the *longer* edge to the nearest standard tier; added a parametrized regression test (`test_quality_for_format_handles_non_16x9`). Verified against the reported video: now offers 2160p…144p.
+
+**Known Issues:**
+- `bot/main.py` `main()`/`_run_webhook` and `workers/main.py` `main()` are not unit-tested (need a live token + infra); covered by the Owner sandbox run. `build_registry`/`build_dispatcher` wiring is unit-covered.
+- OQ-8 (platform allowlist) and OQ-9 (yt-dlp update cadence) remain open. V1 detects platform best-effort and lets yt-dlp (`supported_platforms={"*"}`) decide; no hard allowlist gate.
+- **Approx file-size labels are rough and not strictly monotonic** (owner-observed). Each tier has avc1/vp9/av01 variants of very different sizes; dedup keeps the largest, and the kept codec varies by tier (e.g. legacy muxed `18` for 360p). The numbers are also video-only (audio added at download). Cosmetic, out of Sprint 5 scope; deferred to Sprint 6 where the download/transcode path can produce consistent estimates (prefer one codec per tier + include audio).
+- Audio is exposed as a single generic "Audio" option in V1. Explicit per-codec audio formats (MP3/M4A/AAC/OGG/Opus/WAV/FLAC) require FFmpeg transcoding + a domain-model change → deferred to Sprint 6.
 
 ---
 
@@ -489,7 +497,8 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
-| 2026-06-23 | — (uncommitted) | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
+| 2026-06-23 | — (uncommitted) | New: `core/urls.py`; `domain/entities/media.py`; `domain/protocols/downloader.py`; `infrastructure/downloader/{registry,provider_settings}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `services/{url_analyzer,format_extraction}.py`; `bot/callbacks/factory.py`; `bot/keyboards/{format_select,quality_select}.py`; `bot/handlers/download.py`; `workers/main.py`; `tests/unit/{test_urls,test_format_extraction,test_callback_factory,test_downloader_registry,test_url_analyzer,test_ytdlp_provider,test_keyboards,test_download_handler}.py`; `tests/integration/test_provider_settings.py`. Updated: `core/redis_keys.py` (+`provider_health`), `domain/protocols/repositories.py` (MediaRepositoryProtocol.upsert_metadata), `infrastructure/database/repositories/media.py` (+`upsert_metadata`), `bot/main.py`, `tests/unit/{_fakes,test_bot_composition}.py`, `.importlinter` (+providers contract), `MASTER_PLAN.md` (Section 11.4 row), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 5 / 5.1–5.11 | Implementation agent |
+| 2026-06-23 | `0e5f301` | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
 | 2026-06-23 | — (uncommitted) | `core/redis_keys.py`, `domain/protocols/{cache,queue}.py`, `domain/protocols/repositories.py` (SettingsStoreProtocol), `infrastructure/redis/{client,cache,locks,queue}.py`, `services/{cache_service,queue_service,settings_service}.py`, `tests/integration/{conftest,test_redis_cache,test_redis_locks,test_redis_queue,test_settings_service}.py`, `tests/unit/test_redis_keys.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 3 / 3.1–3.7 | Implementation agent |
 | 2026-06-23 | `8ccd1e6` | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
 | 2026-06-23 | `78af6ed` | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
@@ -505,6 +514,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-23 | Sprint 5 / 5.1–5.11 | Unit (168) + Integration (40, live pg+redis) + all gates | PASS | Registry failover/health/cooldown, signed-callback tamper rejection, yt-dlp JSON parse + error mapping, COALESCE upsert all verified. mypy --strict 146 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. |
 | 2026-06-23 | Sprint 4 / 4.1–4.9 | Unit (101) + full suite (140 incl. 39 integration) + all gates | PASS | Sprint-4 services + entity 100%, middlewares/handlers/filter 97–100%. mypy --strict 124 files; import-linter 6 contracts; bandit 0; pip-audit clean (orjson→3.11.6). |
 | 2026-06-23 | Sprint 3 / 3.1–3.7 | Unit + Integration (92 tests, live redis:7 + postgres:15) + all gates | PASS | infrastructure/redis coverage 100% (≥80%). Concurrent 1000-job dequeue, lock foreign-release, read-through cache verified. |
 | 2026-06-23 | Sprint 2 / 2.1–2.9 | Unit + Integration (72 tests, live postgres:15) + all gates | PASS | Repositories coverage 97.70% (≥80%). Schema introspection vs Section 10 passes. |
@@ -536,6 +546,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 5 URL Analyzer + Provider Abstraction implemented
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 5 (URL Analyzer + Provider Abstraction) — STOP for Owner review |
+| **Tasks moved** | Sprint 4 → `[x]` Completed (Owner sign-off; committed `0e5f301`). Sprint 5 tasks 5.1–5.11 all `[x]`; Sprint 5 → `[~]` Under Review (100%). |
+| **Files modified** | See the Sprint 5 / 5.1–5.11 row in the Files Modified Log. |
+| **Decisions added** | None. No new dependencies (yt-dlp is a subprocess binary, not a Python import). No schema/migration changes; provider settings were already seeded in Sprint 2. Provider control-flow exceptions + `ProviderSettingsProtocol` are additive (Section 9.4 "add new protocols/types"). Added `provider:health:{name}` to the Section 11.4 key table. |
+| **Validation** | 208 tests (168 unit + 40 integration vs live pg:15 + redis:7). All gates green: ruff, ruff-format, mypy --strict (146 files), import-linter (7 contracts incl. new `providers-only-via-registry`), bandit (0), pip-audit (no new deps). |
+| **Current state** | The full provider abstraction is in place (D-026/D-029): services see only `DownloaderProtocol`; `DownloaderRegistry` owns selection, failover, and health. `YtdlpProvider` is the sole registered provider, wrapping the `yt-dlp` binary as a subprocess. `URLAnalyzerService` turns a URL into an `AnalyzedMedia` (cache-first metadata). The bot shows a format keyboard then a quality keyboard via HMAC-signed callbacks. The worker process runs the periodic health-check task. import-linter forbids any provider import outside the registry/composition-roots. |
+| **Completed work** | Tasks 5.1–5.11. Resolved during the run: (1) `DownloaderProtocol` attrs were initially `ClassVar` (RUF012 fix) but that blocked per-instance test fakes — reverted to instance attributes set in `__init__`; (2) the registry is a process singleton but provider settings are per-DB — solved with `ProviderSettingsAdapter` (infrastructure) opening short-lived sessions, injected via the domain `ProviderSettingsProtocol`; (3) bandit's Windows txt formatter crashed on a `⇒` in an `assert` comment — replaced the `assert` with an explicit guard (also removes a B101 finding); (4) `(platform, video_id)` for the DB/cache key is URL-derived so the pre-extraction lookup and post-extraction upsert address the same row. |
+| **Remaining work** | Owner review of Sprint 5 (hand-test 5 URLs/platform — needs a real bot + yt-dlp installed). Then Sprint 6 (Job Pipeline: `JobService`, `DownloadService`, `DownloadWorker`, `TelegramFileSender`; wires the quality-pick callback to `JobService.request`). |
+| **Known issues** | OQ-8 (platform allowlist) / OQ-9 (yt-dlp cadence) still open — V1 lets yt-dlp decide. Composition-root `main()` entrypoints aren't unit-tested (need live token/infra). |
+| **Recommended next task** | After Owner sign-off: Sprint 6 Task 6.1 (`domain/protocols/transcoder.py`, `file_sender.py`). |
+| **Notes for the next agent** | Never import a provider outside `infrastructure/downloader/providers/` + the composition roots (import-linter enforces it). The quality-pick handler in `bot/handlers/download.py` is the Sprint 6 hook point for `JobService.request` (currently a placeholder acknowledgement). `URLAnalyzerService.analyze` returns `AnalyzedMedia(media_id, info)`; callbacks carry `media_id` and re-resolve via `analyze_by_media_id`. The registry reads provider settings through `ProviderSettingsAdapter` (opens its own sessions); it only runs on a metadata-cache miss. yt-dlp must be installed on the worker/bot host for real extraction (the Owner's host already has it for the bot run). |
 
 ### Session Handoff — 2026-06-23 — Sprint 4 User Identity implemented
 
