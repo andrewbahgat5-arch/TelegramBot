@@ -2,8 +2,8 @@
 
 > **Document Status:** LIVE · Single Source of Truth for implementation status
 > **Companion Documents:** `MASTER_PLAN.md` (architecture, sprint plan, locked decisions), `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-23 (v2.2 alignment)
-> **Project Phase:** Pre-Sprint 0 (planning complete; no code yet)
+> **Last Updated:** 2026-06-23 (Sprint 4 implemented)
+> **Project Phase:** Sprint 4 (User Identity) — code complete + verified; under review
 >
 > Update this file on **every** task status change. Never let it drift from reality.
 
@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 3 (Cache and Queue) — code complete + verified; awaiting combined Owner review of Sprints 2+3 |
-| Sprints completed | 3 / 13 (S0, S1 approved; S2 complete; S3 under review) |
-| Tasks completed | 35 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7) |
+| Current sprint | Sprint 5 (URL Analyzer + Provider Abstraction) — in progress |
+| Sprints completed | 4 / 13 (S0, S1 approved; S2, S3 Owner pre-authorized; S4 Owner sign-off 2026-06-23) |
+| Tasks completed | 44 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9) |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions) |
-| Last code change | 2026-06-23 — Sprint 3 cache/queue (Redis client, typed cache, locks, Lua queue, cache/queue/settings services) |
-| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 3 |
-| Next recommended action | **Stop for combined Owner review of Sprints 2 + 3** (schema/partition naming; queue priority behavior). On approval, start Sprint 4 (User Identity). |
+| Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions; OQ-8 platform allowlist + OQ-9 yt-dlp cadence touch Sprint 5) |
+| Last code change | 2026-06-23 — Sprint 4 user identity (committed). Sprint 5 starting. |
+| Last documentation change | 2026-06-23 — Sprint 4 closeout recorded |
+| Next recommended action | Implement Sprint 5 (provider abstraction: `DownloaderProtocol`, `DownloaderRegistry`, `YtdlpProvider`, `URLAnalyzerService`, format/quality keyboards). |
 
 ---
 
@@ -70,9 +70,9 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 0 | Bootstrap | `[x]` Completed | 100% | 10 / 10 | — |
 | 1 | Foundation | `[x]` Completed | 100% | 9 / 9 | — |
 | 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
-| 3 | Cache and Queue | `[~]` Under Review | 100% | 7 / 7 | awaiting Owner sign-off |
-| 4 | User Identity | `[ ]` Not Started | 0% | 0 / 9 | depends on S2, S3 |
-| 5 | URL Analyzer + Provider Abstraction | `[ ]` Not Started | 0% | 0 / 11 | depends on S2, S3 |
+| 3 | Cache and Queue | `[x]` Completed | 100% | 7 / 7 | Owner pre-authorized continuation |
+| 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
+| 5 | URL Analyzer + Provider Abstraction | `[~]` In Progress | 0% | 0 / 11 | — |
 | 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | depends on S4, S5 |
 | 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | depends on S6 |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
@@ -211,7 +211,7 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` Under Review (code complete + integration verified; awaiting Owner sign-off) |
+| **Status** | `[x]` Completed (Owner pre-authorized S3→S4 continuation) |
 | **Completion** | 100% (7 / 7) |
 | **Goal** | Every Redis interaction goes through the documented key scheme and is testable. |
 | **Stop Point** | Owner confirms queue priorities behave correctly under mixed-batch hand test. |
@@ -242,25 +242,45 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 9) |
+| **Status** | `[x]` Completed (Owner sign-off 2026-06-23) |
+| **Completion** | 100% (9 / 9) |
 | **Goal** | Every Telegram update results in a properly authenticated, throttled handler call. |
 | **Stop Point** | Owner sends `/start` from owner account → confirms `owner` role. Second account → `user` role. Ban/unban test passes. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **4.1** `services/user_service.py` (upsert, role, ban/unban with audit retention, debounced `last_activity_at`, user-cache D-014).
-- [ ] **4.2** `services/rate_limit_service.py` (download cooldown, lazy daily reset, message window).
-- [ ] **4.3** `bot/middlewares/logging.py` (UUIDv7 correlation binding).
-- [ ] **4.4** `bot/middlewares/db_session.py` (session per update; commit/rollback).
-- [ ] **4.5** `bot/middlewares/auth.py` (load user; reject banned).
-- [ ] **4.6** `bot/middlewares/throttle.py` (`rate_limit_messages_per_minute`).
-- [ ] **4.7** `bot/filters/role_filter.py` (declarative role gating).
-- [ ] **4.8** `bot/handlers/start.py` and `bot/handlers/help.py` (minimal, prove pipeline).
-- [ ] **4.9** `bot/main.py` composition root.
+- [x] **4.1** `services/user_service.py` — cache-first `get_or_create_user` (D-014), owner-role assignment from config, debounced `record_activity`, `set_role`/`ban`/`unban` with audit-field retention and cache invalidation (Section 11.3). Added `UserSnapshot` entity (`domain/entities/user.py`) + repo `create_user`/`touch_last_activity` (+ protocol).
+- [x] **4.2** `services/rate_limit_service.py` — `check_message_rate` (Redis 60 s window) and `check_download` (maintenance gate, effective-plan resolution, lazy daily reset D-012, daily-limit + cooldown per Section 16.5).
+- [x] **4.3** `bot/middlewares/logging.py` — binds a fresh UUIDv7 correlation id per update via `core.logging.correlation_context`.
+- [x] **4.4** `bot/middlewares/db_session.py` — session per update; commit on success, rollback on exception (unit-of-work boundary).
+- [x] **4.5** `bot/middlewares/auth.py` — cache-first user resolution, activity record, banned-user rejection (Message + CallbackQuery), attaches `UserSnapshot` as `data["user"]`.
+- [x] **4.6** `bot/middlewares/throttle.py` — enforces `rate_limit_messages_per_minute`; friendly reply on exceed.
+- [x] **4.7** `bot/filters/role_filter.py` — declarative `RoleFilter(*roles)` + `StaffFilter` convenience.
+- [x] **4.8** `bot/handlers/start.py` + `bot/handlers/help.py` — minimal pipeline-proving handlers (no business logic).
+- [x] **4.9** `bot/main.py` — composition root: wires concretes→protocols, builds the dispatcher with the Section 9.1 middleware stack (`build_dispatcher`), long-polling default + optional webhook.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Validation Results (unit + all gates; integration suite green where infra present):**
+- 101 unit tests pass (48 new for Sprint 4); full suite 140 pass (101 unit + 39 integration). Sprint-4 module coverage: services + `UserSnapshot` 100%; middlewares/handlers/filter 97–100%; `bot/main.py` 52% (only the network-bound `main()`/`_run_webhook` entry uncovered — exercised via the human-verification bot run; `build_dispatcher` wiring is covered).
+- All gates: ruff, ruff-format (124 files), mypy --strict (124 files), import-linter (6 contracts; `bot.main → infrastructure.**` composition-root exception holds), bandit (0), pip-audit (clean).
+
+**Known Issues:**
+- `bot/main.py` `main()`/`_run_webhook` are not unit-tested (require a live Telegram token + backing infra). Covered by the Owner sandbox-bot run (exit criterion 2).
+
+**Resolved during review:** `LAST_ACTIVITY_DEBOUNCE_SECONDS` tightened 60 s → **5 s** per Owner direction, matching the Sprint 4 checklist ("write at most every 5 s per user").
+
+**Sprint Closeout — 2026-06-23**
+
+| Field | Value |
+|---|---|
+| **Completion** | 100% (9 / 9 tasks) |
+| **Exit criteria** | All met. Validation suite green; bot ran against a live sandbox bot and responded to `/start` + `/help`; `import-linter` green (no service→infrastructure import). |
+| **Human verification** | Completed by Owner on 2026-06-23 — `/start` from owner account → `owner` role; second account → `user` role; ban via SQL blocked the user (ban message only); unban restored access. |
+| **Test results** | Unit 101 (Sprint-4 services + entity 100%; middlewares/handlers/filter 97–100%). Full suite 140 (incl. 39 integration). All gates green. |
+| **Files affected (cumulative)** | See Files Modified Log (Sprint 4 / 4.1–4.9 row). |
+| **Lessons learned** | Services stay framework-agnostic by building `UserSnapshot` from repo rows (attribute access) — the ORM-construction stays in the repo (`create_user`). The bot must run from the worktree (its CWD wins on `sys.path`); the main checkout lacks Sprint 4 code. aiogram `AsyncMock(spec=Message)` doesn't auto-async `answer`. |
+| **Carry-over to next sprint** | None. |
+
+→ **Sprint marked `[x] Completed` by Owner on 2026-06-23.**
 
 ---
 
@@ -469,6 +489,7 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
+| 2026-06-23 | — (uncommitted) | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
 | 2026-06-23 | — (uncommitted) | `core/redis_keys.py`, `domain/protocols/{cache,queue}.py`, `domain/protocols/repositories.py` (SettingsStoreProtocol), `infrastructure/redis/{client,cache,locks,queue}.py`, `services/{cache_service,queue_service,settings_service}.py`, `tests/integration/{conftest,test_redis_cache,test_redis_locks,test_redis_queue,test_settings_service}.py`, `tests/unit/test_redis_keys.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 3 / 3.1–3.7 | Implementation agent |
 | 2026-06-23 | `8ccd1e6` | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
 | 2026-06-23 | `78af6ed` | `core/{config,logging,sentry,uuid7,constants,__main__}.py`, `domain/exceptions.py`, `domain/enums/{__init__,job_status,user_role,media_format,quality,error_type,ad_type}.py`, `tests/unit/test_{config,logging,sentry,uuid7,constants,enums,exceptions,main_entry}.py`, `.gitattributes`, `pyproject.toml` (sentry-sdk pin), `.env.example` (full-line comments), `MASTER_PLAN.md` (Section 9.7 `Constants` card), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 1 / 1.1–1.9 | Implementation agent |
@@ -484,6 +505,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-23 | Sprint 4 / 4.1–4.9 | Unit (101) + full suite (140 incl. 39 integration) + all gates | PASS | Sprint-4 services + entity 100%, middlewares/handlers/filter 97–100%. mypy --strict 124 files; import-linter 6 contracts; bandit 0; pip-audit clean (orjson→3.11.6). |
 | 2026-06-23 | Sprint 3 / 3.1–3.7 | Unit + Integration (92 tests, live redis:7 + postgres:15) + all gates | PASS | infrastructure/redis coverage 100% (≥80%). Concurrent 1000-job dequeue, lock foreign-release, read-through cache verified. |
 | 2026-06-23 | Sprint 2 / 2.1–2.9 | Unit + Integration (72 tests, live postgres:15) + all gates | PASS | Repositories coverage 97.70% (≥80%). Schema introspection vs Section 10 passes. |
 | 2026-06-23 | Sprint 1 / 1.1–1.9 | Unit (44 tests) + all gates (ruff, mypy --strict, import-linter, bandit, pip-audit) | PASS | `core/` coverage 99.26% (≥90%). See `TEST_RESULTS.md` 2026-06-23 Sprint 1 entry. |
@@ -514,6 +536,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 4 User Identity implemented
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 4 (User Identity) — STOP for Owner review |
+| **Tasks moved** | Sprint 3 → `[x]` Completed (Owner pre-authorized continuation). Sprint 4 tasks 4.1–4.9 all `[x]`; Sprint 4 → `[~]` Under Review (100%). |
+| **Files modified** | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; 4 bot middlewares; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; 8 unit-test modules (incl. `tests/unit/_fakes.py`). Updated: `infrastructure/database/repositories/user.py`, `domain/protocols/repositories.py`, `pyproject.toml`, `PROJECT_PROGRESS.md`, `TEST_RESULTS.md`. |
+| **Decisions added** | None. aiogram==3.29.0 added (pre-approved in Section 6.1 — first sprint to use the Telegram framework). orjson patch-bumped 3.11.5→3.11.6 to clear advisory GHSA-hx9q-6w63-j58v (already-approved dep; no new decision needed). |
+| **Validation** | 101 unit tests (48 new); full suite 140 pass (101 unit + 39 integration, live redis:7 + postgres:15). Sprint-4 services + entity 100% coverage; middlewares/handlers/filter 97–100%. All gates: ruff, ruff-format, mypy --strict (124 files), import-linter (6 contracts), bandit (0), pip-audit (clean). |
+| **Current state** | The full auth/throttle pipeline is in place: `logging → db_session → auth → throttle → handler`. `UserService` is cache-first (D-014) with debounced activity writes and audit-preserving ban/unban; `RateLimitService` covers message throttle + the Section 16.5 download checks (lazy daily reset, effective-plan resolution, cooldown). Services stay framework-agnostic (`import-linter` green); `bot/main.py` is the sole composition root reaching infrastructure. Long-polling is the default run mode; webhook is wired but optional. |
+| **Completed work** | Tasks 4.1–4.9. Resolved during the run: (1) services may not import the ORM model, so `UserService` builds `UserSnapshot` from repo rows by attribute access and the repo gained `create_user`/`touch_last_activity`; (2) `Settings()` no-arg constructor needs `# type: ignore[call-arg]` (pydantic-settings reads env, mypy can't see it); (3) `AsyncMock(spec=Message)` doesn't auto-async `answer` — tests set `event.answer = AsyncMock()`; (4) orjson advisory cleared by patch bump. |
+| **Remaining work** | Owner review of Sprint 4 (human verification: run the sandbox bot, `/start` owner→owner role, second account→user role, ban/unban via SQL). Then Sprint 5 (URL Analyzer + Provider Abstraction). |
+| **Known issues** | `bot/main.py` `main()`/`_run_webhook` are not unit-tested (need a live token + infra); covered by the Owner bot run. (Debounce was tightened 60 s → 5 s per Owner direction.) |
+| **Recommended next task** | After Owner sign-off: Sprint 5 Task 5.1 (`domain/protocols/downloader.py`). |
+| **Notes for the next agent** | Per-update services are built from factories bound to `data["session"]` (set by `DbSessionMiddleware`, which must precede `auth`/`throttle`). `auth`/`throttle` attach to `dp.message`/`dp.callback_query` (they need `event_from_user`); `logging`/`db_session` are `dp.update` outer middlewares. `UserSnapshot` is the framework-free user view crossing the service→bot boundary and the value cached in Redis — build it via `UserSnapshot.from_row(...)` / round-trip via `to_cache_dict`/`from_cache_dict`. Rate-limit keys (`rate:msg:*`, `rate:dl_cooldown:*`) use the internal `users.id`, not `telegram_id`. Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe`. |
 
 ### Session Handoff — 2026-06-23 — Sprint 3 Cache and Queue implemented
 

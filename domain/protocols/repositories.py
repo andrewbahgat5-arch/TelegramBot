@@ -31,6 +31,16 @@ class Repository(Protocol[T]):
 
 class UserRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_telegram_id(self, telegram_id: int) -> T | None: ...
+    async def create_user(
+        self,
+        *,
+        telegram_id: int,
+        username: str | None,
+        first_name: str | None,
+        language: str | None,
+        role: str,
+    ) -> T: ...
+    async def touch_last_activity(self, telegram_id: int, when: datetime.datetime) -> None: ...
     async def reset_daily_download_count_if_needed(
         self, user: T, *, today: datetime.date | None = None
     ) -> T: ...

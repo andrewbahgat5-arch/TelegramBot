@@ -20,7 +20,7 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-23 | PASS (53) | core/ 99.26% | Sprint 1 |
+| Unit | 2026-06-23 | PASS (101) | Sprint-4 services + entity 100%; middlewares/handlers/filter 97–100% | Sprint 1–4 |
 | Integration | 2026-06-23 | PASS (39) | redis 100%, repos 97.70% | Sprint 2-3 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
@@ -66,6 +66,34 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-23 — Unit + Integration — Sprint 4 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree; follows `de3e7d9`) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 4 |
+| Triggered by | Sprint 4 exit (User Identity) |
+| Total tests | 140 |
+| Passed | 140 |
+| Failed | 0 |
+| Skipped | 0 |
+| XFail / XPass | 0 / 0 |
+| Duration | ~00:00:12 |
+| Coverage (overall) | Sprint-4 modules 88% (entry-only gap) |
+| Coverage by path | services.user_service 100%, services.rate_limit_service 100%, domain.entities.user 100%, bot.middlewares.* 97–100%, bot.handlers.* 100%, bot.filters.role_filter 100%, bot.main 52% (network-bound `main()`/`_run_webhook` only) |
+| Notes | 48 new unit tests for Sprint 4. Gates: ruff, ruff-format (124 files), mypy --strict (124 files), import-linter (6 contracts kept; `bot.main → infrastructure.**` composition-root exception holds), bandit (0 findings), pip-audit (clean after orjson 3.11.5→3.11.6). Integration suite (39) ran green against live redis:7 + postgres:15. |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None. (Integration suite auto-skips when Postgres/Redis are unavailable; here both were up.)
+
+---
 
 ### 2026-06-23 — Unit + Integration — Sprint 3 exit
 

@@ -80,5 +80,6 @@ SERVICE_TIMEOUT_SECONDS: Final[float] = 15.0
 DEFAULT_WORKER_TIMEOUT_SECONDS: Final[float] = 300.0
 
 # --- Misc tunables fixed in code (not operator-configurable) --------------
-# Debounce window for ``users.last_activity_at`` writes (MASTER_PLAN 9.2).
-LAST_ACTIVITY_DEBOUNCE_SECONDS: Final[int] = 60
+# Debounce window for ``users.last_activity_at`` writes (MASTER_PLAN 9.2; the
+# Sprint 4 validation checklist fixes this at "at most every 5 s per user").
+LAST_ACTIVITY_DEBOUNCE_SECONDS: Final[int] = 5

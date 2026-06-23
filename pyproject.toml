@@ -25,7 +25,10 @@ dependencies = [
     "greenlet==3.1.1",
     "redis==5.2.1",
     "hiredis==3.1.0",
-    "orjson==3.11.5",
+    "orjson==3.11.6",
+    # Sprint 4 (User Identity) is the first sprint to use the Telegram framework.
+    # aiogram is pre-approved in MASTER_PLAN Section 6.1; pinned exactly here.
+    "aiogram==3.29.0",
 ]
 
 [project.optional-dependencies]
