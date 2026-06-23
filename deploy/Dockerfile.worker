@@ -1,0 +1,29 @@
+# Multi-stage build for the worker pool — MASTER_PLAN Task 0.9 (skeleton).
+# Workers need FFmpeg + yt-dlp at runtime; those system deps are added in Sprint 6.
+# Final image is slim. Runtime entrypoint (workers/main.py) lands in Sprint 6.
+
+# ---- builder ----
+FROM python:3.13-slim AS builder
+WORKDIR /build
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY pyproject.toml README.md ./
+RUN python -m pip install --upgrade pip \
+    && pip install --prefix=/install .
+
+# ---- final ----
+FROM python:3.13-slim AS final
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+# FFmpeg is required by the transcoder (Sprint 6). Pinned at distro major version.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 appuser
+COPY --from=builder /install /usr/local
+COPY . .
+USER appuser
+
+# Placeholder command; replaced when workers/main.py exists (Sprint 6).
+CMD ["python", "-m", "workers.main"]

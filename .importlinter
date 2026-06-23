@@ -1,0 +1,98 @@
+# Import Linter — enforces the architecture dependency rules in MASTER_PLAN Section 8.
+# Run with:  lint-imports
+#
+# Allowed import directions (Section 8.1):
+#   core/            -> (no project imports)
+#   domain/          -> core
+#   services/        -> domain, core
+#   infrastructure/  -> domain, core
+#   workers/         -> services, domain, core
+#   bot/             -> services, domain, core
+#   api/             -> services, domain, core
+#
+# services/ and infrastructure/ are independent siblings (neither imports the other).
+# bot/api/workers must not import infrastructure EXCEPT their single composition root
+# (Section 8.2): bot/main.py, api/main.py, workers/main.py wire concretes to protocols.
+
+[importlinter]
+root_packages =
+    api
+    bot
+    core
+    domain
+    infrastructure
+    services
+    workers
+
+[importlinter:contract:backbone-layers]
+name = Inward dependency backbone (services -> domain -> core)
+type = layers
+layers =
+    services
+    domain
+    core
+
+[importlinter:contract:core-is-a-leaf]
+name = core imports no project package
+type = forbidden
+source_modules =
+    core
+forbidden_modules =
+    api
+    bot
+    domain
+    infrastructure
+    services
+    workers
+
+[importlinter:contract:domain-imports-core-only]
+name = domain imports core only
+type = forbidden
+source_modules =
+    domain
+forbidden_modules =
+    api
+    bot
+    infrastructure
+    services
+    workers
+
+[importlinter:contract:services-not-infrastructure]
+name = services depend on protocols, never on infrastructure
+type = forbidden
+source_modules =
+    services
+forbidden_modules =
+    infrastructure
+    api
+    bot
+    workers
+
+[importlinter:contract:infrastructure-is-a-leaf]
+name = infrastructure never imports upward
+type = forbidden
+source_modules =
+    infrastructure
+forbidden_modules =
+    services
+    api
+    bot
+    workers
+
+[importlinter:contract:entrypoints-not-infrastructure]
+name = bot/api/workers reach infrastructure only via their composition root
+type = forbidden
+source_modules =
+    api
+    bot
+    workers
+forbidden_modules =
+    infrastructure
+# The composition roots legitimately wire concretes (Section 8.2). These ignores
+# do not match until the *.main modules exist (Sprint 4/6/8), so do not treat an
+# unmatched ignore as an error.
+unmatched_ignore_imports_alerting = none
+ignore_imports =
+    bot.main -> infrastructure.**
+    api.main -> infrastructure.**
+    workers.main -> infrastructure.**

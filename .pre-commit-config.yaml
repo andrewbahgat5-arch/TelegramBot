@@ -1,0 +1,41 @@
+# Pre-commit hooks — MASTER_PLAN 6.3: lint, type-check, fast checks on staged files.
+# Install with:  pre-commit install
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        args: ["--config-file=mypy.ini"]
+        additional_dependencies:
+          - pydantic==2.11.7
+          - pydantic-settings==2.7.1
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import-linter (architecture layers)
+        entry: lint-imports
+        language: system
+        pass_filenames: false
+        always_run: true

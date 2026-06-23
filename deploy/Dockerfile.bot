@@ -1,0 +1,25 @@
+# Multi-stage build for the Telegram bot process — MASTER_PLAN Task 0.9 (skeleton).
+# Final image is slim. Runtime entrypoint (bot/main.py) lands in Sprint 4.
+
+# ---- builder ----
+FROM python:3.13-slim AS builder
+WORKDIR /build
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY pyproject.toml README.md ./
+# Install into an isolated prefix copied into the final stage.
+RUN python -m pip install --upgrade pip \
+    && pip install --prefix=/install .
+
+# ---- final ----
+FROM python:3.13-slim AS final
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+# Non-root runtime user.
+RUN useradd --create-home --uid 10001 appuser
+COPY --from=builder /install /usr/local
+COPY . .
+USER appuser
+
+# Placeholder command; replaced when bot/main.py exists (Sprint 4).
+CMD ["python", "-m", "bot.main"]

@@ -1,0 +1,25 @@
+# Multi-stage build for the FastAPI process — MASTER_PLAN Task 0.9 (skeleton).
+# Serves admin, health, and metrics endpoints. Final image is slim.
+# Runtime entrypoint (api/main.py) lands in Sprint 8/10.
+
+# ---- builder ----
+FROM python:3.13-slim AS builder
+WORKDIR /build
+ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY pyproject.toml README.md ./
+RUN python -m pip install --upgrade pip \
+    && pip install --prefix=/install .
+
+# ---- final ----
+FROM python:3.13-slim AS final
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+RUN useradd --create-home --uid 10001 appuser
+COPY --from=builder /install /usr/local
+COPY . .
+USER appuser
+
+EXPOSE 8080
+# Placeholder command; replaced when api/main.py exists (Sprint 8/10).
+CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -1,0 +1,111 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-download-bot"
+version = "0.0.0"
+description = "Production-grade Telegram SaaS download bot (V1). See MASTER_PLAN.md."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = { text = "Proprietary" }
+
+# Sprint 0 ships only the dependencies needed to scaffold and validate the repo.
+# Runtime deps (aiogram, fastapi, sqlalchemy, asyncpg, redis, ...) are added in the
+# sprints that first use them, per MASTER_PLAN Section 6 and the Hard Rule on
+# adding dependencies (Section 1.3). Versions are pinned exactly.
+dependencies = [
+    "pydantic==2.11.7",
+    "pydantic-settings==2.7.1",
+    "structlog==25.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.9.10",
+    "mypy==1.15.0",
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==6.0.0",
+    "import-linter==2.3",
+    "pip-audit==2.7.3",
+    "bandit==1.8.3",
+    "pre-commit==4.1.0",
+]
+
+[tool.setuptools]
+# Source layout is the repository root (no src/ dir). Packages are discovered
+# from the locked layout in MASTER_PLAN Section 7.
+packages = [
+    "api",
+    "bot",
+    "core",
+    "domain",
+    "infrastructure",
+    "services",
+    "workers",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff — lint + format (MASTER_PLAN 6.3)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["migrations/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "ASYNC",  # flake8-async (no blocking I/O in async)
+    "S",   # flake8-bandit subset
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific
+]
+# T20 (print) is intentionally NOT ignored: MASTER_PLAN 1.6 forbids print().
+
+[tool.ruff.lint.per-file-ignores]
+# Assertions and fake secrets are expected in tests.
+"tests/**/*.py" = ["S101", "S105", "S106"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["api", "bot", "core", "domain", "infrastructure", "services", "workers"]
+
+# ---------------------------------------------------------------------------
+# Pytest (MASTER_PLAN 25.2 — six separate collection roots + simulation)
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = [
+    "tests/unit",
+    "tests/integration",
+    "tests/security",
+    "tests/performance",
+    "tests/e2e",
+    "tests/regression",
+]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["api", "bot", "core", "domain", "infrastructure", "services", "workers"]
+
+[tool.coverage.report]
+show_missing = true
+
+# ---------------------------------------------------------------------------
+# Bandit (MASTER_PLAN 6.3) — security static analysis
+# ---------------------------------------------------------------------------
+[tool.bandit]
+exclude_dirs = ["tests", "migrations", ".venv", "venv", ".git", "build", "dist", ".mypy_cache", ".ruff_cache", ".pytest_cache"]
