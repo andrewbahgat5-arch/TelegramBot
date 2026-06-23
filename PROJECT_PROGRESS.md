@@ -2,8 +2,8 @@
 
 > **Document Status:** LIVE · Single Source of Truth for implementation status
 > **Companion Documents:** `MASTER_PLAN.md` (architecture, sprint plan, locked decisions), `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-23 (Sprint 4 implemented)
-> **Project Phase:** Sprint 4 (User Identity) — code complete + verified; under review
+> **Last Updated:** 2026-06-23 (Sprint 5 committed `a1f16ad`; ready for Sprint 6)
+> **Project Phase:** Sprint 5 done (committed + owner-validated). Next: Sprint 6 (Job Pipeline).
 >
 > Update this file on **every** task status change. Never let it drift from reality.
 
@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 5 (URL Analyzer + Provider Abstraction) — code complete + verified; under review |
-| Sprints completed | 5 / 13 (S0, S1 approved; S2, S3 Owner pre-authorized; S4 Owner sign-off; S5 under review) |
+| Current sprint | Sprint 5 — **committed (`a1f16ad`) + owner-validated**. Ready to begin Sprint 6. |
+| Sprints completed | 5 / 13 (S0,S1,S2,S3,S4 done; S5 committed + owner hand-tested) |
 | Tasks completed | 55 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9; S5: 11/11) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions; OQ-8 platform allowlist + OQ-9 yt-dlp cadence touch Sprint 5) |
-| Last code change | 2026-06-23 — Sprint 5 provider abstraction (DownloaderProtocol/Registry/YtdlpProvider, URLAnalyzerService, format/quality keyboards, signed callbacks, worker health task) |
-| Last documentation change | 2026-06-23 — `PROJECT_PROGRESS.md` + `TEST_RESULTS.md` updated for Sprint 5 |
-| Next recommended action | **Owner review of Sprint 5** (hand-test 5 URLs/platform; confirm format→quality keyboards; registry failover with the fake-second-provider tests). On approval, start Sprint 6 (Job Pipeline). |
+| Last code change | 2026-06-23 — Sprint 5 committed `a1f16ad` (provider abstraction + URL analyzer + keyboards), incl. the non-16:9 4K quality-mapping fix found during owner validation. |
+| Last documentation change | 2026-06-23 — Sprint 5 closeout + this handoff (for a fresh session). |
+| Next recommended action | **Start Sprint 6 (Job Pipeline).** Owner has explicitly asked that Sprint 6 also deliver: real download/transcode/upload + delivery, **progress feedback** (queued→downloading→processing→uploading→completed/failed), a **thumbnail preview** on the format message, **accurate file-size estimates**, and **explicit per-codec audio formats** (MP3/M4A/Opus/…). See "Carry-ins for Sprint 6" below. |
 
 ---
 
@@ -72,15 +72,15 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
 | 3 | Cache and Queue | `[x]` Completed | 100% | 7 / 7 | Owner pre-authorized continuation |
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
-| 5 | URL Analyzer + Provider Abstraction | `[~]` Under Review | 100% | 11 / 11 | awaiting Owner sign-off |
-| 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | depends on S4, S5 |
+| 5 | URL Analyzer + Provider Abstraction | `[~]` Under Review | 100% | 11 / 11 | committed `a1f16ad`; owner-validated; formal sign-off pending |
+| 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | ready — next sprint |
 | 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | depends on S6 |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
 | 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | depends on S7 |
 | 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **0%** | **0 / 105** |  |
+| **Total** |  |  | **52%** | **55 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -343,6 +343,12 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 - [ ] **6.9** `services/notification_service.py` happy path.
 - [ ] **6.10** `CleanupWorker` minimal sweep (temp files > 60 s).
 
+**Owner-requested carry-ins for Sprint 6** (raised during Sprint 5 validation — fold into the relevant tasks; not new sprint scope creep, these are the UX the Owner expects from the pipeline):
+- **Progress feedback** via `NotificationService` (6.9): edit the message through `queued → downloading → processing → uploading → ✅ completed / ❌ failed`, instead of the current placeholder.
+- **Thumbnail preview** on the format-selection message (small `bot/handlers/download.py` change; `MediaInfo.thumbnail_url` is already extracted). Could land as soon as 6.8.
+- **Accurate file-size estimates**: today `_parse_formats` keeps the *largest* codec variant per tier and shows video-only bytes, so labels aren't monotonic. In the download path, pick a consistent codec per tier and include the audio stream in the estimate.
+- **Explicit per-codec audio formats** (MP3/M4A/AAC/OGG/Opus/WAV/FLAC): needs FFmpeg (6.2) + a domain-model change to carry an audio codec/container on `MediaFormatOption` (today it's a single `Quality.AUDIO`). Native = AAC(m4a)+Opus; the rest are FFmpeg transcode targets. **Decision still open** with the Owner on whether to set up a self-hosted Telegram Bot API server (50 MB bot limit vs 2 GB) — confirm before building large-file delivery.
+
 **Validation Results:** pending.
 **Known Issues:** none.
 
@@ -497,7 +503,7 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
-| 2026-06-23 | — (uncommitted) | New: `core/urls.py`; `domain/entities/media.py`; `domain/protocols/downloader.py`; `infrastructure/downloader/{registry,provider_settings}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `services/{url_analyzer,format_extraction}.py`; `bot/callbacks/factory.py`; `bot/keyboards/{format_select,quality_select}.py`; `bot/handlers/download.py`; `workers/main.py`; `tests/unit/{test_urls,test_format_extraction,test_callback_factory,test_downloader_registry,test_url_analyzer,test_ytdlp_provider,test_keyboards,test_download_handler}.py`; `tests/integration/test_provider_settings.py`. Updated: `core/redis_keys.py` (+`provider_health`), `domain/protocols/repositories.py` (MediaRepositoryProtocol.upsert_metadata), `infrastructure/database/repositories/media.py` (+`upsert_metadata`), `bot/main.py`, `tests/unit/{_fakes,test_bot_composition}.py`, `.importlinter` (+providers contract), `MASTER_PLAN.md` (Section 11.4 row), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 5 / 5.1–5.11 | Implementation agent |
+| 2026-06-23 | `a1f16ad` | New: `core/urls.py`; `domain/entities/media.py`; `domain/protocols/downloader.py`; `infrastructure/downloader/{registry,provider_settings}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `services/{url_analyzer,format_extraction}.py`; `bot/callbacks/factory.py`; `bot/keyboards/{format_select,quality_select}.py`; `bot/handlers/download.py`; `workers/main.py`; `tests/unit/{test_urls,test_format_extraction,test_callback_factory,test_downloader_registry,test_url_analyzer,test_ytdlp_provider,test_keyboards,test_download_handler}.py`; `tests/integration/test_provider_settings.py`. Updated: `core/redis_keys.py` (+`provider_health`), `domain/protocols/repositories.py` (MediaRepositoryProtocol.upsert_metadata), `infrastructure/database/repositories/media.py` (+`upsert_metadata`), `bot/main.py`, `tests/unit/{_fakes,test_bot_composition}.py`, `.importlinter` (+providers contract), `MASTER_PLAN.md` (Section 11.4 row), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 5 / 5.1–5.11 | Implementation agent |
 | 2026-06-23 | `0e5f301` | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
 | 2026-06-23 | — (uncommitted) | `core/redis_keys.py`, `domain/protocols/{cache,queue}.py`, `domain/protocols/repositories.py` (SettingsStoreProtocol), `infrastructure/redis/{client,cache,locks,queue}.py`, `services/{cache_service,queue_service,settings_service}.py`, `tests/integration/{conftest,test_redis_cache,test_redis_locks,test_redis_queue,test_settings_service}.py`, `tests/unit/test_redis_keys.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 3 / 3.1–3.7 | Implementation agent |
 | 2026-06-23 | `8ccd1e6` | `alembic.ini`, `migrations/{env.py,script.py.mako,versions/2026062300{01,02}_*.py}`, `infrastructure/database/{engine,session,partitioning}.py`, `infrastructure/database/models/*.py` (13 models + base), `infrastructure/database/repositories/*.py` (12 repos + base), `domain/protocols/repositories.py`, `tests/integration/{conftest,test_schema,test_repositories,test_partition_rollover}.py`, `tests/unit/{test_partitioning,test_db_engine}.py`, `pyproject.toml` (sqlalchemy/asyncpg/alembic/redis/orjson pins); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 2 / 2.1–2.9 | Implementation agent |
@@ -514,7 +520,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
-| 2026-06-23 | Sprint 5 / 5.1–5.11 | Unit (168) + Integration (40, live pg+redis) + all gates | PASS | Registry failover/health/cooldown, signed-callback tamper rejection, yt-dlp JSON parse + error mapping, COALESCE upsert all verified. mypy --strict 146 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. |
+| 2026-06-23 | Sprint 5 / 5.1–5.11 + 4K fix | Unit + Integration (214 total, live pg+redis) + all gates | PASS | Registry failover/health/cooldown, signed-callback tamper rejection, yt-dlp JSON parse + error mapping, COALESCE upsert verified. Post-validation 4K quality-mapping fix added with parametrized regression test; verified against the reported video (offers 2160p…144p). mypy --strict 146 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. |
 | 2026-06-23 | Sprint 4 / 4.1–4.9 | Unit (101) + full suite (140 incl. 39 integration) + all gates | PASS | Sprint-4 services + entity 100%, middlewares/handlers/filter 97–100%. mypy --strict 124 files; import-linter 6 contracts; bandit 0; pip-audit clean (orjson→3.11.6). |
 | 2026-06-23 | Sprint 3 / 3.1–3.7 | Unit + Integration (92 tests, live redis:7 + postgres:15) + all gates | PASS | infrastructure/redis coverage 100% (≥80%). Concurrent 1000-job dequeue, lock foreign-release, read-through cache verified. |
 | 2026-06-23 | Sprint 2 / 2.1–2.9 | Unit + Integration (72 tests, live postgres:15) + all gates | PASS | Repositories coverage 97.70% (≥80%). Schema introspection vs Section 10 passes. |
@@ -538,6 +544,7 @@ Append a row whenever a validation suite runs.
 | OQ-8 | Approved supported-platform allowlist. | Open question | Sprint 5 | Provide. |
 | OQ-9 | yt-dlp update cadence — monthly cron acceptable? | Open question | Sprint 5 | Confirm. |
 | OQ-10 | Approver for English V1 user-facing copy. | Open question | Sprint 4 | Identify. |
+| OQ-11 | Large-file delivery: accept Telegram's 50 MB bot limit, or stand up a self-hosted Telegram Bot API server (up to 2 GB)? Affects which qualities can actually be sent. | Open question | Sprint 6 | Decide before building delivery. |
 
 Open Questions are the canonical issue board until a real one is set up. Update both this section and `MASTER_PLAN.md` Section 27 when resolving an item.
 
@@ -546,6 +553,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-23 — Sprint 5 committed + owner validation (4K fix); ready for Sprint 6
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation + owner validation |
+| **Active sprint** | 5 → committed (`a1f16ad`). **Next session: start Sprint 6.** |
+| **Tasks moved** | Sprint 5 5.1–5.11 all `[x]` (committed). No status flip to `[x] Completed` yet — formal Owner sprint sign-off not explicitly given; Owner directed "commit + stop". |
+| **Files modified** | Sprint 5 committed in `a1f16ad` (see Files Modified Log). This session also: fixed `_quality_for_format` in `infrastructure/downloader/providers/ytdlp_provider.py` + regression test in `tests/unit/test_ytdlp_provider.py`; doc updates in `PROJECT_PROGRESS.md`. |
+| **Decisions added** | None to MASTER_PLAN. Added OQ-11 (50 MB bot limit vs self-hosted Bot API server) — must be decided before Sprint 6 large-file delivery. |
+| **Validation** | 214 tests pass; all gates green. Owner hand-tested live YouTube/TikTok/etc.: analysis + format→quality keyboards work; cache speed-up confirmed; rejection of bad/non-URLs confirmed. |
+| **Current state** | The full URL→analysis→format/quality-selection UX is live and committed. The quality menu now correctly shows 4K for non-16:9 videos. Selecting a quality ends at a "Downloading will be available soon" placeholder — the actual download engine is Sprint 6 (not built). |
+| **Completed work** | Sprint 5 (provider abstraction, URL analyzer, keyboards, signed callbacks, worker health task, import contract). Post-validation 4K quality-label fix. |
+| **Remaining work** | Sprint 6 (Job Pipeline) — see its task list **and the "Owner-requested carry-ins for Sprint 6"** block: real download/transcode/upload + delivery, progress feedback, thumbnail preview, accurate size estimates, explicit per-codec audio formats. |
+| **Known issues** | (1) File-size labels rough / non-monotonic (cosmetic; fix in Sprint 6 download path). (2) Audio shown as a single "Audio" option (explicit codecs need FFmpeg + a model change → Sprint 6). (3) `bot.main`/`workers.main` entrypoints not unit-tested (covered by the live run). |
+| **Recommended next task** | Sprint 6 Task 6.1 (`domain/protocols/transcoder.py`, `domain/protocols/file_sender.py`). First confirm OQ-11 (file-size/Bot-API decision) with the Owner. |
+| **Notes for the next agent** | To run/validate the bot you need `yt-dlp` installed and `YTDLP_PATH` set in the worktree `.env` (it's a subprocessed system tool, not a pyproject dep). Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe`. The download quality-pick handler in `bot/handlers/download.py` (`handle_quality_choice`) is the placeholder to replace in Task 6.8 (it currently just edits the message). Provider settings are read by the registry via `ProviderSettingsAdapter` (opens its own short session); the registry is a process singleton built in both `bot/main.py` and `workers/main.py`. |
 
 ### Session Handoff — 2026-06-23 — Sprint 5 URL Analyzer + Provider Abstraction implemented
 
