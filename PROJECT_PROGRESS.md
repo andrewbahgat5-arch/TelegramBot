@@ -2,8 +2,8 @@
 
 > **Document Status:** LIVE · Single Source of Truth for implementation status
 > **Companion Documents:** `MASTER_PLAN.md` (architecture, sprint plan, locked decisions), `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-23 (Sprint 5 committed `a1f16ad`; ready for Sprint 6)
-> **Project Phase:** Sprint 5 done (committed + owner-validated). Next: Sprint 6 (Job Pipeline).
+> **Last Updated:** 2026-06-23 (Sprint 5 Owner sign-off; ready for Sprint 6)
+> **Project Phase:** Sprint 5 Completed (Owner sign-off 2026-06-23). Next: Sprint 6 (Job Pipeline).
 >
 > Update this file on **every** task status change. Never let it drift from reality.
 
@@ -52,8 +52,8 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 |
-| Current sprint | Sprint 5 — **committed (`a1f16ad`) + owner-validated**. Ready to begin Sprint 6. |
-| Sprints completed | 5 / 13 (S0,S1,S2,S3,S4 done; S5 committed + owner hand-tested) |
+| Current sprint | Sprint 5 — **Completed (Owner sign-off 2026-06-23, `a1f16ad`)**. Sprint 6 begins next session. |
+| Sprints completed | 5 / 13 (S0–S5 all complete; S5 Owner sign-off 2026-06-23) |
 | Tasks completed | 55 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9; S5: 11/11) |
 | Open blockers | 0 |
 | Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions; OQ-8 platform allowlist + OQ-9 yt-dlp cadence touch Sprint 5) |
@@ -72,7 +72,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 2 | Persistence Layer | `[x]` Completed | 100% | 9 / 9 | Owner pre-authorized continuation |
 | 3 | Cache and Queue | `[x]` Completed | 100% | 7 / 7 | Owner pre-authorized continuation |
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
-| 5 | URL Analyzer + Provider Abstraction | `[~]` Under Review | 100% | 11 / 11 | committed `a1f16ad`; owner-validated; formal sign-off pending |
+| 5 | URL Analyzer + Provider Abstraction | `[x]` Completed | 100% | 11 / 11 | Owner sign-off 2026-06-23 (`a1f16ad`) |
 | 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | ready — next sprint |
 | 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | depends on S6 |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
@@ -288,7 +288,7 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` Under Review (code complete + verified; awaiting Owner sign-off) |
+| **Status** | `[x]` Completed (Owner sign-off 2026-06-23) |
 | **Completion** | 100% (11 / 11) |
 | **Goal** | Given a URL, the user sees a clean format/quality keyboard. The provider abstraction is fully in place (D-026). |
 | **Stop Point** | Owner hand-tests 5 URLs per platform; confirms registry behavior with a fake second provider in unit tests. |
@@ -318,6 +318,20 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 - OQ-8 (platform allowlist) and OQ-9 (yt-dlp update cadence) remain open. V1 detects platform best-effort and lets yt-dlp (`supported_platforms={"*"}`) decide; no hard allowlist gate.
 - **Approx file-size labels are rough and not strictly monotonic** (owner-observed). Each tier has avc1/vp9/av01 variants of very different sizes; dedup keeps the largest, and the kept codec varies by tier (e.g. legacy muxed `18` for 360p). The numbers are also video-only (audio added at download). Cosmetic, out of Sprint 5 scope; deferred to Sprint 6 where the download/transcode path can produce consistent estimates (prefer one codec per tier + include audio).
 - Audio is exposed as a single generic "Audio" option in V1. Explicit per-codec audio formats (MP3/M4A/AAC/OGG/Opus/WAV/FLAC) require FFmpeg transcoding + a domain-model change → deferred to Sprint 6.
+
+**Sprint Closeout — 2026-06-23**
+
+| Field | Value |
+|---|---|
+| **Completion** | 100% (11 / 11 tasks) |
+| **Exit criteria** | Met. Owner hand-tested live URLs across platforms (analysis + format→quality keyboards + metadata-cache speed-up + bad/non-URL rejection). Registry failover/health verified with fake-second-provider unit tests. yt-dlp invocation timed/logged. `import-linter` green (providers reachable only via the registry). |
+| **Human verification** | Completed by Owner on 2026-06-23 (live Telegram sandbox bot). |
+| **Test results** | 214 tests pass; all gates green (ruff, mypy --strict 146 files, import-linter 7 contracts, bandit 0, pip-audit). |
+| **Commits** | `a1f16ad` (Sprint 5), `99c2e9c` (handoff doc). |
+| **Lessons learned** | Quality tiers must come from yt-dlp's `format_note` / nearest longer-edge, not a raw-height floor (non-16:9 4K = 3840×2026). `ClassVar` protocol members block per-instance test fakes — provider identity attrs are plain instance attributes. yt-dlp is a subprocessed system tool, not a Python dependency. |
+| **Carry-over to Sprint 6** | Real download/transcode/upload + delivery; progress feedback; thumbnail preview; accurate file-size estimates; explicit per-codec audio formats. OQ-11 (50 MB bot limit vs self-hosted Bot API) to be decided first. See "Owner-requested carry-ins for Sprint 6". |
+
+→ **Sprint marked `[x] Completed` by Owner on 2026-06-23.**
 
 ---
 
@@ -559,8 +573,8 @@ The newest handoff is at the top. Every session ends with a new entry. Never del
 | Field | Value |
 |---|---|
 | **Session type** | Implementation + owner validation |
-| **Active sprint** | 5 → committed (`a1f16ad`). **Next session: start Sprint 6.** |
-| **Tasks moved** | Sprint 5 5.1–5.11 all `[x]` (committed). No status flip to `[x] Completed` yet — formal Owner sprint sign-off not explicitly given; Owner directed "commit + stop". |
+| **Active sprint** | 5 → **Completed (Owner sign-off 2026-06-23, `a1f16ad`)**. **Next session: start Sprint 6.** |
+| **Tasks moved** | Sprint 5 5.1–5.11 all `[x]`; Sprint 5 → `[x]` Completed (Owner sign-off 2026-06-23). |
 | **Files modified** | Sprint 5 committed in `a1f16ad` (see Files Modified Log). This session also: fixed `_quality_for_format` in `infrastructure/downloader/providers/ytdlp_provider.py` + regression test in `tests/unit/test_ytdlp_provider.py`; doc updates in `PROJECT_PROGRESS.md`. |
 | **Decisions added** | None to MASTER_PLAN. Added OQ-11 (50 MB bot limit vs self-hosted Bot API server) — must be decided before Sprint 6 large-file delivery. |
 | **Validation** | 214 tests pass; all gates green. Owner hand-tested live YouTube/TikTok/etc.: analysis + format→quality keyboards work; cache speed-up confirmed; rejection of bad/non-URLs confirmed. |
