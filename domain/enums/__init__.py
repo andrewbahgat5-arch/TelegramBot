@@ -11,9 +11,10 @@ from domain.enums.error_type import ErrorType
 from domain.enums.job_status import JobStatus
 from domain.enums.media_format import MediaFormat
 from domain.enums.quality import Quality
-from domain.enums.user_role import UserRole
+from domain.enums.user_role import UNLIMITED_ROLES, UserRole
 
 __all__ = [
+    "UNLIMITED_ROLES",
     "AdType",
     "ErrorType",
     "JobStatus",

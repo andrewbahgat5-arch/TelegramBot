@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-24 | PASS (282) | + Owner-feedback fixes #14–#20 (rate-limit enforcement, free single-active cap, broadcast excludes staff, silent-ignore admin, /users) | Sprint 1–8 |
-| Integration | 2026-06-24 | PENDING (52) | Audience SQL #14 updated; re-run needed with Docker up (infra was down at fix time) | Sprint 2–8 |
+| Unit | 2026-06-24 | PASS (289) | + Owner-feedback #21–#24 (Owner unlimited, time-bounded active-job cap, limit-freshness) | Sprint 1–8 |
+| Integration | 2026-06-24 | PENDING (52) | #14 audience + #24 time-bounded `count_active_for_user` need a re-run with Docker up | Sprint 2–8 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,30 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-24 — Unit — Owner verification feedback fixes (#21–#27)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `9348917`) |
+| Environment | local |
+| Suite | unit (integration pending — Docker/infra was down) |
+| Sprint | 8 (second verification round) |
+| Triggered by | Owner feedback items #21–#27 |
+| Total tests | 289 unit passed; 52 integration **skipped** (Postgres/Redis unavailable) |
+| Passed | 289 |
+| Failed | 0 |
+| Coverage by path | services.rate_limit_service: Owner bypass (no limit/cooldown/maintenance, no cooldown armed) + `authorize_download` fresh-row enforcement + missing-user no-op + immediate limit-change visibility; bot.middlewares.throttle: Owner never throttled; bot.handlers.download: `_subject_to_free_cap` excludes Owner; services.job_service: stale stuck job (created >window ago) does not block (time-bounded `count_active_for_user`). |
+| Notes | **#21** Owner unlimited via single-source `domain.enums.UNLIMITED_ROLES` (rate-limit + throttle + single-active cap all honour it). **#24** `JobRepository.count_active_for_user(within_seconds=…)` — `JobService.request` passes `worker_job_timeout` (300s) so orphaned non-terminal jobs age out (fixes the stuck "download in progress"). **#23** verified immediate limit changes (settings-cache invalidation + fresh-row read); cooldown is a separate timer. **#22/#25/#26/#27** recorded as future requirements (#22 role-flexible via UNLIMITED_ROLES; #25 dedup + #26 title-not-platform need `downloads` schema changes → own sprint; #27 instant `file_id` resend already implemented). **Integration NOT run** (Docker off): `test_admin_repositories` covers #14 audience; the #24 time bound is unit-tested via the fake and exercised live once infra is up. Gates: ruff, ruff-format, mypy --strict (178), import-linter (7), bandit (0). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None (unit). Integration not executed (infra unavailable).
+
+**Skips (if non-trivial)**
+- All 52 integration tests skipped — Postgres/Redis not reachable.
+
+---
 
 ### 2026-06-24 — Unit — Owner verification feedback fixes (#14–#20)
 

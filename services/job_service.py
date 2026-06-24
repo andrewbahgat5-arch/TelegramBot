@@ -120,7 +120,14 @@ class JobService:
         # Single-active-job cap (free users): only a cache miss creates a queued job, so
         # the guard sits here — instant cache hits above are never blocked. A free user
         # with an in-flight job cannot start a second download (16-free-cap, spam guard).
-        if single_active and await self._jobs.count_active_for_user(user_id) > 0:
+        # The window bounds it to *recent* jobs so a stuck/orphaned job ages out instead
+        # of blocking forever (#24); the dead job is reaped separately in Sprint 10.
+        if single_active and (
+            await self._jobs.count_active_for_user(
+                user_id, within_seconds=self._settings.worker_job_timeout
+            )
+            > 0
+        ):
             await self._release_lock(media_id, fmt, qual, token)
             _log.info("job_rejected_user_busy", user_id=user_id)
             return RequestOutcome(RequestKind.BUSY)

@@ -207,6 +207,16 @@ async def test_throttle_passthrough_without_user() -> None:
     assert len(calls) == 1  # no user → throttle does not apply
 
 
+async def test_throttle_never_blocks_owner() -> None:
+    # Even with the limit at 0, the Owner passes through unthrottled (#21).
+    mw = ThrottleMiddleware(lambda session: _rate_service("0"))
+    calls: list[dict[str, Any]] = []
+    owner = UserSnapshot.from_row(FakeUser(id=1, telegram_id=1, role="owner"))
+    data: dict[str, Any] = {"session": object(), "user": owner}
+    await mw(_ok_handler(calls), _EVENT, data)
+    assert len(calls) == 1  # owner bypassed the throttle
+
+
 async def test_throttle_blocks_callback_query() -> None:
     mw = ThrottleMiddleware(lambda session: _rate_service("0"))
     calls: list[dict[str, Any]] = []

@@ -15,6 +15,7 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from domain.enums import UNLIMITED_ROLES
 from domain.exceptions import RateLimitExceededError
 from services.rate_limit_service import RateLimitService
 
@@ -31,6 +32,9 @@ class ThrottleMiddleware(BaseMiddleware):
     async def __call__(self, handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
         user = data.get("user")
         if user is None:  # unauthenticated update (e.g. banned, or no from_user)
+            return await handler(event, data)
+
+        if user.role in UNLIMITED_ROLES:  # Owner is never throttled (#21)
             return await handler(event, data)
 
         service = self._rate_limit_service_factory(data["session"])

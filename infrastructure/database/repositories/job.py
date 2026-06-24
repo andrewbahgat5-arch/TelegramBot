@@ -26,12 +26,24 @@ class JobRepository(SqlAlchemyRepository[Job]):
         result = await self.session.execute(select(Job).where(Job.id == job_id))
         return result.scalar_one_or_none()
 
-    async def count_active_for_user(self, user_id: int) -> int:
-        """How many non-terminal (in-flight) jobs this user currently owns (16-free-cap)."""
+    async def count_active_for_user(
+        self, user_id: int, *, within_seconds: int | None = None
+    ) -> int:
+        """Count this user's in-flight (non-terminal) jobs (free single-active cap, #16).
+
+        ``within_seconds`` bounds the window to *recent* jobs so a job stuck in a
+        non-terminal state (worker down or crashed, before the Sprint-10 reaper exists)
+        ages out and stops blocking the user (#24). A job older than the window is
+        treated as dead for capping purposes.
+        """
+        conditions = [Job.user_id == user_id, Job.status.in_(_ACTIVE_STATUSES)]
+        if within_seconds is not None:
+            cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+                seconds=within_seconds
+            )
+            conditions.append(Job.created_at > cutoff)
         result = await self.session.execute(
-            select(func.count())
-            .select_from(Job)
-            .where(Job.user_id == user_id, Job.status.in_(_ACTIVE_STATUSES))
+            select(func.count()).select_from(Job).where(*conditions)
         )
         return int(result.scalar_one())
 

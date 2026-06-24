@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Any
 
+from core.uuid7 import uuid7
 from domain.entities.media import MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import CachedFileExpiredError
@@ -16,6 +18,7 @@ from tests.unit._fakes import (
     FakeDownloadRepo,
     FakeFileSender,
     FakeJobRepo,
+    FakeJobRow,
     FakeJobWaiterRepo,
     FakeMessageSender,
     FakeQueueBackend,
@@ -180,6 +183,35 @@ async def test_single_active_blocks_free_users_second_download() -> None:
     assert len(env["jobs"].jobs) == 1
     # The lock for the second media was released (not left dangling).
     assert await service._cache.acquire_download_lock(99, "video", "720p") is not None
+
+
+async def test_single_active_ignores_stale_stuck_job() -> None:
+    # A non-terminal job orphaned long ago (worker died before the Sprint-10 reaper
+    # exists) must NOT block forever — it ages out of the active window (#24).
+    env = _build()
+    service: JobService = env["service"]
+    stuck = FakeJobRow(
+        id=uuid7(),
+        user_id=7,
+        media_id=1,
+        format="video",
+        quality="720p",
+        status="processing",
+        created_at=datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1),
+    )
+    env["jobs"].jobs[stuck.id] = stuck
+
+    outcome = await service.request(
+        user_id=7,
+        telegram_id=555,
+        media_id=42,
+        info=_INFO,
+        format_=MediaFormat.VIDEO,
+        quality=Quality.P720,
+        progress_message_id=1,
+        single_active=True,
+    )
+    assert outcome.kind is RequestKind.QUEUED  # the stale job did not block the new one
 
 
 async def test_single_active_off_allows_concurrent_downloads() -> None:

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.download import (
+    _subject_to_free_cap,
     handle_back,
     handle_format_choice,
     handle_quality_choice,
@@ -258,6 +259,25 @@ def _user() -> UserSnapshot:
         daily_download_count_reset_date=_today(),
         total_downloads=0,
     )
+
+
+def _owner() -> UserSnapshot:
+    return UserSnapshot(
+        id=1,
+        telegram_id=999,
+        role=UserRole.OWNER,
+        is_banned=False,
+        is_premium=False,
+        daily_download_count=0,
+        daily_download_count_reset_date=_today(),
+        total_downloads=0,
+    )
+
+
+def test_owner_is_exempt_from_single_active_cap() -> None:
+    # Free user is subject to the single-active cap; the Owner never is (#21).
+    assert _subject_to_free_cap(_user()) is True
+    assert _subject_to_free_cap(_owner()) is False
 
 
 def _job_service() -> tuple[JobService, FakeQueueBackend]:

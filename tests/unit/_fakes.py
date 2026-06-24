@@ -406,6 +406,9 @@ class FakeJobRow:
     retry_count: int = 0
     correlation_id: uuid.UUID | None = None
     error_message: str | None = None
+    created_at: datetime.datetime = field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC)
+    )
 
 
 class FakeJobRepo:
@@ -430,10 +433,21 @@ class FakeJobRepo:
     async def get_by_uuid(self, job_id: uuid.UUID) -> FakeJobRow | None:
         return self.jobs.get(job_id)
 
-    async def count_active_for_user(self, user_id: int) -> int:
+    async def count_active_for_user(
+        self, user_id: int, *, within_seconds: int | None = None
+    ) -> int:
         terminal = {"completed", "permanently_failed", "cancelled"}
+        cutoff = (
+            datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=within_seconds)
+            if within_seconds is not None
+            else None
+        )
         return sum(
-            1 for j in self.jobs.values() if j.user_id == user_id and j.status not in terminal
+            1
+            for j in self.jobs.values()
+            if j.user_id == user_id
+            and j.status not in terminal
+            and (cutoff is None or j.created_at > cutoff)
         )
 
     async def create(

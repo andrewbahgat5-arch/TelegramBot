@@ -17,6 +17,7 @@ from __future__ import annotations
 import datetime
 from typing import Any
 
+from domain.enums import UNLIMITED_ROLES
 from domain.exceptions import (
     CooldownActiveError,
     DailyLimitExceededError,
@@ -78,6 +79,11 @@ class RateLimitService:
         """
         if user.is_banned:  # defensive — AuthMiddleware already rejects banned users
             raise PermissionDeniedError("You are banned from using this bot.")
+
+        # The Owner is unlimited: no daily quota, no cooldown, no maintenance lockout,
+        # no single-active cap (#21). No cooldown is armed for them either.
+        if user.role in UNLIMITED_ROLES:
+            return
 
         if await self._settings.get("maintenance_mode"):
             raise MaintenanceModeError("The bot is under maintenance. Please try again later.")

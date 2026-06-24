@@ -131,3 +131,69 @@ async def test_lazy_daily_reset_then_pass() -> None:
     )
     await svc.check_download(user)  # reset to 0 first, then passes
     assert user.daily_download_count == 0
+
+
+# --- Owner bypass (#21) ---------------------------------------------------
+async def test_owner_bypasses_all_limits_and_no_cooldown() -> None:
+    # Maintenance on + a huge daily count: the Owner is still authorized and is NOT
+    # placed on cooldown (unlimited downloads/requests, #21).
+    svc, cache_service = _service({"maintenance_mode": ("true", "bool")})
+    owner = FakeUser(
+        id=1,
+        telegram_id=1,
+        role="owner",
+        daily_download_count=9999,
+        daily_download_count_reset_date=_today(),
+    )
+    await svc.check_download(owner)  # must not raise
+    assert await cache_service.is_on_cooldown(1) is False  # type: ignore[attr-defined]
+
+
+# --- authorize_download (#15: reads the authoritative row) ----------------
+def _service_with_user(
+    user: FakeUser, overrides: dict[str, tuple[str, str]] | None = None
+) -> RateLimitService:
+    data = dict(DEFAULT_RATE_SETTINGS)
+    if overrides:
+        data.update(overrides)
+    cache_service, _ = make_cache_service()
+    repo = FakeUserRepo()
+    repo.by_tid[user.telegram_id] = user
+    return RateLimitService(
+        SettingsService(FakeSettingsStore(data), FakeCache()), cache_service, repo
+    )
+
+
+async def test_authorize_download_loads_fresh_row_and_enforces() -> None:
+    user = FakeUser(
+        id=5, telegram_id=5, daily_download_count=1, daily_download_count_reset_date=_today()
+    )
+    svc = _service_with_user(user, {"free_daily_limit": ("1", "int")})
+    with pytest.raises(DailyLimitExceededError):
+        await svc.authorize_download(5)
+
+
+async def test_authorize_download_missing_user_is_noop() -> None:
+    svc, _ = _service()
+    await svc.authorize_download(404)  # no row → nothing to authorize, no error
+
+
+# --- limit change is immediately effective (#23) --------------------------
+async def test_limit_change_takes_effect_immediately() -> None:
+    # Reader (rate-limit service) and writer (/setting_set) share the same store + cache,
+    # exactly as the bot wires them (both over the one Redis). No stale quota survives.
+    store = FakeSettingsStore({**DEFAULT_RATE_SETTINGS, "free_daily_limit": ("1", "int")})
+    cache = FakeCache()
+    cache_service, _ = make_cache_service()
+    repo = FakeUserRepo()
+    repo.by_tid[5] = FakeUser(
+        id=5, telegram_id=5, daily_download_count=1, daily_download_count_reset_date=_today()
+    )
+    svc = RateLimitService(SettingsService(store, cache), cache_service, repo)
+
+    with pytest.raises(DailyLimitExceededError):
+        await svc.authorize_download(5)  # at limit 1
+
+    # Owner raises the limit via /setting_set (writer shares store + cache → invalidates).
+    await SettingsService(store, cache).set_validated("free_daily_limit", "10")
+    await svc.authorize_download(5)  # now passes — the new limit is seen at once

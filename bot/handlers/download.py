@@ -28,6 +28,7 @@ from bot.keyboards.quality_select import build_quality_keyboard
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
+from domain.enums import UNLIMITED_ROLES
 from domain.exceptions import ExtractionFailedError, URLNotSupportedError, UserFacingError
 from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
@@ -52,6 +53,11 @@ def _is_free(user: UserSnapshot) -> bool:
         user.is_premium and expires is not None and expires > datetime.datetime.now(datetime.UTC)
     )
     return not active_premium
+
+
+def _subject_to_free_cap(user: UserSnapshot) -> bool:
+    """Whether the free single-active-download cap applies (#16). Owner is exempt (#21)."""
+    return _is_free(user) and user.role not in UNLIMITED_ROLES
 
 
 @router.message(F.text.regexp(r"https?://"))
@@ -200,7 +206,7 @@ async def handle_quality_choice(
         quality=parsed.quality,
         progress_message_id=progress_message_id,
         correlation_id=uuid.UUID(correlation) if correlation else None,
-        single_active=_is_free(user),
+        single_active=_subject_to_free_cap(user),
     )
     if outcome.kind is RequestKind.DUPLICATE:
         await notification_service.notify_text(
