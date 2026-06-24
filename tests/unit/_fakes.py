@@ -174,12 +174,38 @@ class FakeUserRepo:
             user.daily_download_count = 1
             user.daily_download_count_reset_date = current
 
+    async def count_all(self) -> int:
+        return len(self.by_tid)
+
+    async def count_banned(self) -> int:
+        return sum(1 for u in self.by_tid.values() if u.is_banned)
+
+    async def sum_total_downloads(self) -> int:
+        return sum(u.total_downloads for u in self.by_tid.values())
+
+    def _audience(self, role: str | None, language: str | None) -> list[FakeUser]:
+        users = [u for u in self.by_tid.values() if not u.is_banned]
+        if role is not None:
+            users = [u for u in users if u.role == role]
+        if language is not None:
+            users = [u for u in users if u.language == language]
+        return sorted(users, key=lambda u: u.id)
+
+    async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
+        return len(self._audience(role, language))
+
+    async def page_for_broadcast(
+        self, *, after_id: int, limit: int, role: str | None, language: str | None
+    ) -> Sequence[FakeUser]:
+        return [u for u in self._audience(role, language) if u.id > after_id][:limit]
+
 
 # --- Settings store fake --------------------------------------------------
 @dataclass
 class FakeSettingRow:
     value: str
     value_type: str
+    key: str = ""
 
 
 class FakeSettingsStore:
@@ -192,14 +218,17 @@ class FakeSettingsStore:
         if key not in self._data:
             return None
         value, value_type = self._data[key]
-        return FakeSettingRow(value, value_type)
+        return FakeSettingRow(value, value_type, key)
 
     async def upsert(
         self, key: str, value: str, *, updated_by: int | None = None
     ) -> FakeSettingRow:
         value_type = self._data.get(key, (value, "string"))[1]
         self._data[key] = (value, value_type)
-        return FakeSettingRow(value, value_type)
+        return FakeSettingRow(value, value_type, key)
+
+    async def list_all(self) -> Sequence[FakeSettingRow]:
+        return [FakeSettingRow(v, t, k) for k, (v, t) in sorted(self._data.items())]
 
 
 DEFAULT_RATE_SETTINGS: dict[str, tuple[str, str]] = {
@@ -821,3 +850,79 @@ class FakeFileDownloader:
 
     async def health_check(self) -> ProviderHealth:
         return ProviderHealth.OK
+
+
+# --- Sprint 8 admin/broadcast fakes ---------------------------------------
+@dataclass
+class FakeBroadcastRow:
+    id: int
+    created_by: int
+    message_text: str
+    target_language: str | None = None
+    target_role: str | None = None
+    expected_total: int = 0
+    total_sent: int = 0
+    total_failed: int = 0
+    status: str = "pending"
+    completed_at: datetime.datetime | None = None
+
+
+class FakeBroadcastRepo:
+    """In-memory ``BroadcastRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.rows: list[FakeBroadcastRow] = []
+        self._next_id = 1
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeBroadcastRow | None:
+        return next((b for b in self.rows if b.id == id_), None)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return self.rows[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        return None
+
+    async def create_pending(
+        self,
+        *,
+        created_by: int,
+        message_text: str,
+        target_language: str | None,
+        target_role: str | None,
+        expected_total: int,
+    ) -> FakeBroadcastRow:
+        row = FakeBroadcastRow(
+            id=self._next_id,
+            created_by=created_by,
+            message_text=message_text,
+            target_language=target_language,
+            target_role=target_role,
+            expected_total=expected_total,
+            status="pending",
+        )
+        self._next_id += 1
+        self.rows.append(row)
+        return row
+
+    async def get_next_pending(self) -> FakeBroadcastRow | None:
+        pending = sorted((b for b in self.rows if b.status == "pending"), key=lambda b: b.id)
+        return pending[0] if pending else None
+
+    async def set_status(
+        self, broadcast_id: int, status: str, *, completed_at: datetime.datetime | None = None
+    ) -> None:
+        row = await self.get_by_id(broadcast_id)
+        if row is not None:
+            row.status = status
+            if completed_at is not None:
+                row.completed_at = completed_at
+
+    async def add_counts(self, broadcast_id: int, *, sent: int, failed: int) -> None:
+        row = await self.get_by_id(broadcast_id)
+        if row is not None:
+            row.total_sent += sent
+            row.total_failed += failed

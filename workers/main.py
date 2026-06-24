@@ -20,6 +20,7 @@ from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry
 from infrastructure.database.engine import create_engine
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
 from infrastructure.database.repositories.download import DownloadRepository
 from infrastructure.database.repositories.job import JobRepository
@@ -44,12 +45,14 @@ from services.notification_service import NotificationService
 from services.queue_service import QueueService
 from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
+from workers.broadcast_worker import BroadcastWorker
 from workers.cleanup_worker import CleanupWorker
 from workers.download_worker import DownloadWorker
 
 _log = get_logger("workers.main")
 
 _DEFAULT_HEALTH_INTERVAL = 120
+_DEFAULT_BROADCAST_CHUNK_SIZE = 25
 
 
 def build_registry(
@@ -79,6 +82,14 @@ async def _read_health_interval(
     async with session_factory() as session:
         row = await SettingsRepository(session).get_by_key("provider_health_check_interval_seconds")
     return int(row.value) if row is not None else _DEFAULT_HEALTH_INTERVAL
+
+
+async def _read_broadcast_chunk_size(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> int:
+    async with session_factory() as session:
+        row = await SettingsRepository(session).get_by_key("broadcast_chunk_size")
+    return int(row.value) if row is not None else _DEFAULT_BROADCAST_CHUNK_SIZE
 
 
 def make_download_service_factory(
@@ -135,7 +146,8 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
 
     bot = build_bot(settings)
     file_sender = TelegramFileSender(bot)
-    notification_service = NotificationService(TelegramMessageSender(bot))
+    message_sender = TelegramMessageSender(bot)
+    notification_service = NotificationService(message_sender)
     transcoder = FFmpegClient(settings.ffmpeg_path)
 
     build_download_service = make_download_service_factory(
@@ -149,9 +161,21 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     )
 
     interval = await _read_health_interval(session_factory)
+    chunk_size = await _read_broadcast_chunk_size(session_factory)
     cleanup = CleanupWorker(Path(settings.download_temp_dir))
+    broadcast_worker = BroadcastWorker(
+        session_factory=session_factory,
+        build_broadcast_repo=BroadcastRepository,
+        build_user_repo=UserRepository,
+        sender=message_sender,
+        chunk_size=chunk_size,
+    )
 
-    tasks = [provider_health_check_task(registry, interval), cleanup.run_forever()]
+    tasks = [
+        provider_health_check_task(registry, interval),
+        cleanup.run_forever(),
+        broadcast_worker.run_forever(),
+    ]
     for _ in range(settings.worker_count):
         worker = DownloadWorker(
             queue_service=queue_service,
@@ -161,7 +185,12 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         )
         tasks.append(worker.run_forever())
 
-    _log.info("worker_starting", workers=settings.worker_count, health_interval_seconds=interval)
+    _log.info(
+        "worker_starting",
+        workers=settings.worker_count,
+        health_interval_seconds=interval,
+        broadcast_chunk_size=chunk_size,
+    )
     try:
         await asyncio.gather(*tasks)
     finally:

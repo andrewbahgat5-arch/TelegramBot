@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, func, select, update
+from sqlalchemy.sql.elements import ColumnElement
 
 from infrastructure.database.models import User
 from infrastructure.database.repositories.base import SqlAlchemyRepository
@@ -85,3 +87,46 @@ class UserRepository(SqlAlchemyRepository[User]):
             )
         )
         await self.session.flush()
+
+    async def count_all(self) -> int:
+        result = await self.session.execute(select(func.count()).select_from(User))
+        return int(result.scalar_one())
+
+    async def count_banned(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.is_banned.is_(True))
+        )
+        return int(result.scalar_one())
+
+    async def sum_total_downloads(self) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.sum(User.total_downloads), 0))
+        )
+        return int(result.scalar_one())
+
+    @staticmethod
+    def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:
+        """Broadcast audience = non-banned users matching the optional role/language."""
+        filters: list[ColumnElement[bool]] = [User.is_banned.is_(False)]
+        if role is not None:
+            filters.append(User.role == role)
+        if language is not None:
+            filters.append(User.language == language)
+        return filters
+
+    async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(*self._audience_filters(role, language))
+        )
+        return int(result.scalar_one())
+
+    async def page_for_broadcast(
+        self, *, after_id: int, limit: int, role: str | None, language: str | None
+    ) -> Sequence[User]:
+        result = await self.session.execute(
+            select(User)
+            .where(User.id > after_id, *self._audience_filters(role, language))
+            .order_by(User.id.asc())
+            .limit(limit)
+        )
+        return result.scalars().all()

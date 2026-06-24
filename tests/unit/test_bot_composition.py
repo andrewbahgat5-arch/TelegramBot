@@ -14,13 +14,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
+from services.broadcast_service import BroadcastService
 from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
+from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
+from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
-from tests.unit._fakes import FakeMessageSender, load_settings
+from tests.unit._fakes import FakeMessageSender, FakeQueueBackend, load_settings
 
 
 def _user_factory(session: AsyncSession) -> UserService:
@@ -43,6 +46,14 @@ def _history_factory(session: AsyncSession) -> HistoryService:
     return cast(HistoryService, None)
 
 
+def _settings_factory(session: AsyncSession) -> SettingsService:
+    return cast(SettingsService, None)
+
+
+def _broadcast_factory(session: AsyncSession) -> BroadcastService:
+    return cast(BroadcastService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
@@ -51,10 +62,13 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         analyzer_factory=_analyzer_factory,
         job_service_factory=_job_factory,
         history_service_factory=_history_factory,
+        settings_service_factory=_settings_factory,
+        broadcast_service_factory=_broadcast_factory,
+        queue_service=QueueService(FakeQueueBackend()),
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
     )
     assert isinstance(dp, Dispatcher)
-    # start + help + download + history routers are all included.
-    assert len(dp.sub_routers) == 4
+    # start + help + admin + download + history routers are all included.
+    assert len(dp.sub_routers) == 5

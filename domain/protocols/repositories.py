@@ -50,6 +50,28 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Atomic, lazy-reset counter bump for one completed download (16.6, D-012)."""
         ...
 
+    async def count_all(self) -> int:
+        """Total registered users (admin /stats)."""
+        ...
+
+    async def count_banned(self) -> int:
+        """Currently-banned users (admin /stats)."""
+        ...
+
+    async def sum_total_downloads(self) -> int:
+        """Lifetime delivered-download count across all users (admin /stats)."""
+        ...
+
+    async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
+        """Count the non-banned audience matching the broadcast filters (16.8)."""
+        ...
+
+    async def page_for_broadcast(
+        self, *, after_id: int, limit: int, role: str | None, language: str | None
+    ) -> Sequence[T]:
+        """One id-cursor page of the non-banned broadcast audience, ascending (16.8)."""
+        ...
+
 
 class MediaRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_platform_video(self, platform: str, video_id: str) -> T | None: ...
@@ -154,6 +176,9 @@ class SettingsStoreProtocol(Protocol):
 
     async def get_by_key(self, key: str) -> Any: ...
     async def upsert(self, key: str, value: str, *, updated_by: int | None = None) -> Any: ...
+    async def list_all(self) -> Sequence[Any]:
+        """Every settings row (admin ``/settings`` listing). Rows expose ``key``/``value``."""
+        ...
 
 
 class SettingsRepositoryProtocol(Repository[T], Protocol[T]):
@@ -184,7 +209,32 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
         ...
 
 
-class BroadcastRepositoryProtocol(Repository[T], Protocol[T]): ...
+class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
+    async def create_pending(
+        self,
+        *,
+        created_by: int,
+        message_text: str,
+        target_language: str | None,
+        target_role: str | None,
+        expected_total: int,
+    ) -> T:
+        """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8)."""
+        ...
+
+    async def get_next_pending(self) -> T | None:
+        """Oldest ``pending`` broadcast for the worker to process (16.8)."""
+        ...
+
+    async def set_status(
+        self, broadcast_id: int, status: str, *, completed_at: datetime.datetime | None = None
+    ) -> None:
+        """Advance a broadcast's lifecycle (pending → in_progress → completed)."""
+        ...
+
+    async def add_counts(self, broadcast_id: int, *, sent: int, failed: int) -> None:
+        """Increment ``total_sent`` / ``total_failed`` after a delivered chunk (16.8)."""
+        ...
 
 
 class AdRepositoryProtocol(Repository[T], Protocol[T]): ...

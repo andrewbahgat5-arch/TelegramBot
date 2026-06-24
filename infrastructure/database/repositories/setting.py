@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 
 from sqlalchemy import select
 
@@ -17,6 +18,11 @@ class SettingsRepository(SqlAlchemyRepository[Setting]):
     async def get_by_key(self, key: str) -> Setting | None:
         result = await self.session.execute(select(Setting).where(Setting.key == key))
         return result.scalar_one_or_none()
+
+    async def list_all(self) -> Sequence[Setting]:
+        """Every settings row, ordered by key (admin ``/settings`` listing)."""
+        result = await self.session.execute(select(Setting).order_by(Setting.key.asc()))
+        return result.scalars().all()
 
     async def upsert(self, key: str, value: str, *, updated_by: int | None = None) -> Setting:
         """Update a setting's value, or create it (default ``string`` type) if absent.

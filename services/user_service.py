@@ -13,6 +13,7 @@ layer extracts identity primitives from the Telegram update and passes them in.
 from __future__ import annotations
 
 import datetime
+from dataclasses import dataclass
 from typing import Any
 
 from core.constants import LAST_ACTIVITY_DEBOUNCE_SECONDS
@@ -23,6 +24,15 @@ from domain.protocols.repositories import UserRepositoryProtocol
 from services.cache_service import CacheService
 
 _log = get_logger("services.user_service")
+
+
+@dataclass(frozen=True, slots=True)
+class UserStats:
+    """Aggregate user counts for the admin ``/stats`` command (Task 8.2)."""
+
+    total_users: int
+    banned_users: int
+    total_downloads: int
 
 
 class UserService:
@@ -80,6 +90,19 @@ class UserService:
             return
         await self._repo.touch_last_activity(snapshot.telegram_id, now)
         await self._cache.delete_user(snapshot.telegram_id)
+
+    async def find(self, telegram_id: int) -> UserSnapshot | None:
+        """Look up a user without creating one (admin ``/userinfo``). Bypasses the cache."""
+        row = await self._repo.get_by_telegram_id(telegram_id)
+        return None if row is None else UserSnapshot.from_row(row)
+
+    async def get_stats(self) -> UserStats:
+        """Aggregate counts for admin ``/stats`` (total / banned users, lifetime downloads)."""
+        return UserStats(
+            total_users=await self._repo.count_all(),
+            banned_users=await self._repo.count_banned(),
+            total_downloads=await self._repo.sum_total_downloads(),
+        )
 
     async def set_role(self, telegram_id: int, role: UserRole) -> UserSnapshot | None:
         """Assign ``role`` to a user. Returns the updated snapshot, or None if absent."""

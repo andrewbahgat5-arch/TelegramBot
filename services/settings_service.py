@@ -6,6 +6,8 @@ stored ``value_type`` (Section 10.11) and write-through invalidation (Section 11
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import orjson
@@ -18,6 +20,19 @@ from domain.protocols.repositories import SettingsStoreProtocol
 
 class SettingNotFoundError(AppError):
     """Raised when a requested settings key does not exist."""
+
+
+class InvalidSettingValueError(AppError):
+    """Raised when a new settings value does not parse as the key's ``value_type``."""
+
+
+@dataclass(frozen=True, slots=True)
+class SettingView:
+    """A settings row for admin display (``/settings`` listing)."""
+
+    key: str
+    value: str
+    value_type: str
 
 
 class SettingsService:
@@ -55,8 +70,29 @@ class SettingsService:
         await self._store.upsert(key, value, updated_by=updated_by)
         await self._cache.delete(RedisKeys.setting(key))
 
+    async def list_all(self) -> list[SettingView]:
+        """Every settings key for the admin ``/settings`` listing."""
+        rows: Sequence[Any] = await self._store.list_all()
+        return [SettingView(r.key, r.value, r.value_type) for r in rows]
+
+    async def set_validated(self, key: str, value: str, *, updated_by: int | None = None) -> Any:
+        """Validate ``value`` against the **existing** key's ``value_type``, then persist.
+
+        Rejects unknown keys — the settings set is LOCKED (§13.4), so ``/setting_set``
+        may only update keys that already exist, never invent one. Rejects a value that
+        does not parse as the key's declared type. Returns the typed value on success.
+        """
+        row = await self._store.get_by_key(key)
+        if row is None:
+            raise SettingNotFoundError(f"unknown setting: {key}")
+        typed = _validate(value, row.value_type)
+        await self._store.upsert(key, value, updated_by=updated_by)
+        await self._cache.delete(RedisKeys.setting(key))
+        return typed
+
 
 _TRUE = frozenset({"true", "1", "yes", "on"})
+_BOOL_TOKENS = _TRUE | frozenset({"false", "0", "no", "off"})
 
 
 def _cast(value: str, value_type: str) -> Any:
@@ -69,3 +105,19 @@ def _cast(value: str, value_type: str) -> Any:
     if value_type == "json":
         return orjson.loads(value)
     return value
+
+
+def _validate(value: str, value_type: str) -> Any:
+    """Like ``_cast`` but raises :class:`InvalidSettingValueError` on bad input.
+
+    ``_cast`` trusts the stored value (already validated on write); this guards the
+    write path, where ``/setting_set`` input is untrusted (Task 8.2 validation item).
+    """
+    try:
+        if value_type == "bool":
+            if value.strip().lower() not in _BOOL_TOKENS:
+                raise ValueError(f"not a boolean: {value!r}")
+            return value.strip().lower() in _TRUE
+        return _cast(value, value_type)
+    except (ValueError, orjson.JSONDecodeError) as exc:
+        raise InvalidSettingValueError(f"{value!r} is not a valid {value_type}") from exc

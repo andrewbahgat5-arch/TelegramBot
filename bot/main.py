@@ -23,6 +23,7 @@ from aiogram import Bot, Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
+from bot.handlers import admin as admin_handler
 from bot.handlers import download as download_handler
 from bot.handlers import help as help_handler
 from bot.handlers import history as history_handler
@@ -36,6 +37,7 @@ from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry
 from infrastructure.database.engine import create_engine
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
 from infrastructure.database.repositories.download import DownloadRepository
 from infrastructure.database.repositories.job import JobRepository
@@ -53,6 +55,7 @@ from infrastructure.redis.locks import RedisLock
 from infrastructure.redis.queue import RedisQueue
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
+from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
 from services.history_service import HistoryService
 from services.job_service import JobService
@@ -74,16 +77,23 @@ def build_dispatcher(
     analyzer_factory: Callable[[AsyncSession], URLAnalyzerService],
     job_service_factory: Callable[[AsyncSession], JobService],
     history_service_factory: Callable[[AsyncSession], HistoryService],
+    settings_service_factory: Callable[[AsyncSession], SettingsService],
+    broadcast_service_factory: Callable[[AsyncSession], BroadcastService],
+    queue_service: QueueService,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> Dispatcher:
     """Build the dispatcher and install the Section 9.1 middleware stack."""
     dp = Dispatcher()
-    # Workflow data injected into handlers by parameter name (download/history handlers).
+    # Workflow data injected into handlers by parameter name (download/history/admin).
     dp["analyzer_factory"] = analyzer_factory
     dp["job_service_factory"] = job_service_factory
     dp["history_service_factory"] = history_service_factory
+    dp["user_service_factory"] = user_service_factory
+    dp["settings_service_factory"] = settings_service_factory
+    dp["broadcast_service_factory"] = broadcast_service_factory
+    dp["queue_service"] = queue_service
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
 
@@ -98,6 +108,7 @@ def build_dispatcher(
 
     dp.include_router(start_handler.router)
     dp.include_router(help_handler.router)
+    dp.include_router(admin_handler.router)
     dp.include_router(download_handler.router)
     dp.include_router(history_handler.router)
     return dp
@@ -172,6 +183,17 @@ async def main() -> None:
             cache_service=cache_service,
         )
 
+    def make_settings_service(session: AsyncSession) -> SettingsService:
+        return SettingsService(
+            SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
+        )
+
+    def make_broadcast_service(session: AsyncSession) -> BroadcastService:
+        return BroadcastService(
+            broadcast_repo=BroadcastRepository(session),
+            user_repo=UserRepository(session),
+        )
+
     dp = build_dispatcher(
         settings,
         user_service_factory=make_user_service,
@@ -179,6 +201,9 @@ async def main() -> None:
         analyzer_factory=make_url_analyzer,
         job_service_factory=make_job_service,
         history_service_factory=make_history_service,
+        settings_service_factory=make_settings_service,
+        broadcast_service_factory=make_broadcast_service,
+        queue_service=queue_service,
         notification_service=notification_service,
         callback_signer=callback_signer,
         session_factory=session_factory,

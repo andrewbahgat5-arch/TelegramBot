@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-24 | PASS (242) | + Sprint-7 fan-out idempotency / per-waiter progress / HistoryService / history handlers + keyboard | Sprint 1–7 |
-| Integration | 2026-06-24 | PASS (48) | + `downloads.get_for_user` owner-scoping & newest-first pagination (live DB) | Sprint 2–7 |
+| Unit | 2026-06-24 | PASS (276) | + Sprint-8 BroadcastService/Worker, admin handlers, settings write-path validation | Sprint 1–8 |
+| Integration | 2026-06-24 | PASS (52) | + user aggregate counts, broadcast audience filter/cursor, broadcast lifecycle (live DB) | Sprint 2–8 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,33 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-24 — Unit + Integration — Sprint 8 exit (Admin and Ops, 8.1–8.2)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `7b18b7f`) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 8 |
+| Triggered by | Sprint 8 exit (in-bot admin surface; tasks 8.1–8.2, 8.3 deferred) |
+| Total tests | 328 (276 unit + 52 integration) |
+| Passed | 328 |
+| Failed | 0 |
+| Skipped | 0 (with infra up; integration auto-skips when pg/redis absent) |
+| XFail / XPass | 0 / 0 |
+| Duration | unit ~5 s; full (unit + integration) ~16 s |
+| Coverage by path | services.broadcast_service (audience snapshot, filters, empty/role validation); workers.broadcast_worker (chunked fan-out, failure isolation, role filter, FIFO pickup, idle no-op); bot.handlers.admin (stats/userinfo/ban/unban/settings/setting_set/broadcast incl. usage + not-found + validation + owner-gating + denied catch-all); services.settings_service.set_validated (int/bool/json/float accept + reject + unknown-key); repositories.user aggregate counts + broadcast audience filter/cursor + repositories.broadcast lifecycle via live-DB `test_admin_repositories`. |
+| Notes | New unit suites: `test_broadcast_service`, `test_broadcast_worker`, `test_admin_handler`, `test_settings_validation`. New integration suite `test_admin_repositories` (4 tests; audience tests isolate via a unique per-test `language` marker since the shared DB holds the Owner's real users). Updated `test_bot_composition` (5 routers), `_fakes` (broadcast repo, user audience/stats methods, settings `list_all`). **No schema/dependency/migration changes** (`broadcast_chunk_size` uses the existing seeded settings key). Task 8.3 (`/v1/admin/*`) deferred by Owner decision → the "admin API requires API key / 401" checklist item is not yet covered. Gates: ruff, ruff-format, mypy --strict (178 files), import-linter (7 contracts kept), bandit (0 findings), pip-audit (no new deps). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None. (During development two `test_admin_repositories` audience tests failed against the shared live DB — pre-existing real users matched a generic `language="en"` filter, and an 11-char marker overflowed `language VARCHAR(10)`; fixed by isolating with a unique ≤9-char per-test marker.)
+
+**Skips (if non-trivial)**
+- None when infra is up. The integration suite auto-skips without Postgres/Redis.
+
+---
 
 ### 2026-06-24 — Unit + Integration — Sprint 7 exit (Fan-Out and Resend)
 
