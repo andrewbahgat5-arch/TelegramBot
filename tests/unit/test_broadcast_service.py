@@ -30,7 +30,8 @@ async def test_create_snapshots_audience_and_queues_pending() -> None:
 
     assert broadcast.status == "pending"
     assert broadcast.message_text == "hello all"  # trimmed
-    assert broadcast.expected_total == 3  # 4 users minus the banned one
+    # 4 users minus the banned one minus the moderator (untargeted excludes staff, #14).
+    assert broadcast.expected_total == 2
     assert broadcasts.rows == [broadcast]
 
 
@@ -39,10 +40,10 @@ async def test_create_applies_role_and_language_filters() -> None:
     _seed_users(users)
 
     by_lang = await service.create(created_by_user_id=3, message_text="hi", target_language="en")
-    assert by_lang.expected_total == 2  # tg 101 + 103 (104 is banned, 102 is es)
+    assert by_lang.expected_total == 1  # tg 101 only (103 is staff/moderator, 104 banned, 102 es)
 
     by_role = await service.create(created_by_user_id=3, message_text="hi", target_role="moderator")
-    assert by_role.expected_total == 1  # only the moderator
+    assert by_role.expected_total == 1  # explicit role targets the moderator
 
 
 async def test_create_rejects_empty_text() -> None:

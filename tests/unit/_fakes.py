@@ -187,6 +187,8 @@ class FakeUserRepo:
         users = [u for u in self.by_tid.values() if not u.is_banned]
         if role is not None:
             users = [u for u in users if u.role == role]
+        else:  # untargeted broadcast excludes Owner/Moderator (item #14)
+            users = [u for u in users if u.role not in ("owner", "moderator")]
         if language is not None:
             users = [u for u in users if u.language == language]
         return sorted(users, key=lambda u: u.id)
@@ -427,6 +429,12 @@ class FakeJobRepo:
 
     async def get_by_uuid(self, job_id: uuid.UUID) -> FakeJobRow | None:
         return self.jobs.get(job_id)
+
+    async def count_active_for_user(self, user_id: int) -> int:
+        terminal = {"completed", "permanently_failed", "cancelled"}
+        return sum(
+            1 for j in self.jobs.values() if j.user_id == user_id and j.status not in terminal
+        )
 
     async def create(
         self,

@@ -289,6 +289,8 @@ class DownloadService:
                 file_size=file_size,
             )
             await self._users.increment_download_counters(waiter.user_id)
+            # Invalidate the user snapshot so the next rate-limit read sees the new count.
+            await self._cache.delete_user(user.telegram_id)
             if waiter.user_id in delivered:
                 continue  # already received it (via the upload, or a prior attempt)
             try:

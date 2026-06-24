@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-24 | PASS (276) | + Sprint-8 BroadcastService/Worker, admin handlers, settings write-path validation | Sprint 1–8 |
-| Integration | 2026-06-24 | PASS (52) | + user aggregate counts, broadcast audience filter/cursor, broadcast lifecycle (live DB) | Sprint 2–8 |
+| Unit | 2026-06-24 | PASS (282) | + Owner-feedback fixes #14–#20 (rate-limit enforcement, free single-active cap, broadcast excludes staff, silent-ignore admin, /users) | Sprint 1–8 |
+| Integration | 2026-06-24 | PENDING (52) | Audience SQL #14 updated; re-run needed with Docker up (infra was down at fix time) | Sprint 2–8 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,58 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-24 — Unit — Owner verification feedback fixes (#14–#20)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `73da095`) |
+| Environment | local |
+| Suite | unit (integration pending — Docker/infra was down) |
+| Sprint | 8 (post-verification feedback) |
+| Triggered by | Owner manual-verification feedback items #14–#20 |
+| Total tests | 282 unit passed; 52 integration **skipped** (Postgres/Redis unavailable) |
+| Passed | 282 |
+| Failed | 0 |
+| Skipped | 52 (integration auto-skips without infra) |
+| Coverage by path | services.job_service single-active cap (BUSY) + cache invalidation on cache-hit counter bump; services.download_service cache invalidation per waiter; bot.handlers.download rate-limit enforcement (authorize_download) + over-limit rejection + single_active wiring; services.rate_limit_service.authorize_download (fresh-row load); bot.handlers.admin /users + silent-ignore (denied catch-all removed); broadcast audience excludes staff (UserRepository._audience_filters). |
+| Notes | Addresses: **#14** broadcast excludes Owner/Moderator by default (untargeted → role `user` only; explicit `--role` unchanged); **#15** download daily-limit/cooldown now enforced in `handle_quality_choice` via `RateLimitService.authorize_download` reading the **authoritative DB row** (the cached snapshot's count was stale) + user-cache invalidation on every counter bump; **#16** free-user single-active-job cap in `JobService.request` (`single_active` → `RequestKind.BUSY`; cache hits unaffected); **#18** unauthorized admin commands are silently ignored (removed the "not permitted" catch-all); **#19** new owner-only `/users` listing; **#20** quality-pick idempotency — same `(media,format,quality)` dedups to DUPLICATE (existing lock/active_downloads), different-media spam blocked by #16. **#17** (history instant file_id resend) already satisfied by `HistoryService.resend` — no change. **Integration suite not run** (Docker Desktop off): the audience SQL change is straightforward and mirrored by the fake; `tests/integration/test_admin_repositories.py` expectation updated (untargeted count excludes staff) and must be re-run with infra up. Gates: ruff, ruff-format, mypy --strict (178 files), import-linter (7 contracts), bandit (0). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None (unit). Integration not executed this round (infra unavailable).
+
+**Skips (if non-trivial)**
+- All 52 integration tests skipped — Postgres/Redis not reachable. Re-run with `docker compose up` to validate the #14 audience SQL.
+
+---
+
+### 2026-06-24 — Unit + Integration — Sprint 7 carry-over fix (`history_page_size`)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows Sprint 8 working tree) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 8 (Sprint 7 carry-over) |
+| Triggered by | Carry-over fix: `HistoryService` now reads `history_page_size` from `SettingsService` instead of the hardcoded `HISTORY_PAGE_SIZE = 5` |
+| Total tests | 330 (278 unit + 52 integration) |
+| Passed | 330 |
+| Failed | 0 |
+| Skipped | 0 (with infra up; integration auto-skips when pg/redis absent) |
+| XFail / XPass | 0 / 0 |
+| Duration | unit ~6 s; full (unit + integration) ~19 s |
+| Coverage by path | services.history_service: page size now read via `SettingsService.get("history_page_size")` (read-through cached, mirrors `RateLimitService`), default-10 fallback on `SettingNotFoundError`, over-read-by-one next-page detection unchanged. New unit tests: `test_list_history_honours_configured_page_size`, `test_list_history_falls_back_to_default_when_unseeded`; `test_list_history_paginates_newest_first` reworked off the removed module constant. |
+| Notes | `make_history_service` (bot/main.py) now injects `make_settings_service(session)`. Test harness `_build` seeds a `FakeSettingsStore` + `FakeCache`-backed `SettingsService` (`page_size=None` leaves the key unseeded to exercise the default). **No §13.4 key, schema, or migration change.** Gates: ruff, ruff-format, mypy --strict (178 files), import-linter (7 contracts kept), bandit (0 findings). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None. (`tests/integration/test_redis_queue.py::test_concurrent_dequeue_no_duplicates` flaked once during the full run — a known concurrency-timing flake against live Redis, unrelated to this change — and passed on isolated re-run and the subsequent full run.)
+
+**Skips (if non-trivial)**
+- None when infra is up. The integration suite auto-skips without Postgres/Redis.
+
+---
 
 ### 2026-06-24 — Unit + Integration — Sprint 8 exit (Admin and Ops, 8.1–8.2)
 

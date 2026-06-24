@@ -90,6 +90,7 @@ def build_dispatcher(
     dp["analyzer_factory"] = analyzer_factory
     dp["job_service_factory"] = job_service_factory
     dp["history_service_factory"] = history_service_factory
+    dp["rate_limit_service_factory"] = rate_limit_service_factory
     dp["user_service_factory"] = user_service_factory
     dp["settings_service_factory"] = settings_service_factory
     dp["broadcast_service_factory"] = broadcast_service_factory
@@ -181,6 +182,7 @@ async def main() -> None:
             analyzer=make_url_analyzer(session),
             file_sender=file_sender,
             cache_service=cache_service,
+            settings_service=make_settings_service(session),
         )
 
     def make_settings_service(session: AsyncSession) -> SettingsService:

@@ -57,6 +57,19 @@ class RateLimitService:
         if count > limit:
             raise RateLimitExceededError("Too many requests. Please slow down.")
 
+    async def authorize_download(self, telegram_id: int) -> None:
+        """Load the **authoritative** user row and authorize a download (Section 16.5).
+
+        The bot handler holds only a cached ``UserSnapshot`` whose
+        ``daily_download_count`` can be stale (CACHE_USER_TTL); enforcement must read
+        the live row, so this loads it by ``telegram_id`` and delegates to
+        :meth:`check_download`. A missing row is treated as "nothing to authorize".
+        """
+        user = await self._repo.get_by_telegram_id(telegram_id)
+        if user is None:  # pragma: no cover - AuthMiddleware always resolves the row first
+            return
+        await self.check_download(user)
+
     async def check_download(self, user: Any) -> None:
         """Authorize a download request for ``user`` (Section 16.5).
 

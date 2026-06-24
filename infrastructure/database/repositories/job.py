@@ -9,10 +9,14 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
+from domain.enums import JobStatus
 from infrastructure.database.models import Job
 from infrastructure.database.repositories.base import SqlAlchemyRepository
+
+# Non-terminal states: a job in any of these is still "in flight" for its owner.
+_ACTIVE_STATUSES = tuple(s.value for s in JobStatus if not s.is_terminal)
 
 
 class JobRepository(SqlAlchemyRepository[Job]):
@@ -21,6 +25,15 @@ class JobRepository(SqlAlchemyRepository[Job]):
     async def get_by_uuid(self, job_id: uuid.UUID) -> Job | None:
         result = await self.session.execute(select(Job).where(Job.id == job_id))
         return result.scalar_one_or_none()
+
+    async def count_active_for_user(self, user_id: int) -> int:
+        """How many non-terminal (in-flight) jobs this user currently owns (16-free-cap)."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Job)
+            .where(Job.user_id == user_id, Job.status.in_(_ACTIVE_STATUSES))
+        )
+        return int(result.scalar_one())
 
     async def create(
         self,

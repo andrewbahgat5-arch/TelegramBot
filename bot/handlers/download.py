@@ -13,6 +13,7 @@ aiogram workflow data (``analyzer_factory``, ``job_service_factory``,
 
 from __future__ import annotations
 
+import datetime
 import uuid
 from collections.abc import Callable
 from html import escape
@@ -27,9 +28,10 @@ from bot.keyboards.quality_select import build_quality_keyboard
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
-from domain.exceptions import ExtractionFailedError, URLNotSupportedError
+from domain.exceptions import ExtractionFailedError, URLNotSupportedError, UserFacingError
 from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
+from services.rate_limit_service import RateLimitService
 from services.url_analyzer import URLAnalyzerService
 
 router = Router(name="download")
@@ -37,8 +39,19 @@ _log = get_logger("bot.handlers.download")
 
 AnalyzerFactory = Callable[[AsyncSession], URLAnalyzerService]
 JobServiceFactory = Callable[[AsyncSession], JobService]
+RateLimitServiceFactory = Callable[[AsyncSession], RateLimitService]
 
 _DUPLICATE_TEXT = "⏳ This is already being prepared — you'll get it shortly."
+_BUSY_TEXT = "⏳ You already have a download in progress. Please wait for it to finish."
+
+
+def _is_free(user: UserSnapshot) -> bool:
+    """A user is on the free plan unless an unexpired premium grant is active (16.5)."""
+    expires = user.premium_expires_at
+    active_premium = (
+        user.is_premium and expires is not None and expires > datetime.datetime.now(datetime.UTC)
+    )
+    return not active_premium
 
 
 @router.message(F.text.regexp(r"https?://"))
@@ -153,6 +166,7 @@ async def handle_quality_choice(
     user: UserSnapshot,
     analyzer_factory: AnalyzerFactory,
     job_service_factory: JobServiceFactory,
+    rate_limit_service_factory: RateLimitServiceFactory,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
 ) -> None:
@@ -164,6 +178,14 @@ async def handle_quality_choice(
     analyzed = await analyzer_factory(session).analyze_by_media_id(parsed.media_id)
     if analyzed is None:
         await callback.answer("This link expired — please send it again.", show_alert=True)
+        return
+
+    # Enforce the per-user daily limit + cooldown against the authoritative DB row
+    # (the cached snapshot's daily count can be stale) before doing any work (16.5).
+    try:
+        await rate_limit_service_factory(session).authorize_download(user.telegram_id)
+    except UserFacingError as exc:
+        await callback.answer(str(exc), show_alert=True)
         return
 
     await callback.answer()
@@ -178,11 +200,14 @@ async def handle_quality_choice(
         quality=parsed.quality,
         progress_message_id=progress_message_id,
         correlation_id=uuid.UUID(correlation) if correlation else None,
+        single_active=_is_free(user),
     )
     if outcome.kind is RequestKind.DUPLICATE:
         await notification_service.notify_text(
             user.telegram_id, progress_message_id, _DUPLICATE_TEXT
         )
+    elif outcome.kind is RequestKind.BUSY:
+        await notification_service.notify_text(user.telegram_id, progress_message_id, _BUSY_TEXT)
 
 
 async def _edit_chooser(message: object, text: str, keyboard: object) -> None:

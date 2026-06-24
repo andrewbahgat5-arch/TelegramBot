@@ -6,13 +6,15 @@ from typing import Any
 
 from domain.entities.media import MediaInfo
 from domain.exceptions import CachedFileExpiredError
-from services.history_service import HISTORY_PAGE_SIZE, HistoryService, ResendKind
+from services.history_service import HistoryService, ResendKind
 from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
+from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from tests.unit._fakes import (
     FakeActiveDownloadRepo,
+    FakeCache,
     FakeCachedFileRepo,
     FakeDownloadRepo,
     FakeFileSender,
@@ -22,6 +24,7 @@ from tests.unit._fakes import (
     FakeMessageSender,
     FakeProvider,
     FakeQueueBackend,
+    FakeSettingsStore,
     FakeUserRepo,
     load_settings,
     make_cache_service,
@@ -29,8 +32,13 @@ from tests.unit._fakes import (
 
 _INFO = MediaInfo(platform="youtube", video_id="vid", title="Clip", source_url="https://x/clip")
 
+# Page size the harness seeds into settings; kept small so a couple of rows span two pages.
+_PAGE_SIZE = 5
 
-def _build(*, sender: FakeFileSender | None = None) -> dict[str, Any]:
+
+def _build(
+    *, sender: FakeFileSender | None = None, page_size: int | None = _PAGE_SIZE
+) -> dict[str, Any]:
     cache_service, _ = make_cache_service()
     media_repo = FakeMediaRepo()
     cached = FakeCachedFileRepo()
@@ -38,6 +46,9 @@ def _build(*, sender: FakeFileSender | None = None) -> dict[str, Any]:
     backend = FakeQueueBackend()
     sender = sender or FakeFileSender()
     analyzer = URLAnalyzerService(FakeProvider("p", result=_INFO), cache_service, media_repo)
+    # ``page_size=None`` leaves the key unseeded so the service falls back to its default.
+    data = {"history_page_size": (str(page_size), "int")} if page_size is not None else {}
+    settings_service = SettingsService(FakeSettingsStore(data), FakeCache())
     job_service = JobService(
         job_repo=FakeJobRepo(),
         cached_file_repo=cached,
@@ -58,6 +69,7 @@ def _build(*, sender: FakeFileSender | None = None) -> dict[str, Any]:
         analyzer=analyzer,
         file_sender=sender,
         cache_service=cache_service,
+        settings_service=settings_service,
     )
     return {
         "service": service,
@@ -67,6 +79,7 @@ def _build(*, sender: FakeFileSender | None = None) -> dict[str, Any]:
         "backend": backend,
         "sender": sender,
         "cache_service": cache_service,
+        "settings": settings_service,
     }
 
 
@@ -101,11 +114,10 @@ async def _seed_cached_download(
     return int(row.id)
 
 
-async def test_list_history_paginates_newest_first() -> None:
-    env = _build()
-    for _ in range(HISTORY_PAGE_SIZE + 2):  # 7 rows
+async def _seed_history_rows(env: dict[str, Any], count: int, *, user_id: int = 7) -> None:
+    for _ in range(count):
         await env["downloads"].create_completed(
-            user_id=7,
+            user_id=user_id,
             cached_file_id=None,
             platform="youtube",
             format_="video",
@@ -113,8 +125,13 @@ async def test_list_history_paginates_newest_first() -> None:
             file_size=1,
         )
 
+
+async def test_list_history_paginates_newest_first() -> None:
+    env = _build()
+    await _seed_history_rows(env, _PAGE_SIZE + 2)  # 7 rows
+
     first = await env["service"].list_history(7, page=0)
-    assert len(first.rows) == HISTORY_PAGE_SIZE
+    assert len(first.rows) == _PAGE_SIZE
     assert first.has_next is True and first.has_prev is False
     # Newest first: the highest id comes first.
     assert first.rows[0].id > first.rows[-1].id
@@ -122,6 +139,26 @@ async def test_list_history_paginates_newest_first() -> None:
     second = await env["service"].list_history(7, page=1)
     assert len(second.rows) == 2
     assert second.has_next is False and second.has_prev is True
+
+
+async def test_list_history_honours_configured_page_size() -> None:
+    # Operator tuned the §13.4 ``history_page_size`` key down to 2.
+    env = _build(page_size=2)
+    await _seed_history_rows(env, 3)
+
+    first = await env["service"].list_history(7, page=0)
+    assert len(first.rows) == 2
+    assert first.has_next is True
+
+
+async def test_list_history_falls_back_to_default_when_unseeded() -> None:
+    # Key missing → SettingNotFoundError → default of 10, so 9 rows fit on one page.
+    env = _build(page_size=None)
+    await _seed_history_rows(env, 9)
+
+    first = await env["service"].list_history(7, page=0)
+    assert len(first.rows) == 9
+    assert first.has_next is False
 
 
 async def test_resend_from_cache_delivers_without_new_history_row() -> None:

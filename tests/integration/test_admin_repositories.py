@@ -45,8 +45,9 @@ async def test_broadcast_audience_filters_exclude_banned(
     await _user(db_session, telegram_id + 2, role="moderator", language=lang)
     await _user(db_session, telegram_id + 3, role="user", language=lang, is_banned=True)
 
-    # Banned users are never in the audience; role narrows it further.
-    assert await repo.count_for_broadcast(role=None, language=lang) == 3
+    # Untargeted: excludes banned AND staff (moderator) → only the 2 normal users (#14).
+    assert await repo.count_for_broadcast(role=None, language=lang) == 2
+    # Explicit role targets exactly that role.
     assert await repo.count_for_broadcast(role="moderator", language=lang) == 1
 
 

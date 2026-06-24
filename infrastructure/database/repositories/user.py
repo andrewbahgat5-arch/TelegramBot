@@ -8,8 +8,13 @@ from collections.abc import Sequence
 from sqlalchemy import case, func, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
+from domain.enums import UserRole
 from infrastructure.database.models import User
 from infrastructure.database.repositories.base import SqlAlchemyRepository
+
+# Admin roles excluded from an untargeted broadcast (item #14): a default broadcast
+# reaches normal users only, never the Owner/Moderator accounts.
+_STAFF_ROLES = (UserRole.OWNER.value, UserRole.MODERATOR.value)
 
 
 class UserRepository(SqlAlchemyRepository[User]):
@@ -106,10 +111,17 @@ class UserRepository(SqlAlchemyRepository[User]):
 
     @staticmethod
     def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:
-        """Broadcast audience = non-banned users matching the optional role/language."""
+        """Broadcast audience filters (16.8, item #14).
+
+        Always excludes banned users. With an explicit ``role`` it targets exactly that
+        role; otherwise it targets normal users only — Owner/Moderator are excluded from
+        an untargeted broadcast.
+        """
         filters: list[ColumnElement[bool]] = [User.is_banned.is_(False)]
         if role is not None:
             filters.append(User.role == role)
+        else:
+            filters.append(User.role.notin_(_STAFF_ROLES))
         if language is not None:
             filters.append(User.language == language)
         return filters

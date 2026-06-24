@@ -104,6 +104,11 @@ class UserService:
             total_downloads=await self._repo.sum_total_downloads(),
         )
 
+    async def list_users(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:
+        """A page of users for the owner ``/users`` listing (Task 8.2 follow-up #19)."""
+        rows = await self._repo.list_paginated(limit=limit, offset=offset)
+        return [UserSnapshot.from_row(row) for row in rows]
+
     async def set_role(self, telegram_id: int, role: UserRole) -> UserSnapshot | None:
         """Assign ``role`` to a user. Returns the updated snapshot, or None if absent."""
         return await self._mutate(

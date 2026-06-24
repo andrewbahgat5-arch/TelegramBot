@@ -112,6 +112,10 @@ class CachedFileRepositoryProtocol(Repository[T], Protocol[T]):
 
 class JobRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_uuid(self, job_id: uuid.UUID) -> T | None: ...
+    async def count_active_for_user(self, user_id: int) -> int:
+        """Count this user's non-terminal jobs (the free single-active-job cap)."""
+        ...
+
     async def create(
         self,
         *,

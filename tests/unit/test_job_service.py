@@ -148,6 +148,68 @@ async def test_cache_hit_with_invalid_file_id_evicts_and_redownloads() -> None:
     assert len(env["downloads"].rows) == 0  # nothing recorded for the failed resend
 
 
+async def test_single_active_blocks_free_users_second_download() -> None:
+    env = _build()
+    service: JobService = env["service"]
+
+    first = await service.request(
+        user_id=7,
+        telegram_id=555,
+        media_id=42,
+        info=_INFO,
+        format_=MediaFormat.VIDEO,
+        quality=Quality.P720,
+        progress_message_id=999,
+        single_active=True,
+    )
+    assert first.kind is RequestKind.QUEUED
+
+    # A different media while the first job is still in flight → rejected (free cap).
+    second = await service.request(
+        user_id=7,
+        telegram_id=555,
+        media_id=99,
+        info=_INFO,
+        format_=MediaFormat.VIDEO,
+        quality=Quality.P720,
+        progress_message_id=1000,
+        single_active=True,
+    )
+    assert second.kind is RequestKind.BUSY
+    assert await env["backend"].depth() == 1  # the second job was never queued
+    assert len(env["jobs"].jobs) == 1
+    # The lock for the second media was released (not left dangling).
+    assert await service._cache.acquire_download_lock(99, "video", "720p") is not None
+
+
+async def test_single_active_off_allows_concurrent_downloads() -> None:
+    env = _build()
+    service: JobService = env["service"]
+
+    await service.request(
+        user_id=7,
+        telegram_id=555,
+        media_id=42,
+        info=_INFO,
+        format_=MediaFormat.VIDEO,
+        quality=Quality.P720,
+        progress_message_id=1,
+        single_active=False,
+    )
+    second = await service.request(
+        user_id=7,
+        telegram_id=555,
+        media_id=99,
+        info=_INFO,
+        format_=MediaFormat.VIDEO,
+        quality=Quality.P720,
+        progress_message_id=2,
+        single_active=False,
+    )
+    assert second.kind is RequestKind.QUEUED
+    assert await env["backend"].depth() == 2  # premium-style: both queued
+
+
 async def test_duplicate_active_request_attaches_waiter() -> None:
     env = _build()
     service: JobService = env["service"]

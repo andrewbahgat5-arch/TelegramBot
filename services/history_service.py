@@ -36,11 +36,15 @@ from domain.protocols.repositories import (
 )
 from services.cache_service import CacheService
 from services.job_service import JobService, RequestKind
+from services.settings_service import SettingNotFoundError, SettingsService
 from services.url_analyzer import URLAnalyzerService
 
 _log = get_logger("services.history_service")
 
-HISTORY_PAGE_SIZE = 5
+# §13.4 seeded settings key (operator-tunable via /setting_set); the constant is only
+# the fallback when the key is missing.
+_PAGE_SIZE_KEY = "history_page_size"
+_DEFAULT_PAGE_SIZE = 10
 
 
 class ResendKind(StrEnum):
@@ -70,6 +74,7 @@ class HistoryService:
         analyzer: URLAnalyzerService,
         file_sender: FileSenderProtocol,
         cache_service: CacheService,
+        settings_service: SettingsService,
     ) -> None:
         self._downloads = download_repo
         self._cached = cached_file_repo
@@ -77,19 +82,27 @@ class HistoryService:
         self._analyzer = analyzer
         self._file_sender = file_sender
         self._cache = cache_service
+        self._settings = settings_service
 
     async def list_history(self, user_id: int, *, page: int = 0) -> HistoryPage:
         """Read one page of history (newest first). Over-reads by one to detect a next page."""
         page = max(0, page)
+        page_size = await self._page_size()
         rows = list(
             await self._downloads.list_for_user(
-                user_id, limit=HISTORY_PAGE_SIZE + 1, offset=page * HISTORY_PAGE_SIZE
+                user_id, limit=page_size + 1, offset=page * page_size
             )
         )
-        has_next = len(rows) > HISTORY_PAGE_SIZE
-        return HistoryPage(
-            rows=rows[:HISTORY_PAGE_SIZE], page=page, has_prev=page > 0, has_next=has_next
-        )
+        has_next = len(rows) > page_size
+        return HistoryPage(rows=rows[:page_size], page=page, has_prev=page > 0, has_next=has_next)
+
+    async def _page_size(self) -> int:
+        """Operator-tunable page size (§13.4); fall back to the default if unseeded."""
+        try:
+            size: int = await self._settings.get(_PAGE_SIZE_KEY)
+        except SettingNotFoundError:
+            return _DEFAULT_PAGE_SIZE
+        return size
 
     async def resend(
         self,

@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.admin import (
     OwnerFilter,
-    handle_admin_denied,
     handle_ban,
     handle_broadcast,
     handle_setting_set,
@@ -20,6 +19,7 @@ from bot.handlers.admin import (
     handle_stats,
     handle_unban,
     handle_userinfo,
+    handle_users,
 )
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
@@ -235,13 +235,29 @@ async def test_broadcast_empty_text_is_rejected() -> None:
     assert "Cannot broadcast" in _answer_text(message)
 
 
+# --- /users ---------------------------------------------------------------
+async def test_users_lists_registered_users() -> None:
+    users = FakeUserRepo()
+    users.by_tid[1] = FakeUser(id=1, telegram_id=111, username="alice", first_name="Alice")
+    users.by_tid[2] = FakeUser(id=2, telegram_id=222, first_name="Bob", is_banned=True)
+    message = _message()
+
+    await handle_users(message, _session(), lambda s: _user_service(users))
+
+    text = _answer_text(message)
+    assert "alice" in text and "Alice" in text and "111" in text
+    assert "Bob" in text and "banned" in text
+
+
+async def test_users_empty_reports_none() -> None:
+    message = _message()
+    await handle_users(message, _session(), lambda s: _user_service(FakeUserRepo()))
+    assert "No users" in _answer_text(message)
+
+
 # --- authorization --------------------------------------------------------
 async def test_owner_filter_blocks_moderator() -> None:
+    # Unauthorized admin commands are silently ignored (item #18) — there is no denied
+    # reply handler; the role filter simply declines and no handler matches.
     moderator = UserSnapshot.from_row(FakeUser(id=2, telegram_id=2, role="moderator"))
     assert await OwnerFilter(_EVENT, moderator) is False
-
-
-async def test_denied_handler_replies() -> None:
-    message = _message()
-    await handle_admin_denied(message)
-    assert "permission" in _answer_text(message)

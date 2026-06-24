@@ -5,10 +5,11 @@ In-bot administration for Owner and Moderator. Authorization lives in the
 the role its API counterpart requires (Section 20.2):
 
 * **Staff** (owner or moderator): ``/stats``, ``/userinfo``, ``/settings`` — read-only.
-* **Owner only**: ``/ban``, ``/unban``, ``/setting_set``, ``/broadcast`` — mutating.
+* **Owner only**: ``/users``, ``/ban``, ``/unban``, ``/setting_set``, ``/broadcast``.
 
-A trailing catch-all replies "not permitted" when a gated handler's role check fails
-(it is registered last, so it only runs after the role-gated handlers decline).
+Unauthorized users are **silently ignored** (item #18): there is no catch-all reply,
+so a non-staff user's admin command matches no handler and the bot says nothing —
+admin commands are invisible to normal users.
 
 Handlers parse, delegate to a service, and format — no business logic (Section 9.1).
 Per-request services arrive as aiogram workflow data factories; ``queue_service`` is a
@@ -46,8 +47,7 @@ SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
 BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 
 OwnerFilter = RoleFilter(UserRole.OWNER)
-_ADMIN_COMMANDS = ["stats", "userinfo", "ban", "unban", "settings", "setting_set", "broadcast"]
-_DENIED_TEXT = "⛔ You don't have permission to use that command."
+_USERS_PAGE_SIZE = 30
 
 
 @router.message(Command("stats"), StaffFilter)
@@ -187,10 +187,31 @@ async def handle_broadcast(
     )
 
 
-@router.message(Command(commands=_ADMIN_COMMANDS))
-async def handle_admin_denied(message: Message) -> None:
-    """Runs only when a role-gated admin handler above declined (insufficient role)."""
-    await message.answer(_DENIED_TEXT)
+@router.message(Command("users"), OwnerFilter)
+async def handle_users(
+    message: Message,
+    session: AsyncSession,
+    user_service_factory: UserServiceFactory,
+) -> None:
+    users = await user_service_factory(session).list_users(limit=_USERS_PAGE_SIZE)
+    if not users:
+        await message.answer("No users registered yet.")
+        return
+    lines = [f"👥 <b>Users</b> (first {len(users)})"]
+    lines += [_format_user_row(snap) for snap in users]
+    await message.answer("\n".join(lines))
+
+
+def _format_user_row(snap: UserSnapshot) -> str:
+    """One compact line per user for ``/users``: id, @username, name, lang, role, status."""
+    username = f"@{escape(snap.username)}" if snap.username else "—"
+    name = escape(snap.first_name) if snap.first_name else "—"
+    lang = snap.language or "—"
+    status = "🚫 banned" if snap.is_banned else "active"
+    return (
+        f"<code>{snap.telegram_id}</code> · {username} · {name} · "
+        f"{lang} · {snap.role.value} · {status}"
+    )
 
 
 def _parse_int(raw: str | None) -> int | None:

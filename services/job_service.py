@@ -50,6 +50,7 @@ class RequestKind(StrEnum):
     CACHED = auto()
     QUEUED = auto()
     DUPLICATE = auto()
+    BUSY = auto()  # free user already has an in-flight download (single-active cap)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,7 @@ class JobService:
         quality: Quality,
         progress_message_id: int,
         correlation_id: uuid.UUID | None = None,
+        single_active: bool = False,
     ) -> RequestOutcome:
         fmt, qual = format_.value, quality.value
         token = await self._cache.acquire_download_lock(media_id, fmt, qual)
@@ -114,6 +116,14 @@ class JobService:
             # The cached file_id was rejected as invalid (e.g. minted by a different
             # bot/API server, or expired) — it was evicted; fall through and download
             # it fresh, keeping the lock we already hold.
+
+        # Single-active-job cap (free users): only a cache miss creates a queued job, so
+        # the guard sits here — instant cache hits above are never blocked. A free user
+        # with an in-flight job cannot start a second download (16-free-cap, spam guard).
+        if single_active and await self._jobs.count_active_for_user(user_id) > 0:
+            await self._release_lock(media_id, fmt, qual, token)
+            _log.info("job_rejected_user_busy", user_id=user_id)
+            return RequestOutcome(RequestKind.BUSY)
 
         job_id = uuid7()
         claimed = await self._active.insert_if_absent(
@@ -219,6 +229,9 @@ class JobService:
             file_size=file_size,
         )
         await self._users.increment_download_counters(user_id)
+        # Invalidate the user snapshot so the next rate-limit read sees the new count
+        # (otherwise the cached daily_download_count is stale for up to CACHE_USER_TTL).
+        await self._cache.delete_user(telegram_id)
         await self._notifier.notify_completed(telegram_id, progress_message_id)
         _log.info("cache_hit_delivered", user_id=user_id, quality=quality.value)
         # TODO(Sprint 9, Task 9.3): AdService.maybe_show(user) after delivery.

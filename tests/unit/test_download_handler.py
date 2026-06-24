@@ -23,9 +23,13 @@ from domain.exceptions import ExtractionFailedError, URLNotSupportedError
 from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
+from services.rate_limit_service import RateLimitService
+from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from tests.unit._fakes import (
+    DEFAULT_RATE_SETTINGS,
     FakeActiveDownloadRepo,
+    FakeCache,
     FakeCachedFileRepo,
     FakeDownloadRepo,
     FakeFileSender,
@@ -35,6 +39,8 @@ from tests.unit._fakes import (
     FakeMessageSender,
     FakeProvider,
     FakeQueueBackend,
+    FakeSettingsStore,
+    FakeUser,
     FakeUserRepo,
     load_settings,
     make_cache_service,
@@ -273,6 +279,15 @@ def _job_service() -> tuple[JobService, FakeQueueBackend]:
     return service, backend
 
 
+def _rate_limit_service() -> RateLimitService:
+    """A permissive rate limiter: with an empty user repo, authorize_download is a no-op."""
+    cache_service, _ = make_cache_service()
+    settings_service = SettingsService(
+        FakeSettingsStore(dict(DEFAULT_RATE_SETTINGS)), FakeCache(), cache_ttl=60
+    )
+    return RateLimitService(settings_service, cache_service, FakeUserRepo())
+
+
 async def test_quality_choice_enqueues_job() -> None:
     signer = CallbackSigner("k")
     analyzer = _analyzer()
@@ -291,12 +306,54 @@ async def test_quality_choice_enqueues_job() -> None:
         _user(),
         lambda s: analyzer,
         lambda s: job_service,
+        lambda s: _rate_limit_service(),
         notifier,
         signer,
     )
 
     callback.answer.assert_awaited_once()
     assert await backend.depth() == 1  # a job was enqueued (cache miss)
+
+
+def _rate_limit_service_at_limit() -> RateLimitService:
+    """A rate limiter that rejects: free_daily_limit=0 with the user already present."""
+    cache_service, _ = make_cache_service()
+    settings_service = SettingsService(
+        FakeSettingsStore({**DEFAULT_RATE_SETTINGS, "free_daily_limit": ("0", "int")}),
+        FakeCache(),
+        cache_ttl=60,
+    )
+    repo = FakeUserRepo()
+    repo.by_tid[555] = FakeUser(id=7, telegram_id=555)
+    return RateLimitService(settings_service, cache_service, repo)
+
+
+async def test_quality_choice_blocked_when_over_daily_limit() -> None:
+    signer = CallbackSigner("k")
+    analyzer = _analyzer()
+    analyzed = await analyzer.analyze(_URL)
+    job_service, backend = _job_service()
+
+    callback = AsyncMock(spec=CallbackQuery)
+    callback.data = signer.pack_quality(analyzed.media_id, MediaFormat.VIDEO, Quality.P720)
+    callback.answer = AsyncMock()
+
+    await handle_quality_choice(
+        callback,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        lambda s: job_service,
+        lambda s: _rate_limit_service_at_limit(),
+        NotificationService(FakeMessageSender()),
+        signer,
+    )
+
+    # Rejected with an alert; no job enqueued.
+    callback.answer.assert_awaited_once()
+    args = callback.answer.await_args
+    assert args is not None and args.kwargs.get("show_alert") is True
+    assert await backend.depth() == 0
 
 
 async def test_quality_choice_forged_ignored() -> None:
@@ -311,6 +368,7 @@ async def test_quality_choice_forged_ignored() -> None:
         _user(),
         lambda s: _analyzer(),
         lambda s: job_service,
+        lambda s: _rate_limit_service(),
         NotificationService(FakeMessageSender()),
         CallbackSigner("k"),
     )
