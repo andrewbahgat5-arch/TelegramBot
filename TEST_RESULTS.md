@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-23 | PASS (168) | Sprint-5 services 100%, registry 91%, provider ~90%, bot UI 92–100% | Sprint 1–5 |
-| Integration | 2026-06-23 | PASS (40) | redis 100%, repos 97.70%; +provider-settings adapter | Sprint 2-5 |
+| Unit | 2026-06-24 | PASS (222) | Sprint-6 services/workers + delivery/audio/size/UX/self-healing-cache regressions | Sprint 1–6 |
+| Integration | 2026-06-24 | PASS (46) | redis 100%, repos incl. new pipeline methods (live-DB ON CONFLICT/CASE) | Sprint 2–6 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,68 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-24 — Unit — Sprint 6 self-healing cache (#13)
+
+| Field | Value |
+|---|---|
+| Suite | unit (+ full regression) |
+| Sprint | 6 (Owner live-test fix) |
+| Triggered by | "MP3 not delivered" — cache-hit resends failed with `Bad Request: wrong file identifier` |
+| Total tests | 268 (222 unit + 46 integration) |
+| Passed | 268 |
+| Root cause | **Not MP3 conversion.** The test switched bot tokens; Telegram `file_id`s are bot-scoped, so cached MP3/M4A `file_id`s minted by the old bot were rejected by the new bot. The cache-hit path resent them blindly and failed. |
+| Fix | `send_cached` distinguishes invalid-file-id (`CachedFileExpiredError`, new `ErrorType.CACHED_FILE_EXPIRED`) from other Telegram errors; `JobService` delivers from cache first and, on that signal, evicts the stale `cached_files` row + Redis key and falls back to a fresh download. Self-healing across bot rotation, Bot-API endpoint switch, and Telegram expiry. New tests: `test_send_cached_invalid_file_id_raises_cache_expired`, `test_cache_hit_with_invalid_file_id_evicts_and_redownloads`. |
+| Gates | ruff, mypy --strict (165 files), import-linter (7), bandit (0), pip-audit (no new deps). The Sprint-3 Redis concurrency tests remain occasionally flaky under parallel load; pass in isolation. |
+
+---
+
+### 2026-06-24 — Unit + Integration — Sprint 6 post-verification fixes
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Suite | all (unit + integration) |
+| Sprint | 6 (Owner live-test fixes) |
+| Triggered by | Owner live test surfaced: duplicate delivery, ogg/opus fail+retry-loop, TikTok no-audio, non-monotonic sizes; plus UX asks (instant ack, single progress bar) |
+| Total tests | 265 (219 unit + 46 integration) |
+| Passed | 265 |
+| Failed | 0 |
+| Notes | Fixes: deliver via upload-to-user (one file per user); ogg/opus/flac sent as documents + voice extraction; muxed-only sources offer audio; mp4-preferring height-capped selector + `--merge-output-format mp4` so videos play inline; provider-side audio-inclusive sizes (muxed counted once, tbr×duration fallback); instant "Analyzing link…" ack; single-message percentage bar. UX additions: ⬅️ Back button (callback action `b`); title-based sanitized filenames (`_safe_filename`); local Bot API `build_bot` selection unit-verified (`test_telegram_client`). New suites `test_file_sender`, `test_telegram_client`; provider/notification/handler/keyboard/callback regressions updated. Gates: ruff, mypy --strict (165 files), import-linter (7 contracts), bandit (0), pip-audit (no new deps). One Sprint-3 Redis concurrency test (`test_concurrent_dequeue_no_duplicates`) is occasionally flaky under parallel load; passes in isolation. |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+---
+
+### 2026-06-24 — Unit + Integration — Sprint 6 exit
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `4b9bf78`) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 6 |
+| Triggered by | Sprint 6 exit (Job Pipeline single-user + Owner carry-ins) |
+| Total tests | 243 (197 unit + 46 integration) |
+| Passed | 243 |
+| Failed | 0 |
+| Skipped | 0 (with infra up; integration auto-skips when pg/redis absent) |
+| XFail / XPass | 0 / 0 |
+| Duration | unit ~5 s; full (unit + integration) ~16 s |
+| Coverage (overall) | Sprint-6 services/workers covered by 6 new unit suites + 1 integration suite |
+| Coverage by path | services.job_service / services.download_service / services.notification_service decision trees + happy/audio/oversize/retry/permanent paths; workers.download_worker (success/retry-requeue/permanent) + workers.cleanup_worker sweep; services.format_extraction audio-expansion + audio-inclusive sizes; repositories.{cached_file,active_download,job_waiter,job,download,user} new methods via live-DB `test_pipeline_repositories`. `infrastructure.telegram.*` / `ffmpeg_client` / `main()` entrypoints exercised by the Owner sandbox run. |
+| Notes | New unit suites: `test_job_service`, `test_download_service`, `test_notification_service`, `test_cleanup_worker`, `test_download_worker`, `test_format_sizes`. Updated for D-041/new signatures: `test_download_handler`, `test_format_extraction`, `test_url_analyzer`, `test_bot_composition`, `_fakes`. New integration suite `test_pipeline_repositories` (6 tests) validates PG `ON CONFLICT…RETURNING` + lazy-`CASE` SQL against live postgres:15 — and caught a stale-identity-map bug in `CachedFileRepository.upsert` (fixed with `populate_existing=True`). Gates: ruff, ruff-format, mypy --strict (163 files), import-linter (7 contracts kept), bandit (0 findings), pip-audit (no new deps; tenacity intentionally not vendored — job-level retry used instead). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None. (During development the live-DB cache-UPSERT test failed once, exposing a real bug; fixed and re-run green.)
+
+**Skips (if non-trivial)**
+- None when infra is up. The integration suite auto-skips without Postgres/Redis.
+
+---
 
 ### 2026-06-23 — Unit + Integration — Sprint 5 exit
 

@@ -13,7 +13,7 @@ from typing import Any
 import orjson
 import pytest
 
-from domain.entities.media import MediaFormatOption, MediaInfo
+from domain.entities.media import MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import ExtractionFailedError, URLNotSupportedError
 from domain.protocols.downloader import ProviderHealth, ProviderRetryElsewhere
@@ -153,6 +153,39 @@ async def test_download_returns_produced_file(
     assert result.size_bytes == 100
 
 
+async def test_video_download_requests_mp4_merge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, tuple[Any, ...]] = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        captured["args"] = args
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
+    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
+    await YtdlpProvider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    assert "--merge-output-format" in captured["args"]
+    assert "mp4" in captured["args"]
+
+
+async def test_audio_download_skips_mp4_merge(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, tuple[Any, ...]] = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        captured["args"] = args
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    (tmp_path / "vid.m4a").write_bytes(b"x" * 10)
+    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
+    await YtdlpProvider().download(media, MediaFormat.AUDIO, Quality.MP3, tmp_path)
+    assert "--merge-output-format" not in captured["args"]
+
+
 async def test_download_no_file_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_proc(monkeypatch, _FakeProc(b"", b"", 0))
     media = MediaInfo(platform="youtube", video_id="missing", title="T", source_url=_URL)
@@ -167,13 +200,38 @@ async def test_health_check_ok_and_unavailable(monkeypatch: pytest.MonkeyPatch) 
     assert await YtdlpProvider().health_check() is ProviderHealth.UNAVAILABLE
 
 
-def test_format_selector_prefers_known_id_else_falls_back() -> None:
-    media = MediaInfo(
-        platform="youtube",
-        video_id="v",
-        title="T",
-        source_url=_URL,
-        formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P720, None, "137"),),
-    )
-    assert _format_selector(media, MediaFormat.VIDEO, Quality.P720) == "137"
-    assert _format_selector(media, MediaFormat.AUDIO, Quality.AUDIO) == "bestaudio/best"
+def test_format_selector_prefers_mp4_caps_height_and_merges_audio() -> None:
+    media = MediaInfo(platform="youtube", video_id="v", title="T", source_url=_URL)
+    selector = _format_selector(media, MediaFormat.VIDEO, Quality.P720)
+    # Prefers H.264+AAC (mp4 → playable inline), always merges audio, caps the tier.
+    assert selector.startswith("bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]")
+    assert "[height<=720]" in selector
+    assert selector.endswith("/best")  # graceful fallback for VP9/AV1-only tiers
+    assert _format_selector(media, MediaFormat.AUDIO, Quality.MP3) == "bestaudio/best"
+
+
+def test_video_only_size_includes_audio_muxed_not_double_counted() -> None:
+    provider = YtdlpProvider()
+    info = provider._to_media_info(_URL, _INFO)
+    # 137 is video-only (5000) + best audio (140 = 400) → 5400, not 5000.
+    hd = next(o for o in info.formats if o.provider_format_id == "137")
+    assert hd.approx_size_bytes == 5400
+    # 18 is muxed (already contains audio) and has no reported size → no estimate.
+    muxed = next(o for o in info.formats if o.provider_format_id == "18")
+    assert muxed.approx_size_bytes is None
+
+
+def test_muxed_only_source_still_offers_audio() -> None:
+    """TikTok-style: only muxed formats, no audio-only stream — audio still offered."""
+    muxed_only = {
+        "id": "t",
+        "title": "Clip",
+        "duration": 30,
+        "formats": [
+            {"format_id": "mux", "vcodec": "h264", "acodec": "aac", "height": 720, "abr": 128},
+        ],
+    }
+    info = YtdlpProvider()._to_media_info("https://www.tiktok.com/@a/video/1", muxed_only)
+    audio = [o for o in info.formats if o.format is MediaFormat.AUDIO]
+    assert len(audio) == 1  # a generic audio source the catalog expands from
+    assert audio[0].provider_format_id is None  # downloaded via bestaudio/best

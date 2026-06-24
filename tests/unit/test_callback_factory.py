@@ -30,6 +30,21 @@ def test_quality_round_trip() -> None:
     assert parsed.quality is Quality.AUDIO
 
 
+def test_back_round_trip() -> None:
+    signer = _signer()
+    parsed = signer.unpack(signer.pack_back(123))
+    assert parsed is not None
+    assert parsed.action == "b"
+    assert parsed.media_id == 123
+    assert parsed.format is None and parsed.quality is None
+
+
+def test_back_tampered_rejected() -> None:
+    signer = _signer()
+    data = signer.pack_back(123)
+    assert signer.unpack(data.replace("123", "124", 1)) is None
+
+
 def test_within_telegram_64_byte_limit() -> None:
     data = _signer().pack_quality(9_999_999_999, MediaFormat.VIDEO, Quality.P2160)
     assert len(data.encode()) <= 64

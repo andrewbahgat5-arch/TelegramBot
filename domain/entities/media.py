@@ -31,6 +31,41 @@ class MediaFormatOption:
     # The provider's concrete format selector (e.g. a yt-dlp format id), opaque to
     # every layer above the provider. Used by ``download`` to reproduce the choice.
     provider_format_id: str | None = None
+    # Descriptive, provider-agnostic codec family (e.g. "avc1", "vp9", "opus") — D-041.
+    # Used for consistent per-tier video selection and for audio remux/transcode hints.
+    codec: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AudioTarget:
+    """A selectable audio output (D-041): the codec/container the user may request.
+
+    ``ffmpeg_codec`` is the FFmpeg encoder (``-c:a``); ``container`` is the output
+    file extension. ``native_acodecs`` lists source codecs that already match the
+    container, so they may be remuxed (``-c:a copy``) instead of re-encoded.
+    """
+
+    quality: Quality
+    label: str
+    container: str
+    ffmpeg_codec: str
+    native_acodecs: tuple[str, ...] = ()
+    lossless: bool = False
+
+
+# Fixed catalog of audio targets offered whenever a media has any audio stream
+# (D-041). Order is the display order in the quality keyboard.
+AUDIO_TARGETS: tuple[AudioTarget, ...] = (
+    AudioTarget(Quality.MP3, "MP3", "mp3", "libmp3lame", native_acodecs=("mp3",)),
+    AudioTarget(Quality.M4A, "M4A (AAC)", "m4a", "aac", native_acodecs=("aac", "mp4a")),
+    AudioTarget(Quality.OPUS, "Opus", "opus", "libopus", native_acodecs=("opus",)),
+    AudioTarget(Quality.OGG, "OGG (Vorbis)", "ogg", "libvorbis", native_acodecs=("vorbis",)),
+    AudioTarget(Quality.AAC, "AAC", "aac", "aac", native_acodecs=("aac", "mp4a")),
+    AudioTarget(Quality.WAV, "WAV (lossless)", "wav", "pcm_s16le", lossless=True),
+    AudioTarget(Quality.FLAC, "FLAC (lossless)", "flac", "flac", lossless=True),
+)
+
+AUDIO_TARGET_BY_QUALITY: dict[Quality, AudioTarget] = {t.quality: t for t in AUDIO_TARGETS}
 
 
 @dataclass(frozen=True, slots=True)

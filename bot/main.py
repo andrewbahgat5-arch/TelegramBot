@@ -20,7 +20,6 @@ import asyncio
 from collections.abc import Callable
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
@@ -35,6 +34,11 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry
 from infrastructure.database.engine import create_engine
+from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.cached_file import CachedFileRepository
+from infrastructure.database.repositories.download import DownloadRepository
+from infrastructure.database.repositories.job import JobRepository
+from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
@@ -45,7 +49,13 @@ from infrastructure.downloader.registry import DownloaderRegistry
 from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.locks import RedisLock
+from infrastructure.redis.queue import RedisQueue
+from infrastructure.telegram.client import build_bot
+from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.cache_service import CacheService
+from services.job_service import JobService
+from services.notification_service import NotificationService
+from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
 from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
@@ -60,6 +70,8 @@ def build_dispatcher(
     user_service_factory: Callable[[AsyncSession], UserService],
     rate_limit_service_factory: Callable[[AsyncSession], RateLimitService],
     analyzer_factory: Callable[[AsyncSession], URLAnalyzerService],
+    job_service_factory: Callable[[AsyncSession], JobService],
+    notification_service: NotificationService,
     callback_signer: CallbackSigner,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> Dispatcher:
@@ -67,6 +79,8 @@ def build_dispatcher(
     dp = Dispatcher()
     # Workflow data injected into handlers by parameter name (download handlers).
     dp["analyzer_factory"] = analyzer_factory
+    dp["job_service_factory"] = job_service_factory
+    dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
 
     dp.update.outer_middleware(LoggingMiddleware())
@@ -98,6 +112,7 @@ async def main() -> None:
 
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
+    queue_service = QueueService(RedisQueue(redis_clients.queue))
 
     # The registry is a process singleton (holds provider health state). It reads
     # provider settings via an adapter that opens its own short-lived sessions.
@@ -106,6 +121,10 @@ async def main() -> None:
     )
     registry.register(YtdlpProvider(settings.ytdlp_path))
     callback_signer = CallbackSigner(settings.bot_token.get_secret_value())
+
+    bot = build_bot(settings)
+    file_sender = TelegramFileSender(bot)
+    notification_service = NotificationService(TelegramMessageSender(bot))
 
     def make_user_service(session: AsyncSession) -> UserService:
         return UserService(
@@ -123,15 +142,28 @@ async def main() -> None:
     def make_url_analyzer(session: AsyncSession) -> URLAnalyzerService:
         return URLAnalyzerService(registry, cache_service, MediaRepository(session))
 
-    bot = Bot(
-        token=settings.bot_token.get_secret_value(),
-        default=DefaultBotProperties(parse_mode=settings.bot_parse_mode),
-    )
+    def make_job_service(session: AsyncSession) -> JobService:
+        return JobService(
+            job_repo=JobRepository(session),
+            cached_file_repo=CachedFileRepository(session),
+            active_download_repo=ActiveDownloadRepository(session),
+            job_waiter_repo=JobWaiterRepository(session),
+            download_repo=DownloadRepository(session),
+            user_repo=UserRepository(session),
+            queue_service=queue_service,
+            cache_service=cache_service,
+            file_sender=file_sender,
+            notification_service=notification_service,
+            settings=settings,
+        )
+
     dp = build_dispatcher(
         settings,
         user_service_factory=make_user_service,
         rate_limit_service_factory=make_rate_limit_service,
         analyzer_factory=make_url_analyzer,
+        job_service_factory=make_job_service,
+        notification_service=notification_service,
         callback_signer=callback_signer,
         session_factory=session_factory,
     )

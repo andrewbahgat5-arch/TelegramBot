@@ -6,11 +6,11 @@ size when known. Each carries a signed ``(media_id, format, quality)`` callback.
 
 from __future__ import annotations
 
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks.factory import CallbackSigner
-from domain.entities.media import MediaFormatOption, MediaInfo
+from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat
 
 
@@ -25,12 +25,16 @@ def build_quality_keyboard(
                 callback_data=signer.pack_quality(media_id, format_, option.quality),
             )
     builder.adjust(2)
+    # A Back row returns to the Video/Audio choice without resending the link.
+    builder.row(InlineKeyboardButton(text="⬅️ Back", callback_data=signer.pack_back(media_id)))
     return builder.as_markup()
 
 
 def _label(option: MediaFormatOption) -> str:
+    target = AUDIO_TARGET_BY_QUALITY.get(option.quality)
+    base = target.label if target is not None else option.quality.value
     size = _human_size(option.approx_size_bytes)
-    return f"{option.quality.value} (~{size})" if size else option.quality.value
+    return f"{base} (~{size})" if size else base
 
 
 def _human_size(size_bytes: int | None) -> str | None:

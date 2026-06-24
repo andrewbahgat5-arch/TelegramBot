@@ -71,6 +71,18 @@ class CacheService:
     async def is_on_cooldown(self, user_id: int) -> bool:
         return (await self._cache.get(RedisKeys.rate_cooldown(user_id))) is not None
 
+    # --- job runtime context (progress message + lock token, key job:{id}) ---
+    async def set_job_context(self, job_id: str, data: dict[str, Any], *, ttl: int) -> None:
+        """Stash a job's request-side context for the worker (progress edits, 16.1)."""
+        await self._cache.set(RedisKeys.job(job_id), _dumps(data), ttl=ttl)
+
+    async def get_job_context(self, job_id: str) -> dict[str, Any] | None:
+        raw = await self._cache.get(RedisKeys.job(job_id))
+        return None if raw is None else _loads(raw)
+
+    async def delete_job_context(self, job_id: str) -> None:
+        await self._cache.delete(RedisKeys.job(job_id))
+
     # --- download lock ---
     async def acquire_download_lock(self, media_id: int, format_: str, quality: str) -> str | None:
         return await self._lock.acquire(

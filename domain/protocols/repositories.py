@@ -44,6 +44,11 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
     async def reset_daily_download_count_if_needed(
         self, user: T, *, today: datetime.date | None = None
     ) -> T: ...
+    async def increment_download_counters(
+        self, user_id: int, *, today: datetime.date | None = None
+    ) -> None:
+        """Atomic, lazy-reset counter bump for one completed download (16.6, D-012)."""
+        ...
 
 
 class MediaRepositoryProtocol(Repository[T], Protocol[T]):
@@ -65,21 +70,78 @@ class CachedFileRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_media_format_quality(
         self, media_id: int, format_: str, quality: str
     ) -> T | None: ...
+    async def upsert(
+        self,
+        *,
+        media_id: int,
+        format_: str,
+        quality: str,
+        telegram_file_id: str,
+        telegram_unique_file_id: str,
+        file_size: int | None,
+    ) -> T:
+        """UPSERT on ``(media_id, format, quality)``; bump usage + last_used (16.1 W5)."""
+        ...
+
+    async def bump_usage(self, cached_file_id: int) -> None:
+        """Increment usage_count and refresh last_used_at on a cache hit (16.2)."""
+        ...
 
 
 class JobRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_uuid(self, job_id: uuid.UUID) -> T | None: ...
+    async def create(
+        self,
+        *,
+        job_id: uuid.UUID,
+        user_id: int,
+        media_id: int,
+        format_: str,
+        quality: str,
+        priority: int,
+        correlation_id: uuid.UUID | None,
+        status: str,
+    ) -> T:
+        """Insert a ``jobs`` row with an app-generated UUIDv7 id (D-013)."""
+        ...
+
+    async def set_status(
+        self,
+        job_id: uuid.UUID,
+        status: str,
+        *,
+        started_at: datetime.datetime | None = None,
+        finished_at: datetime.datetime | None = None,
+        error_message: str | None = None,
+        increment_retry: bool = False,
+    ) -> None:
+        """Advance a job's state machine (Section 12.3) by id (UPDATE only)."""
+        ...
 
 
 class ActiveDownloadRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_by_media_format_quality(
         self, media_id: int, format_: str, quality: str
     ) -> T | None: ...
+    async def insert_if_absent(
+        self, *, media_id: int, format_: str, quality: str, job_id: uuid.UUID
+    ) -> bool:
+        """INSERT ON CONFLICT DO NOTHING; True if inserted, False on duplicate (16.1)."""
+        ...
+
+    async def delete_by_job(self, job_id: uuid.UUID) -> int:
+        """Remove the active-download marker for a finished job (16.1 W9)."""
+        ...
 
 
 class JobWaiterRepositoryProtocol(Repository[T], Protocol[T]):
     async def list_for_job(self, job_id: uuid.UUID) -> Sequence[T]: ...
     async def delete_for_job(self, job_id: uuid.UUID) -> int: ...
+    async def add_waiter(
+        self, *, job_id: uuid.UUID, user_id: int, correlation_id: uuid.UUID | None
+    ) -> bool:
+        """INSERT ON CONFLICT (job_id,user_id) DO NOTHING; True if newly added (12.4)."""
+        ...
 
 
 class SettingsStoreProtocol(Protocol):
@@ -103,6 +165,19 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
     async def list_for_user(
         self, user_id: int, *, limit: int = 10, offset: int = 0
     ) -> Sequence[T]: ...
+    async def create_completed(
+        self,
+        *,
+        user_id: int,
+        cached_file_id: int | None,
+        platform: str,
+        format_: str,
+        quality: str,
+        file_size: int | None,
+        status: str = "completed",
+    ) -> T:
+        """Insert a denormalized history row for a delivered download (10.5, 16.1 W7)."""
+        ...
 
 
 class BroadcastRepositoryProtocol(Repository[T], Protocol[T]): ...

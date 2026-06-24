@@ -2,8 +2,8 @@
 
 > **Document Status:** LIVE · Single Source of Truth for implementation status
 > **Companion Documents:** `MASTER_PLAN.md` (architecture, sprint plan, locked decisions), `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-23 (Sprint 5 Owner sign-off; ready for Sprint 6)
-> **Project Phase:** Sprint 5 Completed (Owner sign-off 2026-06-23). Next: Sprint 6 (Job Pipeline).
+> **Last Updated:** 2026-06-24 (Sprint 6 Completed — Owner sign-off after live testing)
+> **Project Phase:** Sprint 6 (Job Pipeline) **Completed** and committed. Next: Sprint 7 (Fan-Out and Resend).
 >
 > Update this file on **every** task status change. Never let it drift from reality.
 
@@ -51,15 +51,15 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 
 | Field | Value |
 |---|---|
-| Master Plan version | v2.2 |
-| Current sprint | Sprint 5 — **Completed (Owner sign-off 2026-06-23, `a1f16ad`)**. Sprint 6 begins next session. |
-| Sprints completed | 5 / 13 (S0–S5 all complete; S5 Owner sign-off 2026-06-23) |
-| Tasks completed | 55 / 105 (S0: 10/10; S1: 9/9; S2: 9/9; S3: 7/7; S4: 9/9; S5: 11/11) |
+| Master Plan version | v2.2 (+ D-040, D-041, `BOT_API_BASE_URL` env var) |
+| Current sprint | Sprint 6 — **Completed (Owner sign-off 2026-06-24)**. Sprint 7 (Fan-Out and Resend) is next. |
+| Sprints completed | 6 / 13 (S0–S6; S6 Owner sign-off 2026-06-24 after live testing) |
+| Tasks completed | 65 / 105 (S0–S5 = 55; S6: 10/10 + 4 Owner carry-ins + post-verification fixes) |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 10 (see `MASTER_PLAN.md` Section 27 Open Questions; OQ-8 platform allowlist + OQ-9 yt-dlp cadence touch Sprint 5) |
-| Last code change | 2026-06-23 — Sprint 5 committed `a1f16ad` (provider abstraction + URL analyzer + keyboards), incl. the non-16:9 4K quality-mapping fix found during owner validation. |
-| Last documentation change | 2026-06-23 — Sprint 5 closeout + this handoff (for a fresh session). |
-| Next recommended action | **Start Sprint 6 (Job Pipeline).** Owner has explicitly asked that Sprint 6 also deliver: real download/transcode/upload + delivery, **progress feedback** (queued→downloading→processing→uploading→completed/failed), a **thumbnail preview** on the format message, **accurate file-size estimates**, and **explicit per-codec audio formats** (MP3/M4A/Opus/…). See "Carry-ins for Sprint 6" below. |
+| Open decisions awaiting Owner | 9 (OQ-11 resolved by D-040: self-hosted Bot API server, 2 GB). OQ-8 platform allowlist + OQ-9 yt-dlp cadence still open. |
+| Last code change | 2026-06-24 — Sprint 6 job pipeline + Owner live-test fixes (single delivery, audio container routing, muxed audio, playable mp4, accurate sizes, single progress bar, instant ack, Back button, title filenames, self-healing cache). |
+| Last documentation change | 2026-06-24 — Sprint 6 Owner sign-off; TEST_RESULTS + `deploy/LOCAL_BOT_API.md`; this handoff for the Sprint 7 session. |
+| Next recommended action | **Start Sprint 7 (Fan-Out and Resend).** Tasks 7.1–7.4 (multi-recipient delivery for waiters + per-waiter progress; `HistoryService` + history handlers/keyboard, flow 16.3). See the Sprint 7 section + the Owner's future History-UI note. |
 
 ---
 
@@ -73,14 +73,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 3 | Cache and Queue | `[x]` Completed | 100% | 7 / 7 | Owner pre-authorized continuation |
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
 | 5 | URL Analyzer + Provider Abstraction | `[x]` Completed | 100% | 11 / 11 | Owner sign-off 2026-06-23 (`a1f16ad`) |
-| 6 | Job Pipeline (single-user) | `[ ]` Not Started | 0% | 0 / 10 | ready — next sprint |
-| 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | depends on S6 |
+| 6 | Job Pipeline (single-user) | `[x]` Completed | 100% | 10 / 10 | Owner sign-off 2026-06-24 (live-tested) |
+| 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | ready — next sprint |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
 | 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | depends on S7 |
 | 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **52%** | **55 / 105** |  |
+| **Total** |  |  | **62%** | **65 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -339,32 +339,59 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 10) |
+| **Status** | `[x]` Completed (Owner sign-off 2026-06-24 after live testing across YouTube/TikTok/Instagram) |
+| **Completion** | 100% (10 / 10 + 4 Owner carry-ins + post-verification fixes) |
 | **Goal** | End-to-end download for one user, with cache. |
 | **Stop Point** | Owner sends a URL → receives file. Sends same URL → instant cached delivery. |
 
-**Pending Tasks**
+**Owner decisions taken at sprint start (2026-06-24):** self-hosted Telegram Bot API server, 2 GB cap (D-040, resolves OQ-11); all four carry-ins folded in.
 
-- [ ] **6.1** `domain/protocols/transcoder.py`, `domain/protocols/file_sender.py`.
-- [ ] **6.2** `infrastructure/downloader/ffmpeg_client.py`.
-- [ ] **6.3** `infrastructure/telegram/file_sender.py`.
-- [ ] **6.4** `services/job_service.py` (cache-hit, cache-miss, lock paths from Section 16.1–16.2; fan-out deferred to Sprint 7).
-- [ ] **6.5** `services/download_service.py` end-to-end happy path.
-- [ ] **6.6** `workers/download_worker.py` (dequeue, run, retry via `tenacity`).
-- [ ] **6.7** `workers/main.py` composition root.
-- [ ] **6.8** Hook `bot/handlers/download.py` post-quality callback to `JobService.request`.
-- [ ] **6.9** `services/notification_service.py` happy path.
-- [ ] **6.10** `CleanupWorker` minimal sweep (temp files > 60 s).
+**Completed Tasks**
 
-**Owner-requested carry-ins for Sprint 6** (raised during Sprint 5 validation — fold into the relevant tasks; not new sprint scope creep, these are the UX the Owner expects from the pipeline):
-- **Progress feedback** via `NotificationService` (6.9): edit the message through `queued → downloading → processing → uploading → ✅ completed / ❌ failed`, instead of the current placeholder.
-- **Thumbnail preview** on the format-selection message (small `bot/handlers/download.py` change; `MediaInfo.thumbnail_url` is already extracted). Could land as soon as 6.8.
-- **Accurate file-size estimates**: today `_parse_formats` keeps the *largest* codec variant per tier and shows video-only bytes, so labels aren't monotonic. In the download path, pick a consistent codec per tier and include the audio stream in the estimate.
-- **Explicit per-codec audio formats** (MP3/M4A/AAC/OGG/Opus/WAV/FLAC): needs FFmpeg (6.2) + a domain-model change to carry an audio codec/container on `MediaFormatOption` (today it's a single `Quality.AUDIO`). Native = AAC(m4a)+Opus; the rest are FFmpeg transcode targets. **Decision still open** with the Owner on whether to set up a self-hosted Telegram Bot API server (50 MB bot limit vs 2 GB) — confirm before building large-file delivery.
+- [x] **6.1** `domain/protocols/transcoder.py` (`TranscoderProtocol`) + `domain/protocols/file_sender.py` (`FileSenderProtocol`, `MessageSenderProtocol`, `UploadedFile`). Domain-model change (D-041): `Quality` gains audio-codec members (`mp3/m4a/aac/ogg/opus/wav/flac`); `MediaFormatOption.codec`; `AudioTarget` + `AUDIO_TARGETS` catalog in `domain/entities/media.py`.
+- [x] **6.2** `infrastructure/downloader/ffmpeg_client.py` — async FFmpeg subprocess; remux (`-c:a copy`) when source matches the container, else re-encode to the target codec.
+- [x] **6.3** `infrastructure/telegram/file_sender.py` — `TelegramFileSender` (upload-once → reusable `file_id`; deliver by `file_id`) + `TelegramMessageSender` (progress edits). `infrastructure/telegram/client.py` `build_bot` selects the self-hosted Bot API server when `BOT_API_BASE_URL` is set (D-040).
+- [x] **6.4** `services/job_service.py` — lock → cache-hit (instant delivery + counters, 16.2) / cache-miss (claim `active_downloads`, create job + waiter, stash worker context, enqueue, 16.1) / duplicate (attach waiter; full fan-out is Sprint 7).
+- [x] **6.5** `services/download_service.py` — resolve media → download (via registry) → transcode audio target → upload → `cached_files` UPSERT → per-waiter `downloads` + counters + delivery → mark complete → release lock → wipe temp. Emits `download_seconds`/`upload_seconds`/`job_processing_seconds`. `handle_failure`/`mark_retry`/`mark_permanent_failure` own the state machine.
+- [x] **6.6** `workers/download_worker.py` — dequeue, one-transaction-per-job unit of work, job-level retry (`retry_queued` → up to `max_retries` → `permanently_failed`, re-enqueue at LOW).
+- [x] **6.7** `workers/main.py` — composition root: shared registry/bot/file_sender/notifier/FFmpeg + per-job `DownloadService` factory; runs health-check + N download workers + cleanup worker concurrently.
+- [x] **6.8** `bot/handlers/download.py` — post-quality pick sends a progress message and calls `JobService.request`; **thumbnail preview** on the format message (photo + caption, caption-aware edits); per-codec audio buttons.
+- [x] **6.9** `services/notification_service.py` — **progress feedback**: edits one message through `queued → downloading → processing → uploading → ✅/❌` (state only, no percent).
+- [x] **6.10** `workers/cleanup_worker.py` — minimal sweep of temp entries older than 60 s.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Owner carry-ins — delivered:**
+- **Progress feedback** — `NotificationService` (6.9) + worker stage edits.
+- **Thumbnail preview** — `handle_url` sends the thumbnail with the format keyboard.
+- **Accurate file-size estimates** — `services/format_extraction.py` picks one consistent video codec per tier (avc1 → vp9 → av01) and adds the best audio stream's size; sizes are now sensible/monotonic.
+- **Explicit per-codec audio** (D-041) — `MediaFormatOption.codec` + `Quality` audio members + `AUDIO_TARGETS`; the codec is the persisted `quality` value, so the LOCKED `(media_id, format, quality)` cache key distinguishes codecs with no schema change.
+
+**Validation Results (all gates green; verified against live postgres:15 + redis:7):**
+- `ruff check .` / `ruff format --check .` — clean.
+- `mypy --strict .` — no issues in 163 source files.
+- `lint-imports` — 7 contracts kept, 0 broken (workers/bot reach infra only via their composition roots; providers only via the registry).
+- `pytest` — **252 passed** (206 unit + 46 integration; +`test_file_sender` and provider/notification regressions from the post-verification round). New unit suites: `test_job_service`, `test_download_service`, `test_notification_service`, `test_cleanup_worker`, `test_download_worker`, `test_format_sizes`, `test_file_sender`; updated `test_download_handler`, `test_format_extraction`, `test_url_analyzer`, `test_ytdlp_provider`, `test_bot_composition`. New integration suite `test_pipeline_repositories` exercises the PG `ON CONFLICT…RETURNING` + lazy-`CASE` SQL.
+- `bandit -r . -c pyproject.toml` — 0 findings.
+- `pip-audit` — no known vulnerabilities; **no new dependencies** (FFmpeg/yt-dlp are subprocessed system tools).
+
+**Bug found + fixed during validation (2026-06-24):** the live-DB `test_pipeline_repositories` caught `CachedFileRepository.upsert` returning a stale identity-map instance on conflict (old `file_id`/`usage_count`). Fixed with `.execution_options(populate_existing=True)` so the RETURNING values refresh the ORM object.
+
+**Post-verification fixes (2026-06-24, Owner live-test round) — all green (252 tests):**
+- **Duplicate delivery (every fresh download sent twice).** Root cause: the worker uploaded to a *storage chat = owner id*, then `send_cached` re-sent to the user; with the owner as tester that delivered the file twice (the cache-hit path used a single `send_cached`, which is why only fresh downloads doubled). Fix: the worker now **uploads directly to the first waiter** (that upload *is* their delivery) and reuses the resulting `file_id` for any additional waiters — exactly one file per user. `TelegramFileSender` no longer takes a storage chat.
+- **OGG/OPUS failed + retry-looped → "download failed".** Telegram converts `.ogg`/`.opus` sent via `send_audio` into voice notes, so `message.audio` was `None` → "Telegram returned no file reference" → retryable loop ×3 → permanent fail. Fix: ogg/opus/flac are sent as **documents**; `_extract_upload` also reads `message.voice`. AAC/M4A/MP3/WAV unchanged (and no longer double-delivered).
+- **TikTok (and other muxed-only sources) offered no audio.** They expose no audio-only stream, so the per-codec catalog never expanded. Fix: the provider emits a generic audio source whenever *any* stream has audio; the download uses `bestaudio/best` (extracts audio from the best muxed stream).
+- **Silent high-res video (latent) + non-monotonic sizes (#7).** Video now downloads via `bestvideo[height<=H]+bestaudio` (always merges audio, never a silent single-stream). Size estimates moved into the provider: video-only += best-audio size, **muxed counted once** (the 360p>1080p double-count is gone), with a `tbr×duration` fallback when `filesize` is missing.
+- **UX #9 / #8.** The bot now replies `🔍 Analyzing link…` instantly and then shows the thumbnail + title + duration + source. Progress is a **single in-place message with one percentage bar** (internal download/transcode/upload stages are no longer surfaced).
+- **Videos sent as documents, not playable (round 2).** A merged `.webm` (VP9/Opus) shows as a document even via `sendVideo`. Fix: the yt-dlp selector prefers `vcodec^=avc1 + acodec^=mp4a` and the download adds `--merge-output-format mp4`, so output is a playable mp4 (H.264/AAC) inline video whenever the source offers those codecs; VP9/AV1-only tiers fall back gracefully.
+- **Back button (#10).** The quality / audio-codec screen has a `⬅️ Back` row that returns to the Video/Audio choice without resending the link (new signed callback action `b`; `handle_back` rebuilds the format keyboard).
+- **Title-based filenames (#11).** Delivered files are named after the sanitized media title with the correct extension (`Song Title.mp3`, `Video Title.mp4`), across all audio/video formats (`_safe_filename` in `DownloadService`).
+- **Local Bot API (#12).** Code path unit-verified (`build_bot` targets the local endpoint when `BOT_API_BASE_URL` is set; public API otherwise). Config, the cloud-`logOut` token gotcha, large-file behavior, and risks (esp. **`file_id`s are server-scoped → switching endpoints invalidates the existing `cached_files`**) documented in `deploy/LOCAL_BOT_API.md`. Public API stays the default.
+- **MP3 "not delivered" → self-healing cache (#13).** Root cause was **not** MP3 conversion (which works): the test session **switched bot tokens**, and Telegram `file_id`s are **bot-scoped**, so every cached MP3/M4A resend failed with `Bad Request: wrong file identifier` in the cache-hit path. Fix: `send_cached` now raises `CachedFileExpiredError` (new, `ErrorType.CACHED_FILE_EXPIRED`) when Telegram rejects a `file_id`; `JobService` delivers from cache **first**, and on that signal **evicts** the stale `cached_files` row + Redis key and **falls back to a fresh download** — self-healing across bot-token rotation, Bot-API endpoint switches, and Telegram-side expiry. DB writes/✅ now happen only after the file actually reaches the user. (Total tests now **268**: 222 unit + 46 integration.)
+
+**Known Issues / deviations (documented):**
+- **`tenacity` deferred.** Section 6.2 pre-approves `tenacity`, but it is not yet vendored in this environment; adding+importing it would break the gates. Sprint 6 implements the *validated* retry behavior (job-level `retry_queued` → up to 3 → `permanently_failed`) in the worker without it. In-process tenacity backoff can be layered later.
+- **Fan-out is single-user only.** `JobService` duplicate path attaches a waiter and the `DownloadService` waiter loop already iterates all waiters, but multi-recipient delivery + per-waiter progress is Sprint 7 (Tasks 7.1/7.2).
+- **`bot/main.py`/`workers/main.py` `main()` entry points** remain network-bound and unit-uncovered (covered by the Owner sandbox run). `build_dispatcher`/`make_download_service_factory` wiring is unit-covered.
+- **Per-codec audio size estimates are approximate** (lossless scaled from the best lossy source; the real size is known after FFmpeg runs). Labels are prefixed `~`.
 
 ---
 
@@ -383,6 +410,8 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 - [ ] **7.2** Update `DownloadService` to deliver to all waiters; per-waiter `(job_id, user_id)` idempotency.
 - [ ] **7.3** `services/history_service.py` (paginated read, resend).
 - [ ] **7.4** `bot/handlers/history.py` and `bot/keyboards/history.py`.
+
+**Owner-requested History UX (future enhancement — 2026-06-24, do NOT implement before its sprint):** a History section where the user browses previously downloaded media with **title, thumbnail, platform, and date**; tapping an entry **instantly re-sends** it, reusing the cached Telegram `file_id` when present (`cached_files`) and otherwise falling back to the normal download flow (`JobService.request`). Sprint 7's 7.3/7.4 (`HistoryService` + history handlers/keyboards, flow 16.3) cover the resend mechanics; the richer browsable UI (thumbnails + dates + platform) is the Owner's desired surface and may warrant its own dedicated sprint. Schema already supports it: `downloads` carries denormalized `platform/format/quality/file_size/created_at`; `cached_files` holds the reusable `file_id`. No work in the current sprint.
 
 **Validation Results:** pending.
 **Known Issues:** none.
@@ -517,6 +546,7 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
+| 2026-06-24 | — (uncommitted) | New: `domain/protocols/{transcoder,file_sender}.py`; `domain/entities/media.py` (`AudioTarget`/`AUDIO_TARGETS`); `infrastructure/downloader/ffmpeg_client.py`; `infrastructure/telegram/{client,file_sender}.py`; `services/{job_service,download_service,notification_service}.py`; `workers/{download_worker,cleanup_worker}.py`; `tests/unit/{test_job_service,test_download_service,test_notification_service,test_cleanup_worker,test_download_worker,test_format_sizes}.py`; `tests/integration/test_pipeline_repositories.py`. Updated: `core/config.py` + `.env.example` + `MASTER_PLAN.md` (`BOT_API_BASE_URL`, Section 13.2, D-040/D-041); `domain/enums/quality.py` (audio codecs); `domain/entities/media.py` (`MediaFormatOption.codec`); `domain/protocols/repositories.py` (+pipeline methods); `infrastructure/database/repositories/{job,cached_file,active_download,job_waiter,download,user}.py`; `services/{cache_service,format_extraction}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `core/logging.py` (`get_correlation_id`); `bot/{main.py,handlers/download.py,keyboards/quality_select.py}`; `workers/main.py`; `tests/unit/{_fakes,test_download_handler,test_format_extraction,test_url_analyzer,test_bot_composition}.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 6 / 6.1–6.10 + carry-ins | Implementation agent |
 | 2026-06-23 | `a1f16ad` | New: `core/urls.py`; `domain/entities/media.py`; `domain/protocols/downloader.py`; `infrastructure/downloader/{registry,provider_settings}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `services/{url_analyzer,format_extraction}.py`; `bot/callbacks/factory.py`; `bot/keyboards/{format_select,quality_select}.py`; `bot/handlers/download.py`; `workers/main.py`; `tests/unit/{test_urls,test_format_extraction,test_callback_factory,test_downloader_registry,test_url_analyzer,test_ytdlp_provider,test_keyboards,test_download_handler}.py`; `tests/integration/test_provider_settings.py`. Updated: `core/redis_keys.py` (+`provider_health`), `domain/protocols/repositories.py` (MediaRepositoryProtocol.upsert_metadata), `infrastructure/database/repositories/media.py` (+`upsert_metadata`), `bot/main.py`, `tests/unit/{_fakes,test_bot_composition}.py`, `.importlinter` (+providers contract), `MASTER_PLAN.md` (Section 11.4 row), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 5 / 5.1–5.11 | Implementation agent |
 | 2026-06-23 | `0e5f301` | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
 | 2026-06-23 | — (uncommitted) | `core/redis_keys.py`, `domain/protocols/{cache,queue}.py`, `domain/protocols/repositories.py` (SettingsStoreProtocol), `infrastructure/redis/{client,cache,locks,queue}.py`, `services/{cache_service,queue_service,settings_service}.py`, `tests/integration/{conftest,test_redis_cache,test_redis_locks,test_redis_queue,test_settings_service}.py`, `tests/unit/test_redis_keys.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 3 / 3.1–3.7 | Implementation agent |
@@ -567,6 +597,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-24 — Sprint 6 Job Pipeline implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 6 — **code complete, `[~]` Under Review.** Stops here for Owner human-verification + sign-off before Sprint 7. |
+| **Tasks moved** | Sprint 6 6.1–6.10 all `[x]`; all four Owner carry-ins delivered. Sprint 6 → `[~]` Under Review. |
+| **Files modified** | See the 2026-06-24 row in the Files Modified Log (uncommitted in worktree `happy-bose-71ed46`). |
+| **Decisions added** | **D-040** (self-hosted Bot API server, 2 GB; new `BOT_API_BASE_URL` env var in Section 13.2 — resolves OQ-11). **D-041** (per-codec audio modeled via `Quality` audio members + `MediaFormatOption.codec`, reusing the locked `(media_id, format, quality)` cache key). |
+| **Validation** | 243 tests pass (197 unit + 46 integration, incl. a new live-DB `test_pipeline_repositories`). ruff/mypy --strict (163 files)/import-linter (7 contracts)/bandit/pip-audit all green. A live-DB test caught + fixed a stale-identity-map bug in `CachedFileRepository.upsert` (`populate_existing=True`). |
+| **Current state** | Full pipeline is built: pick a quality → progress message → worker downloads via the registry, transcodes audio targets via FFmpeg, uploads once to the storage chat to mint a `file_id`, caches it, delivers to the user, and edits the message through the stages to ✅/❌. Cache hits deliver instantly. Thumbnails show on the format message; audio offers explicit codecs; video sizes include audio. **Not yet run end-to-end against a live bot** (that is the Owner verification step). |
+| **Completed work** | All Sprint 6 tasks + carry-ins. Governance: `BOT_API_BASE_URL`, D-040, D-041. |
+| **Remaining work** | Owner human-verification (live bot + worker). Then Sprint 7 (fan-out delivery to all waiters + per-waiter progress; `HistoryService` + history handlers). |
+| **Known issues** | (1) `tenacity` deferred (not vendored) — job-level retry implemented instead, which is the validated behavior. (2) Fan-out is single-user only until Sprint 7. (3) `main()` entrypoints unit-uncovered (need a live token). (4) Per-codec audio size estimates are approximate (`~`). |
+| **Recommended next task** | Owner: run `python -m bot.main` and `python -m workers.main` (or the deploy containers) with a test bot token, `BOT_API_BASE_URL` pointed at a self-hosted Bot API server, `yt-dlp`/`ffmpeg` installed, and the migrated test DB + Redis up. Send a URL, confirm progress + file; resend, confirm instant cache; try an audio codec. Then sign off Sprint 6 and authorize Sprint 7. |
+| **Notes for the next agent** | Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe` (ruff/mypy/lint-imports/pytest/bandit). The worker process is the only place files are uploaded/delivered — it builds a per-job `DownloadService` via `make_download_service_factory` in `workers/main.py`. The worker reads progress context (telegram_id, message_id, lock token) from Redis key `job:{id}` written by `JobService.request`; the lock is acquired in the bot process and released by the worker. `FileSenderProtocol.upload` targets `bot_owner_telegram_id` as the storage chat. Self-hosted Bot API is selected by `build_bot` in `infrastructure/telegram/client.py` when `BOT_API_BASE_URL` is set. |
 
 ### Session Handoff — 2026-06-23 — Sprint 5 committed + owner validation (4K fix); ready for Sprint 6
 

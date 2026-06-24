@@ -14,10 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
+from services.job_service import JobService
+from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
-from tests.unit._fakes import load_settings
+from tests.unit._fakes import FakeMessageSender, load_settings
 
 
 def _user_factory(session: AsyncSession) -> UserService:
@@ -32,12 +34,18 @@ def _analyzer_factory(session: AsyncSession) -> URLAnalyzerService:
     return cast(URLAnalyzerService, None)
 
 
+def _job_factory(session: AsyncSession) -> JobService:
+    return cast(JobService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
         user_service_factory=_user_factory,
         rate_limit_service_factory=_rate_factory,
         analyzer_factory=_analyzer_factory,
+        job_service_factory=_job_factory,
+        notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
     )

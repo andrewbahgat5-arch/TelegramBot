@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 
 from infrastructure.database.models import User
 from infrastructure.database.repositories.base import SqlAlchemyRepository
@@ -58,3 +58,30 @@ class UserRepository(SqlAlchemyRepository[User]):
             user.daily_download_count_reset_date = current
             await self.session.flush()
         return user
+
+    async def increment_download_counters(
+        self, user_id: int, *, today: datetime.date | None = None
+    ) -> None:
+        """Bump ``total_downloads`` and the lazily-reset ``daily_download_count`` (16.6).
+
+        A single atomic UPDATE keyed by id; the CASE resets the daily counter when
+        its stored reset date is not today (D-012), avoiding a midnight batch.
+        """
+        current = today or datetime.datetime.now(datetime.UTC).date()
+        daily = case(
+            (
+                User.daily_download_count_reset_date == current,
+                User.daily_download_count + 1,
+            ),
+            else_=1,
+        )
+        await self.session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(
+                total_downloads=User.total_downloads + 1,
+                daily_download_count=daily,
+                daily_download_count_reset_date=current,
+            )
+        )
+        await self.session.flush()

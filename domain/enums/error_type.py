@@ -29,6 +29,7 @@ class ErrorType(StrEnum):
     # Internal / control flow
     DUPLICATE_DOWNLOAD = "duplicate_download"
     JOB_NOT_FOUND = "job_not_found"
+    CACHED_FILE_EXPIRED = "cached_file_expired"
     # Cache
     CACHE_CONNECTION = "cache_connection"
     CACHE_SERIALIZATION = "cache_serialization"

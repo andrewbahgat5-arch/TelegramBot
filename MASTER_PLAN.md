@@ -412,6 +412,8 @@ Every non-obvious decision is recorded here with date, rationale, and (if applic
 | D-037 | 2026-06-23 | Human Verification Gates (G-1 through G-8 in Section 25.13) require explicit Owner sign-off in the PR (`Gate <ID> approved`) before merge. The agent stops at the gate. | These are the spots where wrong code is most expensive. | Auto-merge for "low risk." |
 | D-038 | 2026-06-23 | Telegram E2E tests use a dedicated sandbox bot (created via @BotFather, separate from production) and a fixed pool of test accounts. The Telegram API is wrapped in `tests/e2e/harness.py`. | Real Telegram API behavior cannot be fully mocked; sandbox bot is the cheapest realism. | Pure mocks. |
 | D-039 | 2026-06-23 | Security testing is structured by category (Section 25.9.1 through 25.9.5). Categories may be added but never removed. Every release runs every category. | Locking the category set prevents quiet regressions in security coverage. | Ad-hoc security testing. |
+| D-040 | 2026-06-24 | V1 delivers files through a **self-hosted Telegram Bot API server** (2 GB upload cap), selected by a new `BOT_API_BASE_URL` env var (empty = public api.telegram.org, 50 MB). The bot and worker Telegram clients point at it; `max_file_size` (Section 13.4) stays the 2 GiB hard cap. | Owner directive (OQ-11) at Sprint 6 start: large media (HD video, lossless audio) routinely exceeds 50 MB, so the public API cap would make the core flow useless for most content. Base URL is a single env var; the public API remains the fallback. | Public Bot API only (50 MB); chunked/segmented delivery; external file hosts. |
+| D-041 | 2026-06-24 | **Per-codec audio** is modeled by extending the `Quality` enum with audio-codec members (`mp3`, `m4a`, `aac`, `ogg`, `opus`, `wav`, `flac`) and adding a descriptive `codec` field to `MediaFormatOption`. The chosen codec is the `quality` value, so the LOCKED `cached_files`/`active_downloads` unique key `(media_id, format, quality)` distinguishes codecs with no schema change. Audio targets are a fixed catalog offered whenever the media has any audio stream; native containers are remuxed, the rest are FFmpeg transcodes. | Owner carry-in: users want explicit MP3/M4A/Opus/etc. Encoding the codec in `quality` reuses the locked cache key (one cached file per codec) and keeps the enum additive (Section 9.4). | A parallel `audio_codec` column (schema change to the locked unique key); a separate `AudioCodec` enum carried out-of-band from the cache key (risks collisions). |
 
 ---
 
@@ -764,8 +766,8 @@ If a component is not listed here, it does not exist yet. Adding a component req
 
 #### Component: `JobService`
 - **Purpose:** Decide whether to serve from cache, attach to a running download, or create a new job.
-- **Responsibilities:** Check `cached_files`; on miss, attempt to insert into `active_downloads`; on conflict, attach the user to the existing job via `job_waiters`; on success, create a `jobs` row, enqueue.
-- **Dependencies:** `JobRepository`, `CachedFileRepository`, `ActiveDownloadRepository`, `JobWaiterRepository`, `QueueService`.
+- **Responsibilities:** Check `cached_files`; on hit, deliver the cached `file_id` instantly and record it (downloads row + counters + cache-hit progress edit, flow 16.2); on miss, claim `active_downloads`; on conflict, attach the user to the existing job via `job_waiters`; on success, create a `jobs` row, stash the worker's progress context + lock token in Redis (`job:{id}`), and enqueue.
+- **Dependencies:** `JobRepository`, `CachedFileRepository`, `ActiveDownloadRepository`, `JobWaiterRepository`, `DownloadRepository`, `UserRepository`, `QueueService`, `CacheService`, `FileSenderProtocol`, `NotificationService`. (The cache-hit path delivers + records directly, so it owns delivery for that path — flow 16.2.)
 - **Files/Folders:** `services/job_service.py`
 - **Related Services:** `DownloadService`, `NotificationService`.
 - **Can Modify:** Job priority assignment within documented bands.
@@ -962,10 +964,10 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Must Never Modify:** `TranscoderProtocol`.
 
 #### Component: `TelegramFileSender`
-- **Purpose:** Send files via Telegram, capturing `file_id` and `unique_file_id`.
-- **Files/Folders:** `infrastructure/telegram/file_sender.py`
-- **Can Modify:** Chunking thresholds.
-- **Must Never Modify:** `FileSenderProtocol`.
+- **Purpose:** Upload a file once to the storage chat to mint a reusable `file_id`/`unique_file_id`, and deliver cached files by `file_id`. Co-located `TelegramMessageSender` is the `MessageSenderProtocol` transport for `NotificationService` progress edits. The aiogram `Bot` is built by `build_bot` (`infrastructure/telegram/client.py`), which targets the self-hosted Bot API server when `BOT_API_BASE_URL` is set (D-040).
+- **Files/Folders:** `infrastructure/telegram/file_sender.py`, `infrastructure/telegram/client.py`
+- **Can Modify:** Chunking thresholds; storage-chat target.
+- **Must Never Modify:** `FileSenderProtocol`, `MessageSenderProtocol`.
 
 ### 9.6 API Layer
 
@@ -1577,6 +1579,7 @@ Env vars are for things that must be available before the database (DB credentia
 | `BOT_WEBHOOK_SECRET` | str | no | — | Required if webhook mode. |
 | `BOT_OWNER_TELEGRAM_ID` | int | yes | — | Hard owner. |
 | `BOT_PARSE_MODE` | str | no | `HTML` | |
+| `BOT_API_BASE_URL` | str | no | — | Empty → public api.telegram.org (50 MB). Set → self-hosted Bot API server (2 GB). D-040. |
 | `DB_HOST` | str | yes | `localhost` | |
 | `DB_PORT` | int | yes | `5432` | |
 | `DB_NAME` | str | yes | — | |

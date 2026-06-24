@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -114,19 +115,14 @@ class YtdlpProvider:
         dest.mkdir(parents=True, exist_ok=True)
         selector = _format_selector(media, format_, quality)
         out_template = str(dest / f"{media.video_id}.%(ext)s")
-        await self._run(
-            [
-                self._bin,
-                "-f",
-                selector,
-                "--no-playlist",
-                "--no-warnings",
-                "-o",
-                out_template,
-                media.source_url,
-            ],
-            timeout_s=self._download_timeout,
-        )
+        args = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
+        if format_ is MediaFormat.VIDEO:
+            # Merge into an mp4 container so Telegram plays it inline (sendVideo). The
+            # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
+            # native container and Telegram falls back to a document.
+            args += ["--merge-output-format", "mp4"]
+        args += ["-o", out_template, media.source_url]
+        await self._run(args, timeout_s=self._download_timeout)
         produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
         if not produced:
             raise ExtractionFailedError("Download produced no file.")
@@ -165,13 +161,14 @@ class YtdlpProvider:
 
     def _to_media_info(self, url: str, info: dict[str, Any]) -> MediaInfo:
         platform = detect_platform(url)
-        formats = tuple(_parse_formats(info.get("formats") or []))
+        duration = _opt_int(info.get("duration"))
+        formats = tuple(_parse_formats(info.get("formats") or [], duration))
         return MediaInfo(
             platform=platform,
             video_id=str(info.get("id") or ""),
             title=str(info.get("title") or "Untitled"),
             source_url=str(info.get("webpage_url") or url),
-            duration=_opt_int(info.get("duration")),
+            duration=duration,
             thumbnail_url=info.get("thumbnail"),
             formats=formats,
             raw=_curated_metadata(info),
@@ -191,41 +188,131 @@ def _map_error(stderr: str) -> Exception:
     return ExtractionFailedError("Extraction failed.")
 
 
-def _parse_formats(raw_formats: list[dict[str, Any]]) -> list[MediaFormatOption]:
-    options: list[MediaFormatOption] = []
+def _parse_formats(
+    raw_formats: list[dict[str, Any]], duration: int | None
+) -> list[MediaFormatOption]:
+    """Build provider-agnostic options with already-accurate, audio-inclusive sizes.
+
+    Sizing rules (fixes the non-monotonic display, Sprint 6 follow-up):
+    * Size = ``filesize`` / ``filesize_approx`` when present, else estimated from the
+      stream's bitrate times duration (``tbr``/``abr``) — so tiers without a reported
+      size still order correctly.
+    * A **video-only** stream's size has the best audio stream's size added (it will be
+      muxed with audio at download time). A **muxed** stream already includes audio, so
+      nothing is added — this is what previously double-counted (e.g. 360p > 1080p).
+    * Audio is offered whenever the media has *any* audio, including muxed-only sources
+      like TikTok (a generic audio option is emitted so the per-codec catalog expands).
+    """
+    video_rows: list[_VideoRow] = []
+    audio_options: list[MediaFormatOption] = []
+    best_audio_size = 0
+    has_audio = False
+
     for fmt in raw_formats:
         format_id = fmt.get("format_id")
         if not format_id:
             continue
-        vcodec = fmt.get("vcodec")
-        acodec = fmt.get("acodec")
+        has_v = _present(fmt.get("vcodec"))
+        has_a = _present(fmt.get("acodec"))
+        has_audio = has_audio or has_a
         size = _opt_int(fmt.get("filesize") or fmt.get("filesize_approx"))
-        height = _opt_int(fmt.get("height"))
-        width = _opt_int(fmt.get("width"))
-        if vcodec and vcodec != "none" and height:
-            options.append(
-                MediaFormatOption(
-                    format=MediaFormat.VIDEO,
+        height, width = _opt_int(fmt.get("height")), _opt_int(fmt.get("width"))
+        tbr, abr = _opt_float(fmt.get("tbr")), _opt_float(fmt.get("abr"))
+
+        if has_v and height:
+            est = size or _bitrate_size(tbr, duration)
+            video_rows.append(
+                _VideoRow(
                     quality=_quality_for_format(width, height, fmt.get("format_note")),
-                    approx_size_bytes=size,
-                    provider_format_id=str(format_id),
+                    size=est,
+                    format_id=str(format_id),
+                    codec=_codec_family(fmt.get("vcodec")),
+                    is_muxed=has_a,
                 )
             )
-        elif (not vcodec or vcodec == "none") and acodec and acodec != "none":
-            options.append(
+        elif not has_v and has_a:
+            est = size or _bitrate_size(abr or tbr, duration)
+            if est:
+                best_audio_size = max(best_audio_size, est)
+            audio_options.append(
                 MediaFormatOption(
                     format=MediaFormat.AUDIO,
                     quality=Quality.AUDIO,
-                    approx_size_bytes=size,
+                    approx_size_bytes=est,
                     provider_format_id=str(format_id),
+                    codec=_codec_family(fmt.get("acodec")),
                 )
             )
+
+    options: list[MediaFormatOption] = [
+        MediaFormatOption(
+            format=MediaFormat.VIDEO,
+            quality=row.quality,
+            approx_size_bytes=_video_size(row, best_audio_size),
+            provider_format_id=row.format_id,
+            codec=row.codec,
+        )
+        for row in video_rows
+    ]
+    options.extend(audio_options)
+
+    # Muxed-only sources (e.g. TikTok) expose no audio-only stream — still offer audio,
+    # extracted from the best stream at download time (selector ``bestaudio/best``).
+    if has_audio and not audio_options:
+        options.append(
+            MediaFormatOption(
+                format=MediaFormat.AUDIO,
+                quality=Quality.AUDIO,
+                approx_size_bytes=_best_muxed_audio_size(raw_formats, duration),
+                provider_format_id=None,
+                codec="audio",
+            )
+        )
     return options
 
 
-def _quality_for_format(
-    width: int | None, height: int | None, format_note: str | None
-) -> Quality:
+@dataclass(frozen=True, slots=True)
+class _VideoRow:
+    quality: Quality
+    size: int | None
+    format_id: str
+    codec: str | None
+    is_muxed: bool
+
+
+def _video_size(row: _VideoRow, best_audio_size: int) -> int | None:
+    if row.size is None:
+        return None
+    # Video-only streams gain the audio that will be muxed in; muxed streams already
+    # contain it, so adding again would double-count.
+    return row.size if row.is_muxed or not best_audio_size else row.size + best_audio_size
+
+
+def _best_muxed_audio_size(raw_formats: list[dict[str, Any]], duration: int | None) -> int | None:
+    abrs = [_opt_float(f.get("abr")) for f in raw_formats]
+    best = max((a for a in abrs if a), default=None)
+    return _bitrate_size(best, duration)
+
+
+def _present(codec: object) -> bool:
+    return bool(codec) and codec != "none"
+
+
+def _bitrate_size(kbps: float | None, duration: int | None) -> int | None:
+    """Estimate bytes from a bitrate (kbps) over a duration (s): kbps*1000/8*seconds."""
+    if not kbps or not duration:
+        return None
+    return int(kbps * 1000 / 8 * duration)
+
+
+def _codec_family(codec: object) -> str | None:
+    """Reduce a vendor codec string (``avc1.640028``, ``mp4a.40.2``) to its family."""
+    if not isinstance(codec, str) or not codec:
+        return None
+    return codec.split(".", 1)[0].strip().lower()
+
+
+def _quality_for_format(width: int | None, height: int | None, format_note: str | None) -> Quality:
     """Resolve a display quality tier robustly across aspect ratios.
 
     Prefers yt-dlp's own ``format_note`` label (e.g. "2160p60"); otherwise snaps the
@@ -250,11 +337,37 @@ def _nearest_tier(value: int, ladder: tuple[tuple[int, Quality], ...]) -> Qualit
     return min(ladder, key=lambda tier: abs(tier[0] - value))[1]
 
 
+_QUALITY_HEIGHT: dict[Quality, int] = {
+    Quality.P144: 144,
+    Quality.P240: 240,
+    Quality.P360: 360,
+    Quality.P480: 480,
+    Quality.P720: 720,
+    Quality.P1080: 1080,
+    Quality.P1440: 1440,
+    Quality.P2160: 2160,
+}
+
+
 def _format_selector(media: MediaInfo, format_: MediaFormat, quality: Quality) -> str:
-    for option in media.formats:
-        if option.format is format_ and option.quality is quality and option.provider_format_id:
-            return option.provider_format_id
-    return "bestaudio/best" if format_ is MediaFormat.AUDIO else "bestvideo+bestaudio/best"
+    """yt-dlp ``-f`` selector. Video always merges audio so downloads are never silent.
+
+    Using a height-capped ``bestvideo+bestaudio`` (rather than a single video-only
+    ``format_id``) guarantees the chosen resolution *and* an audio track, regardless of
+    which codecs the platform offers. Audio uses ``bestaudio/best`` so muxed-only
+    sources (TikTok) still yield an audio stream for FFmpeg to transcode.
+    """
+    if format_ is MediaFormat.AUDIO:
+        return "bestaudio/best"
+    height = _QUALITY_HEIGHT.get(quality)
+    cap = f"[height<={height}]" if height is not None else ""
+    # Prefer H.264 video + AAC audio in an mp4 (Telegram plays mp4 inline); then any
+    # codec at the tier; then any progressive format. Each step still caps the height.
+    return (
+        f"bestvideo{cap}[vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
+        f"bestvideo{cap}[ext=mp4]+bestaudio[ext=m4a]/"
+        f"bestvideo{cap}+bestaudio/best{cap}/best"
+    )
 
 
 def _curated_metadata(info: dict[str, Any]) -> dict[str, Any]:
@@ -265,5 +378,12 @@ def _curated_metadata(info: dict[str, Any]) -> dict[str, Any]:
 def _opt_int(value: Any) -> int | None:
     try:
         return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None

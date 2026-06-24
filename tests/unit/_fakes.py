@@ -8,6 +8,7 @@ fakes satisfy the same protocols the production code depends on.
 from __future__ import annotations
 
 import datetime
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -158,6 +159,20 @@ class FakeUserRepo:
             user.daily_download_count = 0
             user.daily_download_count_reset_date = current
         return user
+
+    async def increment_download_counters(
+        self, user_id: int, *, today: datetime.date | None = None
+    ) -> None:
+        current = today or _today()
+        user = next((u for u in self.by_tid.values() if u.id == user_id), None)
+        if user is None:
+            return
+        user.total_downloads += 1
+        if user.daily_download_count_reset_date == current:
+            user.daily_download_count += 1
+        else:
+            user.daily_download_count = 1
+            user.daily_download_count_reset_date = current
 
 
 # --- Settings store fake --------------------------------------------------
@@ -343,3 +358,454 @@ class FakeMediaRepo:
             return row
         existing.metadata_json = {**(metadata_json or {}), **(existing.metadata_json or {})}
         return existing
+
+
+# --- Sprint 6 pipeline fakes ----------------------------------------------
+
+
+@dataclass
+class FakeJobRow:
+    id: uuid.UUID
+    user_id: int
+    media_id: int
+    format: str
+    quality: str
+    status: str
+    priority: int = 1000
+    retry_count: int = 0
+    correlation_id: uuid.UUID | None = None
+    error_message: str | None = None
+
+
+class FakeJobRepo:
+    """In-memory ``JobRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.jobs: dict[uuid.UUID, FakeJobRow] = {}
+
+    async def add(self, entity: FakeJobRow) -> FakeJobRow:
+        self.jobs[entity.id] = entity
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeJobRow | None:
+        return self.jobs.get(id_)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[FakeJobRow]:
+        return list(self.jobs.values())[offset : offset + limit]
+
+    async def delete(self, entity: FakeJobRow) -> None:
+        self.jobs.pop(entity.id, None)
+
+    async def get_by_uuid(self, job_id: uuid.UUID) -> FakeJobRow | None:
+        return self.jobs.get(job_id)
+
+    async def create(
+        self,
+        *,
+        job_id: uuid.UUID,
+        user_id: int,
+        media_id: int,
+        format_: str,
+        quality: str,
+        priority: int,
+        correlation_id: uuid.UUID | None,
+        status: str,
+    ) -> FakeJobRow:
+        row = FakeJobRow(
+            id=job_id,
+            user_id=user_id,
+            media_id=media_id,
+            format=format_,
+            quality=quality,
+            status=status,
+            priority=priority,
+            correlation_id=correlation_id,
+        )
+        self.jobs[job_id] = row
+        return row
+
+    async def set_status(
+        self,
+        job_id: uuid.UUID,
+        status: str,
+        *,
+        started_at: datetime.datetime | None = None,
+        finished_at: datetime.datetime | None = None,
+        error_message: str | None = None,
+        increment_retry: bool = False,
+    ) -> None:
+        row = self.jobs.get(job_id)
+        if row is None:
+            return
+        row.status = status
+        if error_message is not None:
+            row.error_message = error_message
+        if increment_retry:
+            row.retry_count += 1
+
+
+@dataclass
+class FakeCachedFileRow:
+    id: int
+    media_id: int
+    format: str
+    quality: str
+    telegram_file_id: str
+    telegram_unique_file_id: str
+    file_size: int | None
+    usage_count: int = 1
+
+
+class FakeCachedFileRepo:
+    """In-memory ``CachedFileRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.by_key: dict[tuple[int, str, str], FakeCachedFileRow] = {}
+        self.by_id: dict[int, FakeCachedFileRow] = {}
+        self._next_id = 1
+
+    async def add(self, entity: FakeCachedFileRow) -> FakeCachedFileRow:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeCachedFileRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(
+        self, *, limit: int = 50, offset: int = 0
+    ) -> Sequence[FakeCachedFileRow]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: FakeCachedFileRow) -> None:
+        self.by_id.pop(entity.id, None)
+        self.by_key.pop((entity.media_id, entity.format, entity.quality), None)
+
+    async def get_by_media_format_quality(
+        self, media_id: int, format_: str, quality: str
+    ) -> FakeCachedFileRow | None:
+        return self.by_key.get((media_id, format_, quality))
+
+    async def upsert(
+        self,
+        *,
+        media_id: int,
+        format_: str,
+        quality: str,
+        telegram_file_id: str,
+        telegram_unique_file_id: str,
+        file_size: int | None,
+    ) -> FakeCachedFileRow:
+        key = (media_id, format_, quality)
+        existing = self.by_key.get(key)
+        if existing is not None:
+            existing.telegram_file_id = telegram_file_id
+            existing.telegram_unique_file_id = telegram_unique_file_id
+            existing.file_size = file_size
+            existing.usage_count += 1
+            return existing
+        row = FakeCachedFileRow(
+            id=self._next_id,
+            media_id=media_id,
+            format=format_,
+            quality=quality,
+            telegram_file_id=telegram_file_id,
+            telegram_unique_file_id=telegram_unique_file_id,
+            file_size=file_size,
+        )
+        self._next_id += 1
+        self.by_key[key] = row
+        self.by_id[row.id] = row
+        return row
+
+    async def bump_usage(self, cached_file_id: int) -> None:
+        row = self.by_id.get(cached_file_id)
+        if row is not None:
+            row.usage_count += 1
+
+
+@dataclass
+class FakeActiveDownloadRow:
+    media_id: int
+    format: str
+    quality: str
+    job_id: uuid.UUID
+
+
+class FakeActiveDownloadRepo:
+    """In-memory ``ActiveDownloadRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.by_key: dict[tuple[int, str, str], FakeActiveDownloadRow] = {}
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> Any:
+        return None
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return list(self.by_key.values())[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        return None
+
+    async def get_by_media_format_quality(
+        self, media_id: int, format_: str, quality: str
+    ) -> FakeActiveDownloadRow | None:
+        return self.by_key.get((media_id, format_, quality))
+
+    async def insert_if_absent(
+        self, *, media_id: int, format_: str, quality: str, job_id: uuid.UUID
+    ) -> bool:
+        key = (media_id, format_, quality)
+        if key in self.by_key:
+            return False
+        self.by_key[key] = FakeActiveDownloadRow(media_id, format_, quality, job_id)
+        return True
+
+    async def delete_by_job(self, job_id: uuid.UUID) -> int:
+        before = len(self.by_key)
+        self.by_key = {k: v for k, v in self.by_key.items() if v.job_id != job_id}
+        return before - len(self.by_key)
+
+
+@dataclass
+class FakeWaiterRow:
+    job_id: uuid.UUID
+    user_id: int
+    correlation_id: uuid.UUID | None = None
+
+
+class FakeJobWaiterRepo:
+    """In-memory ``JobWaiterRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.waiters: list[FakeWaiterRow] = []
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> Any:
+        return None
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return self.waiters[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        return None
+
+    async def list_for_job(self, job_id: uuid.UUID) -> Sequence[FakeWaiterRow]:
+        return [w for w in self.waiters if w.job_id == job_id]
+
+    async def delete_for_job(self, job_id: uuid.UUID) -> int:
+        before = len(self.waiters)
+        self.waiters = [w for w in self.waiters if w.job_id != job_id]
+        return before - len(self.waiters)
+
+    async def add_waiter(
+        self, *, job_id: uuid.UUID, user_id: int, correlation_id: uuid.UUID | None
+    ) -> bool:
+        if any(w.job_id == job_id and w.user_id == user_id for w in self.waiters):
+            return False
+        self.waiters.append(FakeWaiterRow(job_id, user_id, correlation_id))
+        return True
+
+
+@dataclass
+class FakeDownloadRow:
+    user_id: int
+    cached_file_id: int | None
+    platform: str
+    format: str
+    quality: str
+    file_size: int | None
+    status: str = "completed"
+
+
+class FakeDownloadRepo:
+    """In-memory ``DownloadRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.rows: list[FakeDownloadRow] = []
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> Any:
+        return None
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return self.rows[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        return None
+
+    async def list_for_user(
+        self, user_id: int, *, limit: int = 10, offset: int = 0
+    ) -> Sequence[FakeDownloadRow]:
+        return [r for r in self.rows if r.user_id == user_id][offset : offset + limit]
+
+    async def create_completed(
+        self,
+        *,
+        user_id: int,
+        cached_file_id: int | None,
+        platform: str,
+        format_: str,
+        quality: str,
+        file_size: int | None,
+        status: str = "completed",
+    ) -> FakeDownloadRow:
+        row = FakeDownloadRow(
+            user_id=user_id,
+            cached_file_id=cached_file_id,
+            platform=platform,
+            format=format_,
+            quality=quality,
+            file_size=file_size,
+            status=status,
+        )
+        self.rows.append(row)
+        return row
+
+
+class FakeQueueBackend:
+    """In-memory ``QueueProtocol`` (lowest score first)."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[float, str]] = []
+        self.active: set[str] = set()
+
+    async def enqueue(self, member: str, *, score: float) -> None:
+        self.entries.append((score, member))
+        self.entries.sort(key=lambda e: e[0])
+
+    async def dequeue(self) -> str | None:
+        if not self.entries:
+            return None
+        _, member = self.entries.pop(0)
+        self.active.add(member)
+        return member
+
+    async def ack(self, member: str) -> None:
+        self.active.discard(member)
+
+    async def depth(self) -> int:
+        return len(self.entries)
+
+    async def active_count(self) -> int:
+        return len(self.active)
+
+
+class FakeFileSender:
+    """In-memory ``FileSenderProtocol`` recording uploads and deliveries.
+
+    ``uploads`` records the chat each file was uploaded to (the first waiter's
+    delivery); ``sent`` records ``send_cached`` deliveries to additional waiters.
+    """
+
+    def __init__(
+        self,
+        *,
+        file_id: str = "tg-file-id",
+        unique: str = "tg-unique",
+        send_cached_error: Exception | None = None,
+    ) -> None:
+        self._file_id = file_id
+        self._unique = unique
+        self._send_cached_error = send_cached_error
+        self.uploads: list[tuple[int, Path]] = []
+        self.filenames: list[str] = []
+        self.sent: list[tuple[int, str]] = []
+
+    async def upload(
+        self,
+        path: Path,
+        *,
+        format_: MediaFormat,
+        quality: Quality,
+        chat_id: int,
+        filename: str,
+        caption: str | None = None,
+    ) -> Any:
+        from domain.protocols.file_sender import UploadedFile
+
+        self.uploads.append((chat_id, path))
+        self.filenames.append(filename)
+        size = path.stat().st_size if path.exists() else None
+        return UploadedFile(file_id=self._file_id, unique_file_id=self._unique, size_bytes=size)
+
+    async def send_cached(
+        self,
+        telegram_id: int,
+        file_id: str,
+        *,
+        format_: MediaFormat,
+        quality: Quality,
+        caption: str | None = None,
+    ) -> None:
+        if self._send_cached_error is not None:
+            raise self._send_cached_error
+        self.sent.append((telegram_id, file_id))
+
+
+class FakeMessageSender:
+    """In-memory ``MessageSenderProtocol`` recording sends/edits."""
+
+    def __init__(self) -> None:
+        self._next_id = 100
+        self.sent: list[tuple[int, str]] = []
+        self.edits: list[tuple[int, int, str]] = []
+
+    async def send_message(self, chat_id: int, text: str) -> int:
+        self._next_id += 1
+        self.sent.append((chat_id, text))
+        return self._next_id
+
+    async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
+        self.edits.append((chat_id, message_id, text))
+
+
+class FakeTranscoder:
+    """In-memory ``TranscoderProtocol``: writes a target-extension file."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def transcode_audio(self, source: Path, target: Any) -> Path:
+        self.calls.append(target.quality.value)
+        dest = source.with_suffix(f".{target.container}")
+        dest.write_bytes(b"transcoded-audio")
+        return dest
+
+
+class FakeFileDownloader:
+    """A ``DownloaderProtocol`` whose ``download`` writes a real temp file."""
+
+    def __init__(self, *, content: bytes = b"video-bytes", error: Exception | None = None) -> None:
+        self.name = "fake"
+        self.supported_platforms = {"*"}
+        self.capabilities = {Capability.VIDEO, Capability.AUDIO}
+        self.priority = 100
+        self._content = content
+        self._error = error
+        self.calls = 0
+
+    async def extract_info(self, url: str) -> MediaInfo:
+        return MediaInfo(platform="generic", video_id="vid", title="T", source_url=url)
+
+    async def download(
+        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+    ) -> DownloadedFile:
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        dest.mkdir(parents=True, exist_ok=True)
+        ext = "m4a" if format_ is MediaFormat.AUDIO else "mp4"
+        path = dest / f"{media.video_id}.{ext}"
+        path.write_bytes(self._content)
+        return DownloadedFile(
+            path=path, size_bytes=len(self._content), format=format_, quality=quality
+        )
+
+    async def health_check(self) -> ProviderHealth:
+        return ProviderHealth.OK

@@ -98,6 +98,12 @@ def clear_correlation_id() -> None:
     structlog.contextvars.unbind_contextvars(_CORRELATION_KEY)
 
 
+def get_correlation_id() -> str | None:
+    """Return the correlation ID bound to the current context, if any (Section 15.2)."""
+    value = structlog.contextvars.get_contextvars().get(_CORRELATION_KEY)
+    return value if isinstance(value, str) else None
+
+
 @contextmanager
 def correlation_context(correlation_id: str) -> Iterator[None]:
     """Bind ``correlation_id`` for the duration of the ``with`` block."""

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     bot_webhook_secret: SecretStr = Field(SecretStr(""), alias="BOT_WEBHOOK_SECRET")
     bot_owner_telegram_id: int = Field(..., alias="BOT_OWNER_TELEGRAM_ID")
     bot_parse_mode: str = Field("HTML", alias="BOT_PARSE_MODE")
+    # Empty → public api.telegram.org (50 MB upload cap). Set to a self-hosted
+    # Telegram Bot API server base URL (e.g. http://bot-api:8081) to raise the cap
+    # to 2 GB (D-040). Used by the bot + worker Telegram clients.
+    bot_api_base_url: str = Field("", alias="BOT_API_BASE_URL")
 
     # --- Database ---
     db_host: str = Field("localhost", alias="DB_HOST")
@@ -134,6 +138,11 @@ class Settings(BaseSettings):
     def use_webhook(self) -> bool:
         """Empty webhook URL means long-polling mode (Section 13.2)."""
         return bool(self.bot_webhook_url)
+
+    @property
+    def use_local_bot_api(self) -> bool:
+        """A configured base URL selects the self-hosted Bot API server (D-040)."""
+        return bool(self.bot_api_base_url)
 
     # --- Safe representation (Section 14.3) ---
     def __repr__(self) -> str:

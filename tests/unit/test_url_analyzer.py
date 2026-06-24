@@ -49,8 +49,15 @@ async def test_cache_miss_extracts_upserts_and_normalizes() -> None:
     assert downloader.calls == 1
     assert repo.upserts == 1
     assert result.media_id == 1
-    # The two P720 video options were deduplicated to one (+ the audio option).
-    assert len(result.info.formats) == 2
+    # The two P720 video options dedupe to one; the audio source expands to the
+    # 7-codec catalog (D-041) → 1 video + 7 audio.
+    videos = [o for o in result.info.formats if o.format is MediaFormat.VIDEO]
+    audios = [o for o in result.info.formats if o.format is MediaFormat.AUDIO]
+    assert len(videos) == 1
+    assert len(audios) == 7
+    # normalize_formats preserves the provider-supplied size (the provider already
+    # folds audio into video-only sizes); it does not re-add audio here.
+    assert videos[0].approx_size_bytes == 200
     # platform/video_id come from the URL, not the provider's claim.
     assert result.info.platform == "generic"
 

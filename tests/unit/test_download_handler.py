@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 from aiogram.types import CallbackQuery, Message
@@ -9,15 +11,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.download import (
+    handle_back,
     handle_format_choice,
     handle_quality_choice,
     handle_url,
 )
 from domain.entities.media import MediaFormatOption, MediaInfo
-from domain.enums import MediaFormat, Quality
+from domain.entities.user import UserSnapshot
+from domain.enums import MediaFormat, Quality, UserRole
 from domain.exceptions import ExtractionFailedError, URLNotSupportedError
+from services.job_service import JobService
+from services.notification_service import NotificationService
+from services.queue_service import QueueService
 from services.url_analyzer import URLAnalyzerService
-from tests.unit._fakes import FakeMediaRepo, FakeProvider, make_cache_service
+from tests.unit._fakes import (
+    FakeActiveDownloadRepo,
+    FakeCachedFileRepo,
+    FakeDownloadRepo,
+    FakeFileSender,
+    FakeJobRepo,
+    FakeJobWaiterRepo,
+    FakeMediaRepo,
+    FakeMessageSender,
+    FakeProvider,
+    FakeQueueBackend,
+    FakeUserRepo,
+    load_settings,
+    make_cache_service,
+)
+
+
+def _today() -> datetime.date:
+    return datetime.datetime.now(datetime.UTC).date()
+
 
 _URL = "https://example.org/clip"
 
@@ -45,40 +71,45 @@ def _session() -> AsyncSession:
     return object()  # type: ignore[return-value]  # analyzer factory ignores it here
 
 
-async def test_url_message_shows_format_keyboard() -> None:
-    analyzer = _analyzer()
+def _message_with_ack() -> tuple[AsyncMock, AsyncMock]:
+    """A message whose .answer returns an ack message (both with async shortcuts)."""
+    ack = AsyncMock(spec=Message)
+    ack.edit_text = AsyncMock()
+    ack.delete = AsyncMock()
     message = AsyncMock(spec=Message)
     message.text = _URL
-    message.answer = AsyncMock()
+    message.answer = AsyncMock(return_value=ack)
+    message.answer_photo = AsyncMock()
+    return message, ack
+
+
+async def test_url_message_shows_format_keyboard() -> None:
+    analyzer = _analyzer()  # _result() has no thumbnail → ack is edited in place
+    message, ack = _message_with_ack()
 
     await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
 
-    message.answer.assert_awaited_once()
-    args = message.answer.await_args
-    assert args is not None and args.kwargs.get("reply_markup") is not None
+    message.answer.assert_awaited_once()  # the instant "Analyzing…" ack
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.kwargs.get("reply_markup") is not None
 
 
 async def test_url_message_unsupported_replies_without_keyboard() -> None:
     analyzer = _analyzer(error=URLNotSupportedError())
-    message = AsyncMock(spec=Message)
-    message.text = _URL
-    message.answer = AsyncMock()
+    message, ack = _message_with_ack()
 
     await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
 
-    message.answer.assert_awaited_once()
-    args = message.answer.await_args
-    assert args is not None and args.kwargs.get("reply_markup") is None
+    ack.edit_text.assert_awaited_once()  # the ack is edited to the error text
+    assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
 
 async def test_url_message_extraction_failed_replies() -> None:
     analyzer = _analyzer(error=ExtractionFailedError())
-    message = AsyncMock(spec=Message)
-    message.text = _URL
-    message.answer = AsyncMock()
+    message, ack = _message_with_ack()
     await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
-    args = message.answer.await_args
-    assert args is not None and args.kwargs.get("reply_markup") is None
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
 
 async def test_url_message_no_formats_replies() -> None:
@@ -88,12 +119,10 @@ async def test_url_message_no_formats_replies() -> None:
     )
     cache_service, _ = make_cache_service()
     analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
-    message = AsyncMock(spec=Message)
-    message.text = _URL
-    message.answer = AsyncMock()
+    message, ack = _message_with_ack()
     await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
-    args = message.answer.await_args
-    assert args is not None and args.kwargs.get("reply_markup") is None
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
 
 async def test_format_choice_expired_media_alerts() -> None:
@@ -116,12 +145,59 @@ async def test_format_choice_shows_quality_keyboard() -> None:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = signer.pack_format(analyzed.media_id, MediaFormat.VIDEO)
     callback.message = AsyncMock(spec=Message)
+    callback.message.photo = None  # text chooser → edit_text path
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
     await handle_format_choice(callback, _session(), lambda s: analyzer, signer)
 
     callback.message.edit_text.assert_awaited_once()
+    callback.answer.assert_awaited_once()
+
+
+async def test_format_choice_edits_caption_for_photo_chooser() -> None:
+    signer = CallbackSigner("k")
+    analyzer = _analyzer()
+    analyzed = await analyzer.analyze(_URL)
+
+    callback = AsyncMock(spec=CallbackQuery)
+    callback.data = signer.pack_format(analyzed.media_id, MediaFormat.VIDEO)
+    callback.message = AsyncMock(spec=Message)
+    callback.message.photo = [object()]  # photo chooser → edit_caption path
+    callback.message.edit_caption = AsyncMock()
+    callback.answer = AsyncMock()
+
+    await handle_format_choice(callback, _session(), lambda s: analyzer, signer)
+
+    callback.message.edit_caption.assert_awaited_once()
+
+
+async def test_back_returns_to_format_keyboard() -> None:
+    signer = CallbackSigner("k")
+    analyzer = _analyzer()
+    analyzed = await analyzer.analyze(_URL)  # populate repo + cache
+
+    callback = AsyncMock(spec=CallbackQuery)
+    callback.data = signer.pack_back(analyzed.media_id)
+    callback.message = AsyncMock(spec=Message)
+    callback.message.photo = None
+    callback.message.edit_text = AsyncMock()
+    callback.answer = AsyncMock()
+
+    await handle_back(callback, _session(), lambda s: analyzer, signer)
+
+    callback.message.edit_text.assert_awaited_once()
+    call = callback.message.edit_text.await_args
+    assert call is not None and call.kwargs.get("reply_markup") is not None
+    callback.answer.assert_awaited_once()
+
+
+async def test_back_forged_ignored() -> None:
+    analyzer = _analyzer()
+    callback = AsyncMock(spec=CallbackQuery)
+    callback.data = "b|1|deadbeef00"  # bad signature
+    callback.answer = AsyncMock()
+    await handle_back(callback, _session(), lambda s: analyzer, CallbackSigner("k"))
     callback.answer.assert_awaited_once()
 
 
@@ -144,24 +220,99 @@ async def test_format_choice_forged_data_ignored() -> None:
     assert called is False  # forged callback never reaches the analyzer
 
 
-async def test_quality_choice_confirms_selection() -> None:
+async def test_url_message_with_thumbnail_sends_photo() -> None:
+    info = MediaInfo(
+        platform="x",
+        video_id="vid",
+        title="A Clip",
+        source_url=_URL,
+        thumbnail_url="https://img.example/t.jpg",
+        formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P720, 1_000_000, "a"),),
+    )
+    downloader = FakeProvider("ytdlp", result=info)
+    cache_service, _ = make_cache_service()
+    analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
+    message, ack = _message_with_ack()
+
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+
+    message.answer.assert_awaited_once()  # instant ack
+    message.answer_photo.assert_awaited_once()  # thumbnail + keyboard
+    ack.delete.assert_awaited_once()  # ack removed once the rich message is shown
+
+
+def _user() -> UserSnapshot:
+    return UserSnapshot(
+        id=7,
+        telegram_id=555,
+        role=UserRole.USER,
+        is_banned=False,
+        is_premium=False,
+        daily_download_count=0,
+        daily_download_count_reset_date=_today(),
+        total_downloads=0,
+    )
+
+
+def _job_service() -> tuple[JobService, FakeQueueBackend]:
+    cache_service, _ = make_cache_service()
+    backend = FakeQueueBackend()
+    service = JobService(
+        job_repo=FakeJobRepo(),
+        cached_file_repo=FakeCachedFileRepo(),
+        active_download_repo=FakeActiveDownloadRepo(),
+        job_waiter_repo=FakeJobWaiterRepo(),
+        download_repo=FakeDownloadRepo(),
+        user_repo=FakeUserRepo(),
+        queue_service=QueueService(backend),
+        cache_service=cache_service,
+        file_sender=FakeFileSender(),
+        notification_service=NotificationService(FakeMessageSender()),
+        settings=load_settings(),
+    )
+    return service, backend
+
+
+async def test_quality_choice_enqueues_job() -> None:
     signer = CallbackSigner("k")
+    analyzer = _analyzer()
+    analyzed = await analyzer.analyze(_URL)  # populate repo so analyze_by_media_id works
+    job_service, backend = _job_service()
+    notifier = NotificationService(FakeMessageSender())
+
     callback = AsyncMock(spec=CallbackQuery)
-    callback.data = signer.pack_quality(3, MediaFormat.VIDEO, Quality.P720)
-    callback.message = AsyncMock(spec=Message)
-    callback.message.edit_text = AsyncMock()
+    callback.data = signer.pack_quality(analyzed.media_id, MediaFormat.VIDEO, Quality.P720)
+    callback.from_user = SimpleNamespace(id=555)
     callback.answer = AsyncMock()
 
-    await handle_quality_choice(callback, signer)
+    await handle_quality_choice(
+        callback,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        lambda s: job_service,
+        notifier,
+        signer,
+    )
 
     callback.answer.assert_awaited_once()
-    callback.message.edit_text.assert_awaited_once()
+    assert await backend.depth() == 1  # a job was enqueued (cache miss)
 
 
 async def test_quality_choice_forged_ignored() -> None:
+    job_service, backend = _job_service()
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = "q|x|video|720p|bad"
     callback.answer = AsyncMock()
 
-    await handle_quality_choice(callback, CallbackSigner("k"))
+    await handle_quality_choice(
+        callback,
+        _session(),
+        _user(),
+        lambda s: _analyzer(),
+        lambda s: job_service,
+        NotificationService(FakeMessageSender()),
+        CallbackSigner("k"),
+    )
     callback.answer.assert_awaited_once()
+    assert await backend.depth() == 0  # forged → never enqueued

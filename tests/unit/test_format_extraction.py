@@ -25,12 +25,17 @@ def test_dedup_prefers_concrete_then_larger() -> None:
 
 def test_sorts_video_before_audio_best_first() -> None:
     options = [
-        MediaFormatOption(MediaFormat.AUDIO, Quality.AUDIO),
+        MediaFormatOption(MediaFormat.AUDIO, Quality.AUDIO, 100, "a"),
         _vid(Quality.P480),
         _vid(Quality.P1080),
     ]
     result = normalize_formats(options)
-    assert [o.quality for o in result] == [Quality.P1080, Quality.P480, Quality.AUDIO]
+    videos = [o for o in result if o.format is MediaFormat.VIDEO]
+    audios = [o for o in result if o.format is MediaFormat.AUDIO]
+    # Video group sorts best-first; the audio source expands to the codec catalog (D-041).
+    assert [o.quality for o in videos] == [Quality.P1080, Quality.P480]
+    assert len(audios) == 7
+    assert result[0].format is MediaFormat.VIDEO and result[-1].format is MediaFormat.AUDIO
 
 
 def test_empty_input() -> None:

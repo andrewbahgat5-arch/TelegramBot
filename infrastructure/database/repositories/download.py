@@ -25,3 +25,26 @@ class DownloadRepository(SqlAlchemyRepository[Download]):
             .offset(offset)
         )
         return result.scalars().all()
+
+    async def create_completed(
+        self,
+        *,
+        user_id: int,
+        cached_file_id: int | None,
+        platform: str,
+        format_: str,
+        quality: str,
+        file_size: int | None,
+        status: str = "completed",
+    ) -> Download:
+        """Insert a denormalized history row for a delivered download (10.5, 16.1 W7)."""
+        download = Download(
+            user_id=user_id,
+            cached_file_id=cached_file_id,
+            platform=platform,
+            format=format_,
+            quality=quality,
+            file_size=file_size,
+            status=status,
+        )
+        return await self.add(download)

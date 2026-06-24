@@ -102,6 +102,18 @@ class JobNotFoundError(AppError):
     error_type = ErrorType.JOB_NOT_FOUND
 
 
+class CachedFileExpiredError(AppError):
+    """A cached Telegram ``file_id`` is no longer valid.
+
+    Telegram ``file_id``s are scoped to the bot (and to the API server) that created
+    them, and Telegram may also expire them. When a cache-hit resend is rejected with
+    "wrong file identifier", the caller evicts the stale ``cached_files`` entry and
+    falls back to a fresh download. Not user-facing — it drives self-healing.
+    """
+
+    error_type = ErrorType.CACHED_FILE_EXPIRED
+
+
 # --- Cache ----------------------------------------------------------------
 class CacheError(AppError):
     """Base for Redis cache failures."""
@@ -133,6 +145,7 @@ __all__ = [
     "CacheConnectionError",
     "CacheError",
     "CacheSerializationError",
+    "CachedFileExpiredError",
     "CooldownActiveError",
     "DailyLimitExceededError",
     "DatabaseConnectionError",
