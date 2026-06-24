@@ -83,6 +83,42 @@ class CacheService:
     async def delete_job_context(self, job_id: str) -> None:
         await self._cache.delete(RedisKeys.job(job_id))
 
+    async def add_waiter_progress(
+        self, job_id: str, user_id: int, telegram_id: int, message_id: int
+    ) -> None:
+        """Register a fan-out waiter's progress message so the worker can notify them.
+
+        Best-effort: progress display is cosmetic (delivery correctness comes from the
+        durable ``job_waiters`` table). A lost update under a rare concurrent attach
+        only means that waiter sees no ✅/❌ edit, not a missed file.
+        """
+        ctx = await self.get_job_context(job_id) or {}
+        progress = dict(ctx.get("progress", {}))
+        progress[str(user_id)] = {"telegram_id": telegram_id, "message_id": message_id}
+        ctx["progress"] = progress
+        await self.set_job_context(job_id, ctx, ttl=self._settings.cache_lock_ttl)
+
+    async def record_uploaded_file(self, job_id: str, file_id: str, unique_file_id: str) -> None:
+        """Persist the minted ``file_id`` so a retried worker reuses it (idempotency).
+
+        Survives the per-job DB transaction's rollback (Redis is outside it), so a
+        retry after partial delivery skips the re-upload — the first waiter is never
+        delivered to twice.
+        """
+        ctx = await self.get_job_context(job_id) or {}
+        ctx["file_id"] = file_id
+        ctx["unique_file_id"] = unique_file_id
+        await self.set_job_context(job_id, ctx, ttl=self._settings.cache_lock_ttl)
+
+    async def record_delivered(self, job_id: str, user_id: int) -> None:
+        """Mark a waiter as already delivered so a retry won't re-send their file."""
+        ctx = await self.get_job_context(job_id) or {}
+        delivered = list(ctx.get("delivered", []))
+        if user_id not in delivered:
+            delivered.append(user_id)
+        ctx["delivered"] = delivered
+        await self.set_job_context(job_id, ctx, ttl=self._settings.cache_lock_ttl)
+
     # --- download lock ---
     async def acquire_download_lock(self, media_id: int, format_: str, quality: str) -> str | None:
         return await self._lock.acquire(

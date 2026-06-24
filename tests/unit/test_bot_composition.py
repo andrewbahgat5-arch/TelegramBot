@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
+from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
@@ -38,6 +39,10 @@ def _job_factory(session: AsyncSession) -> JobService:
     return cast(JobService, None)
 
 
+def _history_factory(session: AsyncSession) -> HistoryService:
+    return cast(HistoryService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
@@ -45,10 +50,11 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         rate_limit_service_factory=_rate_factory,
         analyzer_factory=_analyzer_factory,
         job_service_factory=_job_factory,
+        history_service_factory=_history_factory,
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
     )
     assert isinstance(dp, Dispatcher)
-    # start + help + download routers are all included.
-    assert len(dp.sub_routers) == 3
+    # start + help + download + history routers are all included.
+    assert len(dp.sub_routers) == 4

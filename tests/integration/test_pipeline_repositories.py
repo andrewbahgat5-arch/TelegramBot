@@ -185,3 +185,42 @@ async def test_download_create_completed(db_session: AsyncSession, telegram_id: 
     assert row.status == "completed"
     history = await repo.list_for_user(user.id)
     assert len(history) == 1 and history[0].cached_file_id == cached.id
+
+
+async def test_download_get_for_user_is_owner_scoped(
+    db_session: AsyncSession, telegram_id: int
+) -> None:
+    owner = await _make_user(db_session, telegram_id)
+    other = await _make_user(db_session, telegram_id + 1)
+    repo = DownloadRepository(db_session)
+    row = await repo.create_completed(
+        user_id=owner.id,
+        cached_file_id=None,
+        platform="youtube",
+        format_="video",
+        quality="720p",
+        file_size=1,
+    )
+
+    # The owner can fetch their row; another user gets nothing (resend can't leak, 16.3).
+    assert (await repo.get_for_user(row.id, owner.id)) is not None
+    assert (await repo.get_for_user(row.id, other.id)) is None
+
+
+async def test_download_list_for_user_is_newest_first(
+    db_session: AsyncSession, telegram_id: int
+) -> None:
+    user = await _make_user(db_session, telegram_id)
+    repo = DownloadRepository(db_session)
+    for quality in ("240p", "480p", "1080p"):  # inserted oldest → newest
+        await repo.create_completed(
+            user_id=user.id,
+            cached_file_id=None,
+            platform="youtube",
+            format_="video",
+            quality=quality,
+            file_size=1,
+        )
+
+    page = await repo.list_for_user(user.id, limit=2, offset=0)
+    assert [r.quality for r in page] == ["1080p", "480p"]  # newest first, paginated

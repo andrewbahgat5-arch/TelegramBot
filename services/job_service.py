@@ -7,9 +7,10 @@ Decides what happens when a user requests a (media, format, quality):
 * **Cache miss** — claim the ``active_downloads`` slot, create a ``jobs`` row + the
   originator ``job_waiters`` row, stash the request-side context (progress message,
   lock token) for the worker, and enqueue (flow 16.1 T0-T6).
-* **Duplicate active request** — Sprint 6 attaches the user as a waiter and tells
-  them it is already in flight; full multi-recipient fan-out delivery lands in
-  Sprint 7 (Task 7.1/7.2).
+* **Duplicate active request** — attach the user as a waiter on the in-flight job
+  (16.4), register their progress message so the worker notifies them on completion,
+  and tell them it is already being prepared. Multi-recipient delivery happens in the
+  worker's ``DownloadService._deliver`` (Task 7.1/7.2).
 
 The Redis download lock is acquired here and *released by the worker* on completion
 (W11); its token travels in the job context so the worker can compare-and-delete it.
@@ -126,7 +127,11 @@ class JobService:
             await self._waiters.add_waiter(
                 job_id=existing.job_id, user_id=user_id, correlation_id=correlation_id
             )
-            # TODO(Sprint 7, Task 7.2): deliver to all waiters + per-waiter progress.
+            # Fan-out (16.4): register this waiter's progress message so the worker
+            # edits it to ✅/❌ alongside the originator's on completion (Task 7.1).
+            await self._cache.add_waiter_progress(
+                str(existing.job_id), user_id, telegram_id, progress_message_id
+            )
             _log.info("job_duplicate_attached", job_id=str(existing.job_id), user_id=user_id)
             return RequestOutcome(RequestKind.DUPLICATE, job_id=str(existing.job_id))
 
@@ -154,6 +159,11 @@ class JobService:
                 "title": info.title,
                 "format": fmt,
                 "quality": qual,
+                # Per-waiter progress messages, keyed by user id. The originator is the
+                # first waiter; fan-out duplicates append themselves (16.4, Task 7.1).
+                "progress": {
+                    str(user_id): {"telegram_id": telegram_id, "message_id": progress_message_id}
+                },
             },
             ttl=self._settings.cache_lock_ttl,
         )

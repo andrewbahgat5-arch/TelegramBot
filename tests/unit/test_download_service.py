@@ -73,6 +73,7 @@ def _build(
     settings_service = SettingsService(
         settings_store or _settings_store(), FakeCache(), cache_ttl=60
     )
+    env["msg"] = FakeMessageSender()
     env["service"] = DownloadService(
         job_repo=env["jobs"],
         cached_file_repo=env["cached"],
@@ -84,7 +85,7 @@ def _build(
         downloader=downloader,
         transcoder=env["transcoder"],
         file_sender=env["sender"],
-        notification_service=NotificationService(FakeMessageSender()),
+        notification_service=NotificationService(env["msg"]),
         cache_service=cache_service,
         settings_service=settings_service,
         settings=settings,
@@ -114,7 +115,21 @@ async def _seed_job(env: dict[str, Any], fmt: MediaFormat, quality: Quality) -> 
     await env["active"].insert_if_absent(
         media_id=row.id, format_=fmt.value, quality=quality.value, job_id=job_id
     )
+    # The originator's progress entry, as JobService.request would have stashed it.
+    await env["cache_service"].set_job_context(
+        str(job_id),
+        {"progress": {"7": {"telegram_id": 555, "message_id": 901}}},
+        ttl=600,
+    )
     return str(job_id)
+
+
+async def _add_second_waiter(env: dict[str, Any], job_id: str) -> None:
+    """A second user (id 8 / tg 556) joins the same job via the fan-out path (16.4)."""
+    users: FakeUserRepo = env["users"]
+    users.by_tid[556] = FakeUser(id=8, telegram_id=556)
+    await env["waiters"].add_waiter(job_id=uuid.UUID(job_id), user_id=8, correlation_id=None)
+    await env["cache_service"].add_waiter_progress(job_id, 8, 556, 902)
 
 
 async def test_video_happy_path(tmp_path: Path) -> None:
@@ -199,6 +214,62 @@ async def test_handle_failure_retries_then_permanently_fails(tmp_path: Path) -> 
     # Retry budget exhausted → permanent.
     assert not await service.handle_failure(job_id, reason="boom", retryable=True, max_retries=3)
     assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.PERMANENTLY_FAILED.value
+
+
+async def test_fan_out_delivers_to_all_waiters_once(tmp_path: Path) -> None:
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+    await _add_second_waiter(env, job_id)
+
+    await env["service"].process(job_id)
+
+    # The first waiter is delivered via the upload; the second via send_cached. Each
+    # receives the file exactly once; only one cache entry is minted.
+    assert [chat for chat, _ in env["sender"].uploads] == [555]
+    assert env["sender"].sent == [(556, "tg-file-id")]
+    assert len(env["cached"].by_id) == 1
+    # One downloads row + one counter increment per waiter.
+    assert sorted(r.user_id for r in env["downloads"].rows) == [7, 8]
+    assert env["users"].by_tid[555].total_downloads == 1
+    assert env["users"].by_tid[556].total_downloads == 1
+    # Both waiters' progress messages are edited to the completed text.
+    completed_targets = {(c, m) for c, m, _ in env["msg"].edits}
+    assert (555, 901) in completed_targets and (556, 902) in completed_targets
+
+
+async def test_retry_after_partial_delivery_is_idempotent(tmp_path: Path) -> None:
+    # Model a retry: a prior attempt minted the file_id and delivered to waiter 7, then
+    # failed (rolling back its DB writes). The persisted Redis context records both.
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+    await _add_second_waiter(env, job_id)
+    await env["cache_service"].record_uploaded_file(job_id, "minted-fid", "minted-unique")
+    await env["cache_service"].record_delivered(job_id, 7)
+
+    await env["service"].process(job_id)
+
+    # No re-upload (so waiter 7 is NOT delivered to again); only waiter 8 is sent the file.
+    assert env["sender"].uploads == []
+    assert env["sender"].sent == [(556, "minted-fid")]
+    # DB rows were rolled back on the prior attempt, so both are (re)created now.
+    assert sorted(r.user_id for r in env["downloads"].rows) == [7, 8]
+    assert env["users"].by_tid[555].total_downloads == 1
+    assert env["users"].by_tid[556].total_downloads == 1
+
+
+async def test_one_waiter_delivery_failure_does_not_block_others(tmp_path: Path) -> None:
+    # The second waiter's send_cached fails; the first (via upload) still succeeds and
+    # the job completes (risk-table mitigation: log + continue, never block the rest).
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
+    env["sender"]._send_cached_error = RuntimeError("telegram hiccup")
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+    await _add_second_waiter(env, job_id)
+
+    await env["service"].process(job_id)
+
+    jobs: FakeJobRepo = env["jobs"]
+    assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.COMPLETED.value
+    assert [chat for chat, _ in env["sender"].uploads] == [555]  # first waiter delivered
 
 
 async def test_handle_failure_non_retryable_is_permanent(tmp_path: Path) -> None:

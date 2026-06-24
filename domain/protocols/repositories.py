@@ -165,6 +165,10 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
     async def list_for_user(
         self, user_id: int, *, limit: int = 10, offset: int = 0
     ) -> Sequence[T]: ...
+    async def get_for_user(self, download_id: int, user_id: int) -> T | None:
+        """Fetch one history row by id, scoped to its owner (resend, 16.3)."""
+        ...
+
     async def create_completed(
         self,
         *,

@@ -16,15 +16,27 @@ class DownloadRepository(SqlAlchemyRepository[Download]):
     async def list_for_user(
         self, user_id: int, *, limit: int = 10, offset: int = 0
     ) -> Sequence[Download]:
-        """Paginated history, newest first (uses ix_downloads_user_created)."""
+        """Paginated history, newest first (uses ix_downloads_user_created).
+
+        ``id`` breaks ``created_at`` ties so the order is total and stable — rows
+        created in the same transaction share ``now()``, and a non-deterministic tie
+        order would let a row skip or repeat across pages.
+        """
         result = await self.session.execute(
             select(Download)
             .where(Download.user_id == user_id)
-            .order_by(Download.created_at.desc())
+            .order_by(Download.created_at.desc(), Download.id.desc())
             .limit(limit)
             .offset(offset)
         )
         return result.scalars().all()
+
+    async def get_for_user(self, download_id: int, user_id: int) -> Download | None:
+        """One history row by id, scoped to its owner — never another user's (16.3)."""
+        result = await self.session.execute(
+            select(Download).where(Download.id == download_id, Download.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
 
     async def create_completed(
         self,

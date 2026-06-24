@@ -12,8 +12,13 @@ files). The worker (Task 6.6) owns the retry / permanent-failure decision and ca
 so the cleanup (lock, active marker, waiters, context, progress message) lives in
 one place.
 
-Sprint 6 is single-user; the waiter loop already iterates all waiters so Sprint 7
-fan-out is a delivery-only change (Task 7.2).
+Fan-out (Task 7.2): ``_deliver`` reads every waiter and delivers the file once to
+each. The first not-yet-delivered waiter's *upload* is their delivery (it mints the
+reusable ``file_id``); each additional waiter receives that ``file_id``. Delivery is
+idempotent across worker retries — the minted ``file_id`` and the set of already-
+delivered waiters are persisted in the Redis job context (outside the per-job DB
+transaction), so a retry after partial delivery never sends a waiter their file
+twice. One waiter's delivery failure is logged and skipped, never blocking the rest.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from core.logging import get_logger
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaInfo
 from domain.enums import JobStatus, MediaFormat, Quality
 from domain.exceptions import (
+    CachedFileExpiredError,
     DownloadTimeoutError,
     ExtractionFailedError,
     FileTooLargeError,
@@ -155,7 +161,7 @@ class DownloadService:
             await self._stage(chat_id, message_id, ProgressStage.UPLOADING)
             upload_started = time.monotonic()
             uploaded = await self._deliver(
-                job_id, produced, info, format_, quality, file_size, media_id
+                job_id, ctx, produced, info, format_, quality, file_size, media_id
             )
             _log.info(
                 "upload_seconds",
@@ -168,8 +174,7 @@ class DownloadService:
             await self._waiters.delete_for_job(job_id)
             await self._active.delete_by_job(job_id)
             await self._jobs.set_status(job_id, JobStatus.COMPLETED.value, finished_at=now_utc())
-            if chat_id is not None and message_id is not None:
-                await self._notifier.notify_completed(chat_id, message_id)
+            await self._notify_waiters(ctx, completed=True)
             await self._release_lock(ctx)
             await self._cache.delete_job_context(job_id_str)
             _log.info(
@@ -216,6 +221,7 @@ class DownloadService:
     async def _deliver(
         self,
         job_id: uuid.UUID,
+        ctx: dict[str, Any],
         produced: Path,
         info: MediaInfo,
         format_: MediaFormat,
@@ -223,36 +229,57 @@ class DownloadService:
         file_size: int,
         media_id: int,
     ) -> UploadedFile:
-        """Deliver exactly one file to each waiter (16.1 W4-W7).
+        """Deliver exactly one file to each waiter (16.1 W4-W7), idempotently.
 
-        The first waiter's **upload is their delivery** — we never send them the file
-        a second time. That upload mints the reusable ``file_id``, which is cached and
-        re-sent to any additional waiters (fan-out, Sprint 7). One file per user.
+        The first not-yet-delivered waiter's **upload is their delivery** — we never
+        send them the file a second time. That upload mints the reusable ``file_id``,
+        which is cached and re-sent to every other waiter (fan-out). One file per user.
+
+        Idempotency across retries: the minted ``file_id`` and the set of already-
+        delivered waiters live in the Redis job context (``ctx``), which is *not* part
+        of the per-job DB transaction. If a previous attempt delivered to some waiters
+        and then failed (rolling back the DB writes), this attempt reuses the stored
+        ``file_id`` (no re-upload, so the upload-target is not re-delivered) and skips
+        the Telegram send for anyone already delivered. The DB rows (``downloads`` +
+        counters) are re-created for every waiter — correct, since they rolled back.
         """
+        job_id_str = str(job_id)
+        delivered: set[int] = set(ctx.get("delivered", []))
+        file_id: str | None = ctx.get("file_id")
+        unique_file_id: str | None = ctx.get("unique_file_id")
+
         waiters = list(await self._waiters.list_for_job(job_id))
         users = [await self._users.get_by_id(w.user_id) for w in waiters]
         pairs = [(w, u) for w, u in zip(waiters, users, strict=True) if u is not None]
         if not pairs:  # pragma: no cover - the originator is always a waiter
             raise ExtractionFailedError("No recipient for the completed job.")
 
-        first_waiter, first_user = pairs[0]
-        uploaded = await self._file_sender.upload(
-            produced,
-            format_=format_,
-            quality=quality,
-            chat_id=first_user.telegram_id,
-            filename=_safe_filename(info.title, produced.suffix),
-            caption=info.title,
-        )
+        if file_id is None:
+            # Mint the file_id by uploading to the first waiter who has not already
+            # received it on a prior attempt — that upload is their delivery.
+            target = next((p for p in pairs if p[0].user_id not in delivered), pairs[0])
+            uploaded = await self._file_sender.upload(
+                produced,
+                format_=format_,
+                quality=quality,
+                chat_id=target[1].telegram_id,
+                filename=_safe_filename(info.title, produced.suffix),
+                caption=info.title,
+            )
+            file_id, unique_file_id = uploaded.file_id, uploaded.unique_file_id
+            delivered.add(target[0].user_id)
+            await self._cache.record_uploaded_file(job_id_str, file_id, unique_file_id)
+            await self._cache.record_delivered(job_id_str, target[0].user_id)
+
         cached = await self._cached.upsert(
             media_id=media_id,
             format_=format_.value,
             quality=quality.value,
-            telegram_file_id=uploaded.file_id,
-            telegram_unique_file_id=uploaded.unique_file_id,
+            telegram_file_id=file_id,
+            telegram_unique_file_id=unique_file_id or "",
             file_size=file_size,
         )
-        for index, (waiter, user) in enumerate(pairs):
+        for waiter, user in pairs:
             await self._downloads.create_completed(
                 user_id=waiter.user_id,
                 cached_file_id=cached.id,
@@ -262,15 +289,34 @@ class DownloadService:
                 file_size=file_size,
             )
             await self._users.increment_download_counters(waiter.user_id)
-            if index != 0:  # the first waiter already received it via the upload
+            if waiter.user_id in delivered:
+                continue  # already received it (via the upload, or a prior attempt)
+            try:
                 await self._file_sender.send_cached(
                     user.telegram_id,
-                    uploaded.file_id,
+                    file_id,
                     format_=format_,
                     quality=quality,
                     caption=info.title,
                 )
-        return uploaded
+            except CachedFileExpiredError as exc:
+                # The just-minted file_id was rejected — treat as an upload failure so
+                # the whole job retries rather than silently dropping every waiter.
+                raise TelegramUploadError("Minted file_id was rejected.") from exc
+            except Exception as exc:  # one waiter's failure must not block the others
+                _log.warning(
+                    "waiter_delivery_failed",
+                    job_id=job_id_str,
+                    user_id=waiter.user_id,
+                    error=str(exc),
+                )
+                continue
+            delivered.add(waiter.user_id)
+            await self._cache.record_delivered(job_id_str, waiter.user_id)
+
+        return UploadedFile(
+            file_id=file_id, unique_file_id=unique_file_id or "", size_bytes=file_size
+        )
 
     async def handle_failure(
         self, job_id_str: str, *, reason: str, retryable: bool, max_retries: int
@@ -306,14 +352,33 @@ class DownloadService:
             job_id, JobStatus.PERMANENTLY_FAILED.value, finished_at=now_utc(), error_message=reason
         )
         ctx = await self._cache.get_job_context(job_id_str) or {}
-        chat_id, message_id = ctx.get("telegram_id"), ctx.get("message_id")
-        if chat_id is not None and message_id is not None:
-            await self._notifier.notify_failed(chat_id, message_id)
+        await self._notify_waiters(ctx, completed=False)
         await self._waiters.delete_for_job(job_id)
         await self._active.delete_by_job(job_id)
         await self._release_lock(ctx)
         await self._cache.delete_job_context(job_id_str)
         _log.warning("job_permanently_failed", job_id=job_id_str, reason=reason)
+
+    async def _notify_waiters(self, ctx: dict[str, Any], *, completed: bool) -> None:
+        """Edit every waiter's progress message to ✅/❌ (16.1 W7, per-waiter).
+
+        Uses the ``progress`` map populated by ``JobService`` (originator + fan-out
+        duplicates). Falls back to the top-level originator fields for legacy contexts.
+        Each edit is best-effort — one failed edit never blocks the others.
+        """
+        targets = list((ctx.get("progress") or {}).values())
+        if not targets:
+            tid, mid = ctx.get("telegram_id"), ctx.get("message_id")
+            if tid is not None and mid is not None:
+                targets = [{"telegram_id": tid, "message_id": mid}]
+        for target in targets:
+            chat_id, message_id = target.get("telegram_id"), target.get("message_id")
+            if chat_id is None or message_id is None:
+                continue
+            if completed:
+                await self._notifier.notify_completed(chat_id, message_id)
+            else:
+                await self._notifier.notify_failed(chat_id, message_id)
 
     async def _stage(
         self, chat_id: int | None, message_id: int | None, stage: ProgressStage

@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import datetime
+from dataclasses import dataclass
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks.factory import CallbackSigner
 from bot.keyboards.format_select import build_format_keyboard
+from bot.keyboards.history import build_history_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
 from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat, Quality
@@ -49,6 +53,36 @@ def test_quality_keyboard_lists_qualities_for_format() -> None:
     assert parsed is not None and parsed.action == "q" and parsed.quality is not None
     back = signer.unpack(back_buttons[0].callback_data or "")
     assert back is not None and back.action == "b" and back.media_id == 5
+
+
+@dataclass
+class _HistRow:
+    id: int
+    platform: str = "youtube"
+    quality: str = "720p"
+    created_at: datetime.datetime = datetime.datetime(2026, 6, 24, tzinfo=datetime.UTC)
+
+
+def test_history_keyboard_has_resend_button_per_row_and_nav() -> None:
+    signer = CallbackSigner("k")
+    rows = [_HistRow(1), _HistRow(2)]
+    markup = build_history_keyboard(rows, page=1, has_prev=True, has_next=True, signer=signer)
+    buttons = _buttons(markup)
+    resend = [b for b in buttons if (b.callback_data or "").startswith("r|")]
+    nav = [b for b in buttons if (b.callback_data or "").startswith("h|")]
+    assert len(resend) == 2  # one resend per history row
+    assert len(nav) == 2  # prev + next
+    parsed = signer.unpack(resend[0].callback_data or "")
+    assert parsed is not None and parsed.action == "r" and parsed.arg == 1
+
+
+def test_history_keyboard_first_page_has_no_prev() -> None:
+    signer = CallbackSigner("k")
+    markup = build_history_keyboard(
+        [_HistRow(1)], page=0, has_prev=False, has_next=False, signer=signer
+    )
+    nav = [b for b in _buttons(markup) if (b.callback_data or "").startswith("h|")]
+    assert nav == []  # neither prev nor next on a single full-stop page
 
 
 def test_quality_label_uses_gb_for_large_files() -> None:

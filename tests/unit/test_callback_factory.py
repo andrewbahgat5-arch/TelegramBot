@@ -45,6 +45,29 @@ def test_back_tampered_rejected() -> None:
     assert signer.unpack(data.replace("123", "124", 1)) is None
 
 
+def test_resend_round_trip() -> None:
+    signer = _signer()
+    parsed = signer.unpack(signer.pack_resend(987))
+    assert parsed is not None
+    assert parsed.action == "r"
+    assert parsed.arg == 987
+    assert parsed.format is None and parsed.quality is None
+
+
+def test_history_page_round_trip() -> None:
+    signer = _signer()
+    parsed = signer.unpack(signer.pack_history_page(3))
+    assert parsed is not None
+    assert parsed.action == "h"
+    assert parsed.arg == 3
+
+
+def test_resend_tampered_rejected() -> None:
+    signer = _signer()
+    data = signer.pack_resend(987)
+    assert signer.unpack(data.replace("987", "988", 1)) is None
+
+
 def test_within_telegram_64_byte_limit() -> None:
     data = _signer().pack_quality(9_999_999_999, MediaFormat.VIDEO, Quality.P2160)
     assert len(data.encode()) <= 64

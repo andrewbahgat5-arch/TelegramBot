@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, `BOT_API_BASE_URL` env var) |
-| Current sprint | Sprint 6 — **Completed (Owner sign-off 2026-06-24)**. Sprint 7 (Fan-Out and Resend) is next. |
-| Sprints completed | 6 / 13 (S0–S6; S6 Owner sign-off 2026-06-24 after live testing) |
-| Tasks completed | 65 / 105 (S0–S5 = 55; S6: 10/10 + 4 Owner carry-ins + post-verification fixes) |
+| Current sprint | Sprint 7 — **`[~]` Under Review** (code complete, all gates green; awaiting Owner human-verification at the stop point). Sprint 6 Completed (Owner sign-off 2026-06-24, `ec0ac7f`). |
+| Sprints completed | 6 / 13 (S0–S6 signed off; S7 code-complete, under review) |
+| Tasks completed | 69 / 105 (S0–S6 = 65; S7: 4/4 code-complete, pending Owner sign-off) |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 9 (OQ-11 resolved by D-040: self-hosted Bot API server, 2 GB). OQ-8 platform allowlist + OQ-9 yt-dlp cadence still open. |
-| Last code change | 2026-06-24 — Sprint 6 job pipeline + Owner live-test fixes (single delivery, audio container routing, muxed audio, playable mp4, accurate sizes, single progress bar, instant ack, Back button, title filenames, self-healing cache). |
-| Last documentation change | 2026-06-24 — Sprint 6 Owner sign-off; TEST_RESULTS + `deploy/LOCAL_BOT_API.md`; this handoff for the Sprint 7 session. |
-| Next recommended action | **Start Sprint 7 (Fan-Out and Resend).** Tasks 7.1–7.4 (multi-recipient delivery for waiters + per-waiter progress; `HistoryService` + history handlers/keyboard, flow 16.3). See the Sprint 7 section + the Owner's future History-UI note. |
+| Open decisions awaiting Owner | 9 OQs + **2 new Sprint-7 schema deviations to ratify** (see Sprint 7 Known Issues): `downloads` has no `job_id` (idempotency moved to the Redis job context) and no `media_id` (NULL-cache resend can't reconstruct → asks user to re-send). Both forced by the locked, partitioned §10.5 schema. |
+| Last code change | 2026-06-24 — Sprint 7 fan-out delivery (idempotent, per-waiter progress) + `HistoryService` + history handlers/keyboard (flow 16.3). |
+| Last documentation change | 2026-06-24 — Sprint 7 closeout + session handoff (this entry); TEST_RESULTS updated. |
+| Next recommended action | **Owner human-verification of Sprint 7** (two accounts request the same URL within seconds → both receive it once; resend from `/history`). Then sign off Sprint 7 and authorize Sprint 8 (Admin and Ops). |
 
 ---
 
@@ -74,13 +74,13 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
 | 5 | URL Analyzer + Provider Abstraction | `[x]` Completed | 100% | 11 / 11 | Owner sign-off 2026-06-23 (`a1f16ad`) |
 | 6 | Job Pipeline (single-user) | `[x]` Completed | 100% | 10 / 10 | Owner sign-off 2026-06-24 (live-tested) |
-| 7 | Fan-Out and Resend | `[ ]` Not Started | 0% | 0 / 4 | ready — next sprint |
+| 7 | Fan-Out and Resend | `[~]` Under Review | 100% | 4 / 4 | code complete; awaiting Owner human-verification |
 | 8 | Admin and Ops | `[ ]` Not Started | 0% | 0 / 3 | depends on S7 |
 | 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | depends on S7 |
 | 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **62%** | **65 / 105** |  |
+| **Total** |  |  | **66%** | **69 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -399,22 +399,37 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 4) |
+| **Status** | `[~]` Under Review (code complete, all gates green; awaiting Owner human-verification at the stop point) |
+| **Completion** | 100% (4 / 4) |
 | **Goal** | Two users requesting the same content while a download is in flight both receive the file. Resend from history works. |
 | **Stop Point** | Owner: two human accounts request same URL → both receive. Resend from history works. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **7.1** Update `JobService.request` to insert `job_waiters` on duplicate path.
-- [ ] **7.2** Update `DownloadService` to deliver to all waiters; per-waiter `(job_id, user_id)` idempotency.
-- [ ] **7.3** `services/history_service.py` (paginated read, resend).
-- [ ] **7.4** `bot/handlers/history.py` and `bot/keyboards/history.py`.
+- [x] **7.1** `JobService.request` duplicate path attaches the user as a `job_waiters` row (16.4) **and** registers their progress message in the Redis job context (`progress` map) so the worker edits *their* message to ✅/❌, not only the originator's. The originator is seeded into the same map at job creation.
+- [x] **7.2** `DownloadService._deliver` reads every waiter and delivers once to each — the first not-yet-delivered waiter's upload is their delivery (mints the `file_id`), every other waiter gets that `file_id` via `send_cached`. **Idempotent across retries:** the minted `file_id` and the set of already-delivered `user_id`s are persisted in the Redis job context (outside the per-job DB transaction), so a retry after a partial delivery reuses the `file_id` (no re-upload → the first waiter is never re-delivered) and skips `send_cached` for anyone already delivered. `downloads` rows + counters are re-created for every waiter (they rolled back). One waiter's delivery failure is logged and skipped (risk-table mitigation), never blocking the rest. On completion/failure **all** waiters' progress messages are edited.
+- [x] **7.3** `services/history_service.py` — paginated newest-first read (`HISTORY_PAGE_SIZE=5`, over-reads by one to detect the next page) and `resend`: deliver instantly from cache (bump `usage_count`, **no** new `downloads` row, 16.3 step 5); on a Telegram-rejected `file_id` evict the stale cache and fall back to a fresh `JobService.request` (16.3 step 4); on an unreconstructable row return `NEEDS_RELINK`.
+- [x] **7.4** `bot/handlers/history.py` (`/history`, page nav, resend) + `bot/keyboards/history.py` (resend button per row + prev/next), wired via a new `history_service_factory` in `bot/main.py`. New signed callback actions `r` (resend `download_id`) and `h` (history page). `/history` added to `/help`.
 
-**Owner-requested History UX (future enhancement — 2026-06-24, do NOT implement before its sprint):** a History section where the user browses previously downloaded media with **title, thumbnail, platform, and date**; tapping an entry **instantly re-sends** it, reusing the cached Telegram `file_id` when present (`cached_files`) and otherwise falling back to the normal download flow (`JobService.request`). Sprint 7's 7.3/7.4 (`HistoryService` + history handlers/keyboards, flow 16.3) cover the resend mechanics; the richer browsable UI (thumbnails + dates + platform) is the Owner's desired surface and may warrant its own dedicated sprint. Schema already supports it: `downloads` carries denormalized `platform/format/quality/file_size/created_at`; `cached_files` holds the reusable `file_id`. No work in the current sprint.
+**Owner-requested History UX (future enhancement — 2026-06-24, do NOT implement before its sprint):** a History section where the user browses previously downloaded media with **title, thumbnail, platform, and date**; tapping an entry **instantly re-sends** it. Sprint 7's 7.3/7.4 deliver the **resend mechanics + a basic list** (platform/quality/format/date, newest first); the richer browsable UI (thumbnails + titles) is the Owner's desired surface and may warrant its own dedicated sprint. NOTE: `downloads` (§10.5) carries no `title`/`thumbnail`/`media_id` columns — a thumbnail/title grid would read those from `media_metadata`, which needs a join key (`media_id`) the history row does not store. Flag for the dedicated History-UI sprint.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Validation Results (all gates green; verified against live postgres:15 + redis:7):**
+- `ruff check .` / `ruff format --check .` — clean.
+- `mypy --strict .` — no issues in **170** source files.
+- `lint-imports` — **7 contracts kept, 0 broken** (HistoryService depends only on services/domain; the history handler reaches infrastructure only via `bot/main.py`).
+- `pytest` — **290 passed** (242 unit + 48 integration). New unit suites: `test_history_service`, `test_history_handler`; extended `test_job_service` (per-waiter progress context), `test_download_service` (fan-out to all waiters, retry-after-partial idempotency, per-waiter-failure isolation), `test_callback_factory` (resend/history actions), `test_keyboards` (history keyboard), `test_bot_composition` (4 routers). New integration tests: `DownloadRepository.get_for_user` owner-scoping + `list_for_user` newest-first pagination (live DB).
+- `bandit -r . -c pyproject.toml` — 0 findings.
+- `pip-audit` — no new dependencies (no `pyproject.toml` change).
+
+**Known Issues / deviations (REQUIRE OWNER RATIFICATION — surfaced at the stop point per §1.11):**
+- **Deviation A — `downloads` has no `job_id`; idempotency moved to the Redis job context.** Task 7.2 / flow 16.1 W7 specify per-waiter idempotency via `(job_id, user_id)` uniqueness in the `downloads` insert. That is **physically impossible** against §10.5 as locked: `downloads` has no `job_id` column, and it is RANGE-partitioned by `created_at`, so a Postgres unique constraint *must* include the partition key — `(job_id, user_id)` alone cannot exist. Also, a DB unique constraint would roll back with the per-job transaction, so it would not actually stop the *re-delivery* (the non-transactional Telegram send) on a retry anyway. **Resolution implemented:** idempotency lives where it can survive the rollback — the Redis job context records the minted `file_id` and the delivered `user_id`s; a retry skips re-upload and re-send. (This matches the prior session's handoff guidance to "extend the Redis job context.") No schema change. **Owner decision needed:** ratify this, or approve a future migration adding `downloads.job_id` + a partition-compatible unique index `(job_id, user_id, created_at)` (a §10/§19/§5 change).
+- **Deviation B — `downloads` has no `media_id`; a truly NULL-cache resend cannot be reconstructed.** The checklist item "resend when `cached_file_id` is NULL falls back to a new download" is only partly feasible. When the `cached_files` row still exists but Telegram rejects the `file_id`, we reuse `cached_files.media_id` to queue a fresh download (this path **is** implemented and tested → `REQUEUED`). When `cached_file_id` is genuinely NULL (its parent `cached_files` row was deleted, FK `ON DELETE SET NULL`), there is **no `media_id`** anywhere on the row to reconstruct the source, so resend returns `NEEDS_RELINK` (asks the user to send the link again). **Owner decision needed:** accept the relink fallback, or approve a future migration adding `downloads.media_id` so any history row can be re-downloaded.
+- **Per-stage progress for fan-out duplicates is originator-only (cosmetic).** During processing, only the originator's message shows the moving bar; **completion/failure** (✅/❌) is edited on **every** waiter's message. Surfacing live per-stage bars to every waiter would multiply Telegram edit calls; flow 16.1 only mandates `notify_completed` per waiter, which is implemented.
+- **Concurrency/idempotency proven at the unit level (with fakes).** The 10-simultaneous-waiter stress and "retry after partial delivery" scenarios are covered by `test_download_service` (fan-out + idempotency) and `test_pipeline_repositories` (live SQL). The Owner human-verification step (two real accounts) remains the acceptance gate.
+
+**Sprint Closeout — 2026-06-24**
+
+Sprint 7 (Fan-Out and Resend) is code-complete and `[~]` Under Review. Multi-recipient fan-out now delivers a single file to every waiter on one in-flight job, idempotently across worker retries, with per-waiter completion/failure notifications. `/history` lists past downloads newest-first and resends any of them — instantly from cache (no duplicate history row) or via a fresh download when the cache is unusable. All automated gates pass (290 tests; ruff, mypy --strict 170 files, import-linter 7 contracts, bandit 0). No schema, config-key, dependency, or migration changes. Two schema deviations (no `job_id`/`media_id` on `downloads`) are documented above for Owner ratification. Stops here for Owner human-verification before Sprint 8.
 
 ---
 
@@ -546,6 +561,7 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
+| 2026-06-24 | — (uncommitted) | New: `services/history_service.py`; `bot/handlers/history.py`; `bot/keyboards/history.py`; `tests/unit/{test_history_service,test_history_handler}.py`. Updated: `services/{job_service,download_service,cache_service}.py` (per-waiter progress map; idempotent fan-out delivery; `add_waiter_progress`/`record_uploaded_file`/`record_delivered`); `bot/callbacks/factory.py` (`r`/`h` actions, `arg` field); `bot/main.py` (`history_service_factory` + router); `bot/handlers/help.py` (`/history`); `domain/protocols/repositories.py` (`DownloadRepositoryProtocol.get_for_user`); `infrastructure/database/repositories/download.py` (`get_for_user`, deterministic `created_at DESC, id DESC` order); `tests/unit/{_fakes,test_job_service,test_download_service,test_callback_factory,test_keyboards,test_bot_composition}.py`; `tests/integration/test_pipeline_repositories.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 7 / 7.1–7.4 | Implementation agent |
 | 2026-06-24 | — (uncommitted) | New: `domain/protocols/{transcoder,file_sender}.py`; `domain/entities/media.py` (`AudioTarget`/`AUDIO_TARGETS`); `infrastructure/downloader/ffmpeg_client.py`; `infrastructure/telegram/{client,file_sender}.py`; `services/{job_service,download_service,notification_service}.py`; `workers/{download_worker,cleanup_worker}.py`; `tests/unit/{test_job_service,test_download_service,test_notification_service,test_cleanup_worker,test_download_worker,test_format_sizes}.py`; `tests/integration/test_pipeline_repositories.py`. Updated: `core/config.py` + `.env.example` + `MASTER_PLAN.md` (`BOT_API_BASE_URL`, Section 13.2, D-040/D-041); `domain/enums/quality.py` (audio codecs); `domain/entities/media.py` (`MediaFormatOption.codec`); `domain/protocols/repositories.py` (+pipeline methods); `infrastructure/database/repositories/{job,cached_file,active_download,job_waiter,download,user}.py`; `services/{cache_service,format_extraction}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `core/logging.py` (`get_correlation_id`); `bot/{main.py,handlers/download.py,keyboards/quality_select.py}`; `workers/main.py`; `tests/unit/{_fakes,test_download_handler,test_format_extraction,test_url_analyzer,test_bot_composition}.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 6 / 6.1–6.10 + carry-ins | Implementation agent |
 | 2026-06-23 | `a1f16ad` | New: `core/urls.py`; `domain/entities/media.py`; `domain/protocols/downloader.py`; `infrastructure/downloader/{registry,provider_settings}.py`; `infrastructure/downloader/providers/ytdlp_provider.py`; `services/{url_analyzer,format_extraction}.py`; `bot/callbacks/factory.py`; `bot/keyboards/{format_select,quality_select}.py`; `bot/handlers/download.py`; `workers/main.py`; `tests/unit/{test_urls,test_format_extraction,test_callback_factory,test_downloader_registry,test_url_analyzer,test_ytdlp_provider,test_keyboards,test_download_handler}.py`; `tests/integration/test_provider_settings.py`. Updated: `core/redis_keys.py` (+`provider_health`), `domain/protocols/repositories.py` (MediaRepositoryProtocol.upsert_metadata), `infrastructure/database/repositories/media.py` (+`upsert_metadata`), `bot/main.py`, `tests/unit/{_fakes,test_bot_composition}.py`, `.importlinter` (+providers contract), `MASTER_PLAN.md` (Section 11.4 row), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 5 / 5.1–5.11 | Implementation agent |
 | 2026-06-23 | `0e5f301` | New: `domain/entities/user.py`; `services/{user_service,rate_limit_service}.py`; `bot/middlewares/{logging,db_session,auth,throttle}.py`; `bot/filters/role_filter.py`; `bot/handlers/{start,help}.py`; `bot/main.py`; `tests/unit/{_fakes,test_user_snapshot,test_user_service,test_rate_limit_service,test_role_filter,test_bot_middlewares,test_bot_handlers,test_bot_composition}.py`. Updated: `infrastructure/database/repositories/user.py` (+`create_user`/`touch_last_activity`), `domain/protocols/repositories.py` (UserRepositoryProtocol), `pyproject.toml` (+aiogram==3.29.0; orjson 3.11.5→3.11.6); `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 4 / 4.1–4.9 | Implementation agent |
@@ -564,6 +580,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-24 | Sprint 7 / 7.1–7.4 | Unit + Integration (290 total, live pg:15 + redis:7) + all gates | PASS | Idempotent fan-out (retry-after-partial never double-delivers), per-waiter completion notifications, one-waiter-failure isolation, history pagination + resend (cache-hit / evict+requeue / needs-relink / not-found), signed resend+page callbacks, `get_for_user` owner-scoping. mypy --strict 170 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. Two schema deviations documented for Owner ratification (no `job_id`/`media_id` on `downloads`). |
 | 2026-06-23 | Sprint 5 / 5.1–5.11 + 4K fix | Unit + Integration (214 total, live pg+redis) + all gates | PASS | Registry failover/health/cooldown, signed-callback tamper rejection, yt-dlp JSON parse + error mapping, COALESCE upsert verified. Post-validation 4K quality-mapping fix added with parametrized regression test; verified against the reported video (offers 2160p…144p). mypy --strict 146 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. |
 | 2026-06-23 | Sprint 4 / 4.1–4.9 | Unit (101) + full suite (140 incl. 39 integration) + all gates | PASS | Sprint-4 services + entity 100%, middlewares/handlers/filter 97–100%. mypy --strict 124 files; import-linter 6 contracts; bandit 0; pip-audit clean (orjson→3.11.6). |
 | 2026-06-23 | Sprint 3 / 3.1–3.7 | Unit + Integration (92 tests, live redis:7 + postgres:15) + all gates | PASS | infrastructure/redis coverage 100% (≥80%). Concurrent 1000-job dequeue, lock foreign-release, read-through cache verified. |
@@ -597,6 +614,21 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-24 — Sprint 7 Fan-Out and Resend implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | 7 — **code complete, `[~]` Under Review.** Stops here for Owner human-verification + sign-off before Sprint 8. Uncommitted in worktree `happy-bose-71ed46` (branch `claude/happy-bose-71ed46`). |
+| **Tasks moved** | Sprint 7 7.1–7.4 all `[x]`; Sprint 7 → `[~]` Under Review (100%). |
+| **What was built** | **7.1** Duplicate requesters are attached as `job_waiters` **and** their progress message is registered in the Redis job-context `progress` map (originator seeded at job creation). **7.2** `DownloadService._deliver` delivers one file to every waiter idempotently — first undelivered waiter's upload is their delivery + mints the `file_id`; others get it via `send_cached`; the minted `file_id` + delivered `user_id`s are persisted in the Redis context so a **retry after partial delivery never double-delivers** (no re-upload, skip already-sent). Per-waiter failure is logged + skipped; **all** waiters get a ✅/❌ edit on completion/failure. **7.3** `services/history_service.py` (paginated newest-first list; resend = instant-from-cache with usage bump and no new history row, or evict+fresh-download fallback, or `NEEDS_RELINK`). **7.4** `bot/handlers/history.py` + `bot/keyboards/history.py` (`/history`, resend buttons, prev/next), new signed callback actions `r`/`h`, wired via `history_service_factory` in `bot/main.py`; `/history` added to `/help`. |
+| **Validation** | **290 tests pass** (242 unit + 48 integration, live pg:15 + redis:7). ruff + ruff-format clean; mypy --strict 170 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. No schema/config/dependency/migration changes. |
+| **⚠ Two schema deviations needing Owner ratification (see Sprint 7 Known Issues)** | (A) `downloads` has **no `job_id`** and is partitioned, so the spec'd `(job_id,user_id)` uniqueness for idempotency is impossible — idempotency was implemented in the Redis job context instead (survives the per-job tx rollback; a DB constraint would not). (B) `downloads` has **no `media_id`**, so a genuinely NULL-`cached_file_id` resend can't be reconstructed → returns `NEEDS_RELINK`; the feasible fallback (cache row present, `file_id` rejected) reuses `cached_files.media_id` and requeues. Owner: ratify the app-layer approach, or approve a future migration adding those columns (§10/§19/§5). |
+| **Remaining work** | Owner human-verification: two accounts send the same URL within seconds → both receive it once; resend from `/history` (instant when cached, fresh download when not). Then sign off Sprint 7 and authorize Sprint 8 (Admin and Ops). |
+| **Known issues** | (1) Deviations A/B above. (2) Per-stage live progress bar during processing is originator-only (cosmetic); completion/failure notifies all waiters. (3) `bot.main`/`workers.main` `main()` entrypoints remain network-bound + unit-uncovered (Owner sandbox run covers them). |
+| **Recommended next task** | After Owner sign-off: Sprint 8 Task 8.1 (`services/broadcast_service.py` + `workers/broadcast_worker.py`). |
+| **Notes for the next agent** | Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe` (ruff/mypy/lint-imports/pytest/bandit). The Redis job context (`job:{id}`) now also carries a per-waiter `progress` map, a `delivered` list, and the minted `file_id`/`unique_file_id` — `CacheService.{add_waiter_progress,record_uploaded_file,record_delivered}` own those writes. Fan-out delivery + idempotency live in `DownloadService._deliver`. `HistoryService.resend` reuses the same invalid-`file_id` eviction path as `JobService._try_deliver_cached` (both delegate eviction to the cache repo + `delete_file_id`). Bot must run from this worktree. |
 
 ### Session Handoff — 2026-06-24 — Sprint 6 Completed (Owner sign-off, committed) → start Sprint 7
 

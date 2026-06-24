@@ -2,7 +2,7 @@
 
 > **Document Status:** LIVE · Append-only test-results SSOT
 > **Companion Documents:** `MASTER_PLAN.md` (Section 25), `PROJECT_PROGRESS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-23
+> **Last Updated:** 2026-06-24
 >
 > Append a new entry on every test-suite run. Never edit past entries; corrections get a new entry that references the prior one.
 
@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-24 | PASS (222) | Sprint-6 services/workers + delivery/audio/size/UX/self-healing-cache regressions | Sprint 1–6 |
-| Integration | 2026-06-24 | PASS (46) | redis 100%, repos incl. new pipeline methods (live-DB ON CONFLICT/CASE) | Sprint 2–6 |
+| Unit | 2026-06-24 | PASS (242) | + Sprint-7 fan-out idempotency / per-waiter progress / HistoryService / history handlers + keyboard | Sprint 1–7 |
+| Integration | 2026-06-24 | PASS (48) | + `downloads.get_for_user` owner-scoping & newest-first pagination (live DB) | Sprint 2–7 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,33 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-24 — Unit + Integration — Sprint 7 exit (Fan-Out and Resend)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `ec157de`) |
+| Environment | local |
+| Suite | all (unit + integration) |
+| Sprint | 7 |
+| Triggered by | Sprint 7 exit (fan-out delivery + resend; tasks 7.1–7.4) |
+| Total tests | 290 (242 unit + 48 integration) |
+| Passed | 290 |
+| Failed | 0 |
+| Skipped | 0 (with infra up; integration auto-skips when pg/redis absent) |
+| XFail / XPass | 0 / 0 |
+| Duration | unit ~5 s; full (unit + integration) ~15 s |
+| Coverage by path | services.download_service fan-out: deliver-to-all-waiters-once, **retry-after-partial-delivery idempotency** (no re-upload, skip already-delivered), per-waiter-failure isolation, per-waiter completion edits; services.job_service duplicate→waiter-progress-context; services.history_service list pagination + resend (cache-hit no-new-row / evict+requeue / needs-relink / not-found); bot.handlers.history (`/history`, page nav, resend outcomes, forged-ignore); bot.keyboards.history; bot.callbacks resend/page round-trip + tamper; repositories.download `get_for_user` owner-scoping + newest-first pagination via live-DB `test_pipeline_repositories`. |
+| Notes | New unit suites: `test_history_service`, `test_history_handler`. Extended: `test_job_service` (per-waiter progress map), `test_download_service` (fan-out + idempotency + failure isolation), `test_callback_factory`, `test_keyboards`, `test_bot_composition` (4 routers), `_fakes` (`FakeDownloadRow.id/created_at`, `get_for_user`). New integration tests in `test_pipeline_repositories`. **No schema/config/dependency/migration changes.** Two schema deviations documented in `PROJECT_PROGRESS.md` Sprint 7 Known Issues for Owner ratification (no `job_id`/`media_id` on `downloads`; idempotency + NULL-cache resend handled at the app/Redis layer). Gates: ruff, ruff-format, mypy --strict (170 files), import-linter (7 contracts kept), bandit (0 findings), pip-audit (no new deps). |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None when infra is up. The integration suite auto-skips without Postgres/Redis.
+
+---
 
 ### 2026-06-24 — Unit — Sprint 6 self-healing cache (#13)
 

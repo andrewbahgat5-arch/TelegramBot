@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers import download as download_handler
 from bot.handlers import help as help_handler
+from bot.handlers import history as history_handler
 from bot.handlers import start as start_handler
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db_session import DbSessionMiddleware
@@ -53,6 +54,7 @@ from infrastructure.redis.queue import RedisQueue
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.cache_service import CacheService
+from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
@@ -71,15 +73,17 @@ def build_dispatcher(
     rate_limit_service_factory: Callable[[AsyncSession], RateLimitService],
     analyzer_factory: Callable[[AsyncSession], URLAnalyzerService],
     job_service_factory: Callable[[AsyncSession], JobService],
+    history_service_factory: Callable[[AsyncSession], HistoryService],
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
     session_factory: async_sessionmaker[AsyncSession],
 ) -> Dispatcher:
     """Build the dispatcher and install the Section 9.1 middleware stack."""
     dp = Dispatcher()
-    # Workflow data injected into handlers by parameter name (download handlers).
+    # Workflow data injected into handlers by parameter name (download/history handlers).
     dp["analyzer_factory"] = analyzer_factory
     dp["job_service_factory"] = job_service_factory
+    dp["history_service_factory"] = history_service_factory
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
 
@@ -95,6 +99,7 @@ def build_dispatcher(
     dp.include_router(start_handler.router)
     dp.include_router(help_handler.router)
     dp.include_router(download_handler.router)
+    dp.include_router(history_handler.router)
     return dp
 
 
@@ -157,12 +162,23 @@ async def main() -> None:
             settings=settings,
         )
 
+    def make_history_service(session: AsyncSession) -> HistoryService:
+        return HistoryService(
+            download_repo=DownloadRepository(session),
+            cached_file_repo=CachedFileRepository(session),
+            job_service=make_job_service(session),
+            analyzer=make_url_analyzer(session),
+            file_sender=file_sender,
+            cache_service=cache_service,
+        )
+
     dp = build_dispatcher(
         settings,
         user_service_factory=make_user_service,
         rate_limit_service_factory=make_rate_limit_service,
         analyzer_factory=make_url_analyzer,
         job_service_factory=make_job_service,
+        history_service_factory=make_history_service,
         notification_service=notification_service,
         callback_signer=callback_signer,
         session_factory=session_factory,

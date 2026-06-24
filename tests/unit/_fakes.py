@@ -619,6 +619,10 @@ class FakeDownloadRow:
     quality: str
     file_size: int | None
     status: str = "completed"
+    id: int = 0
+    created_at: datetime.datetime = field(
+        default_factory=lambda: datetime.datetime.now(datetime.UTC)
+    )
 
 
 class FakeDownloadRepo:
@@ -626,6 +630,7 @@ class FakeDownloadRepo:
 
     def __init__(self) -> None:
         self.rows: list[FakeDownloadRow] = []
+        self._next_id = 1
 
     async def add(self, entity: Any) -> Any:
         return entity
@@ -642,7 +647,12 @@ class FakeDownloadRepo:
     async def list_for_user(
         self, user_id: int, *, limit: int = 10, offset: int = 0
     ) -> Sequence[FakeDownloadRow]:
-        return [r for r in self.rows if r.user_id == user_id][offset : offset + limit]
+        owned = [r for r in self.rows if r.user_id == user_id]
+        owned.sort(key=lambda r: (r.created_at, r.id), reverse=True)  # newest first
+        return owned[offset : offset + limit]
+
+    async def get_for_user(self, download_id: int, user_id: int) -> FakeDownloadRow | None:
+        return next((r for r in self.rows if r.id == download_id and r.user_id == user_id), None)
 
     async def create_completed(
         self,
@@ -663,7 +673,9 @@ class FakeDownloadRepo:
             quality=quality,
             file_size=file_size,
             status=status,
+            id=self._next_id,
         )
+        self._next_id += 1
         self.rows.append(row)
         return row
 

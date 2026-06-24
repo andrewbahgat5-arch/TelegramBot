@@ -14,6 +14,7 @@ router = Router(name="help")
 _HELP = (
     "<b>How to use this bot</b>\n\n"
     "• Send a supported link and pick a format/quality to download.\n"
+    "• /history — see your past downloads and resend any of them.\n"
     "• /start — restart the bot.\n"
     "• /help — show this message."
 )

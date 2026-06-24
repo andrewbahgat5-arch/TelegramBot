@@ -93,6 +93,8 @@ async def test_cache_miss_creates_job_waiter_and_enqueues() -> None:
     assert outcome.job_id is not None
     ctx = await service._cache.get_job_context(outcome.job_id)
     assert ctx is not None and ctx["message_id"] == 999 and ctx["lock_token"]
+    # The originator is the first per-waiter progress entry (used for fan-out ✅/❌).
+    assert ctx["progress"]["7"] == {"telegram_id": 555, "message_id": 999}
 
 
 async def test_cache_hit_delivers_instantly_without_a_job() -> None:
@@ -167,3 +169,9 @@ async def test_duplicate_active_request_attaches_waiter() -> None:
     # Both the originator and the duplicate are waiters on the one job.
     assert len(env["waiters"].waiters) == 2
     assert await env["backend"].depth() == 1  # still one job
+    # The duplicate's progress message is registered so the worker notifies them too.
+    assert first.job_id is not None
+    ctx = await service._cache.get_job_context(first.job_id)
+    assert ctx is not None
+    assert ctx["progress"]["7"] == {"telegram_id": 555, "message_id": 999}  # originator
+    assert ctx["progress"]["8"] == {"telegram_id": 556, "message_id": 1000}  # duplicate
