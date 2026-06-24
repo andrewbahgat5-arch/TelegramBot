@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, `BOT_API_BASE_URL` env var) |
-| Current sprint | Sprint 8 — **`[~]` Under Review** (8.1+8.2 code-complete, all gates green; **8.3 HTTP API deferred** by Owner decision). Sprint 7 committed (`7b18b7f`). |
-| Sprints completed | 6 / 13 (S0–S6 signed off; S7 + S8 code-complete, under review) |
-| Tasks completed | 71 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred) |
+| Current sprint | Sprint 8 — **`[x]` Completed (Owner sign-off 2026-06-24, `df530a8`)**; 8.3 HTTP API deferred. Sprint 7 also Owner-signed-off this round. **Next: Sprint 9 (Smart Advertisements).** |
+| Sprints completed | 8 / 13 (S0–S8 signed off; S8 with 8.3 HTTP API deferred) |
+| Tasks completed | 71 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred) + Owner-feedback hardening rounds #14–#27 |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 9 OQs + **Sprint-7 schema deviations** (no `job_id`/`media_id` on `downloads` — see Sprint 7 Known Issues) + **Sprint-8 decisions**: (a) approve FastAPI/uvicorn + reconcile `ADMIN_API_KEY` (§13.2 vs §20.3) to unblock task 8.3; (b) ratify the BroadcastWorker polling deviation from §16.8. |
-| Last code change | 2026-06-24 — Owner feedback round 2 (#21–#24): Owner bypasses all limits/throttle/single-active; active-job cap is now time-bounded so stuck jobs age out (unblocks downloads); limit changes verified immediate. (#22/#25/#26/#27 recorded as future requirements.) |
-| Last documentation change | 2026-06-24 — feedback-round #21–#27 handoff (this entry); TEST_RESULTS updated. |
-| Next recommended action | **Re-verify live**: Owner has no limits/cooldown; the "download in progress" block clears after completion (and never sticks); changing `free_daily_limit` takes effect immediately. **Run the integration suite with Docker up** (covers #14 audience + #24 time-bounded count). Then decide task 8.3 (FastAPI) and authorize Sprint 9. |
+| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (approve FastAPI/uvicorn + reconcile `ADMIN_API_KEY` §13.2 vs §20.3) + ratify the documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). None block Sprint 9. |
+| Last code change | 2026-06-24 — Owner feedback #21–#24 (Owner unlimited; time-bounded active-job cap; limit-change freshness). Committed `df530a8`. |
+| Last documentation change | 2026-06-24 — Owner sign-off Sprint 7 + 8; this state update. |
+| Next recommended action | **Start Sprint 9 (Smart Advertisements)** — tasks 9.1–9.4 (AdService per §16.7, ad admin commands, post-delivery hook in DownloadService, click-tracking). Run the integration suite with Docker up at some point to green #14/#24. |
 
 ---
 
@@ -74,9 +74,9 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 4 | User Identity | `[x]` Completed | 100% | 9 / 9 | — |
 | 5 | URL Analyzer + Provider Abstraction | `[x]` Completed | 100% | 11 / 11 | Owner sign-off 2026-06-23 (`a1f16ad`) |
 | 6 | Job Pipeline (single-user) | `[x]` Completed | 100% | 10 / 10 | Owner sign-off 2026-06-24 (live-tested) |
-| 7 | Fan-Out and Resend | `[~]` Under Review | 100% | 4 / 4 | code complete; awaiting Owner human-verification |
-| 8 | Admin and Ops | `[~]` Under Review | 67% | 2 / 3 | 8.3 HTTP API deferred (needs Owner-approved FastAPI dep) |
-| 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | depends on S7 |
+| 7 | Fan-Out and Resend | `[x]` Completed | 100% | 4 / 4 | Owner sign-off 2026-06-24 (`7b18b7f`) |
+| 8 | Admin and Ops | `[x]` Completed | 100% | 2 / 3 | Owner sign-off 2026-06-24 (`df530a8`); 8.3 HTTP API deferred |
+| 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | ready — next sprint |
 | 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
@@ -399,7 +399,7 @@ Each task line carries its status marker. To start a task, change `[ ]` to `[~]`
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` Under Review (code complete, all gates green; awaiting Owner human-verification at the stop point) |
+| **Status** | `[x]` Completed (Owner sign-off 2026-06-24, committed `7b18b7f`; live-verified across fan-out + history resend) |
 | **Completion** | 100% (4 / 4) |
 | **Goal** | Two users requesting the same content while a download is in flight both receive the file. Resend from history works. |
 | **Stop Point** | Owner: two human accounts request same URL → both receive. Resend from history works. |
@@ -442,7 +442,7 @@ Sprint 7 (Fan-Out and Resend) is code-complete and `[~]` Under Review. Multi-rec
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` Under Review (8.1 + 8.2 code-complete, all gates green; **8.3 deferred** by Owner decision — see below). Awaiting Owner human-verification at the stop point. |
+| **Status** | `[x]` Completed (Owner sign-off 2026-06-24, committed `df530a8`, incl. feedback rounds #14–#27). **8.3 HTTP API deferred** by Owner decision — see below. |
 | **Completion** | 67% (2 / 3 — 8.3 HTTP API deferred pending FastAPI dependency approval) |
 | **Goal** | Owner and Moderator administer the bot from within Telegram. |
 | **Stop Point** | Owner runs every admin command and sends a broadcast. |
@@ -640,6 +640,17 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-24 — Owner sign-off Sprint 7 + Sprint 8 → start Sprint 9
+
+| Field | Value |
+|---|---|
+| **Session type** | Owner sign-off |
+| **Active sprint** | **Sprint 7 + Sprint 8 → `[x]` Completed** (Owner: "everything works right now"). Sprint 8's task 8.3 (HTTP admin API) stays **deferred** by Owner choice. **Next: Sprint 9 (Smart Advertisements).** |
+| **Signed off** | Sprint 7 (fan-out + history resend), Sprint 8 8.1–8.2 (admin + broadcast), and all hardening rounds #14–#27 (rate-limit enforcement, free single-active cap with stuck-job ageing, Owner-unlimited, broadcast excludes staff, silent-ignore admin, `/users`). Committed through `df530a8` on `claude/happy-bose-71ed46`. |
+| **Deferred / future** | **8.3** `/v1/admin/*` HTTP API — needs FastAPI/uvicorn approval + `ADMIN_API_KEY` (§13.2 vs §20.3). **History-UI sprint** — #25 dedup + #26 title-not-platform display need `downloads` schema changes (title/media_id + uniqueness key); #27 instant file_id resend already done. **#22** role-specific tiers — extend `domain.enums.UNLIMITED_ROLES`. |
+| **Validation** | 289 unit pass; ruff/mypy --strict (178)/import-linter (7)/bandit (0) green. Integration (52) pending a `docker compose up` re-run (Docker was off) — covers #14 audience + #24 time-bounded job count. Owner accepted via live manual testing. |
+| **Recommended next task** | Sprint 9 Task 9.1 — `services/ad_service.py` (selection algorithm, flow §16.7), then 9.2 ad admin commands, 9.3 post-delivery hook in `DownloadService`, 9.4 click-tracking callback. Read MASTER_PLAN §23 Sprint 9 + §16.7 + the `advertisements` schema §10.10 first. |
 
 ### Session Handoff — 2026-06-24 — Owner verification feedback fixes #21–#27
 

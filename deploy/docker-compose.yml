@@ -70,7 +70,7 @@ services:
     container_name: tgbot_uptime_kuma
     # Probes /v1/health and /v1/ready once the API process is deployed.
     ports:
-      - "3001:3001"
+      - "3010:3001"
     volumes:
       - kuma:/app/data
     restart: unless-stopped
