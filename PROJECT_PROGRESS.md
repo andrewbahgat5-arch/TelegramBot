@@ -598,6 +598,18 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
 
+### Session Handoff — 2026-06-24 — Sprint 6 Completed (Owner sign-off, committed) → start Sprint 7
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation + Owner live testing + fixes |
+| **Active sprint** | 6 — **`[x]` Completed**, Owner sign-off 2026-06-24, committed `ec0ac7f` on `claude/happy-bose-71ed46`. **Next session: start Sprint 7 (Fan-Out and Resend).** |
+| **Commit** | `ec0ac7f` — "Sprint 6: end-to-end job pipeline + Owner live-test fixes" (53 files). Tree clean. |
+| **What works (Owner-confirmed)** | URL → instant "Analyzing…" ack → thumbnail + title/duration/source → format → quality (with ⬅️ Back) → single progress bar → **one** delivered file named after the title. Videos play inline (mp4); audio in all codecs (mp3/m4a/aac/ogg/opus/wav/flac); TikTok/Instagram/YouTube tested. Cache-hit instant resend; **self-healing** when a cached file_id is invalid (bot/endpoint change). |
+| **Validation** | 268 tests (222 unit + 46 integration). ruff, mypy --strict (165 files), import-linter (7 contracts), bandit (0), pip-audit (no new deps). Note: Sprint-3 Redis concurrency tests (`test_redis_queue.py`) are occasionally flaky under parallel load — they pass in isolation; not a regression. |
+| **Sprint 7 scope (next)** | 7.1 `JobService.request` already inserts `job_waiters` on the duplicate path (done in S6) — verify/extend. 7.2 `DownloadService._deliver` already loops all waiters + uploads to the first, send_cached to the rest — extend with per-waiter progress messages (each waiter has their own progress message_id; today only the originator's is tracked in the Redis `job:{id}` context). 7.3 `services/history_service.py` (paginated read from `downloads`, resend via cached `file_id` → flow 16.3, reuse the self-healing path). 7.4 `bot/handlers/history.py` + `bot/keyboards/history.py`. See the Owner's richer **History UI** note in the Sprint 7 section (browse title/thumbnail/platform/date) — may be its own sprint. |
+| **Key implementation notes for Sprint 7** | Fan-out per-waiter progress needs each waiter's `(telegram_id, message_id)` — extend the Redis job context (`CacheService.set_job_context`) from a single originator blob to a per-waiter list, or store a waiter→message map. `DownloadService._deliver` is where multi-recipient delivery lives. `HistoryService` resends should go through the same invalid-file-id eviction path as `JobService._try_deliver_cached` (factor it out if shared). Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe`. Bot must run from this worktree. |
+
 ### Session Handoff — 2026-06-24 — Sprint 6 Job Pipeline implemented (Under Review)
 
 | Field | Value |
