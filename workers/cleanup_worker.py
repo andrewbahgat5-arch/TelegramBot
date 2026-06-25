@@ -1,9 +1,18 @@
-"""CleanupWorker (MASTER_PLAN Component 9.3, Task 6.10).
+"""CleanupWorker (MASTER_PLAN Component 9.3, Task 6.10 + 10.5).
 
-Sprint 6 ships the minimal sweep: delete temp download files/dirs older than
-``max_age_seconds`` (default 60 s, Section 14.6). The full duties — partition
-pre-creation, stale ``active_downloads``/``job_waiters`` reconciliation, and
-retention drops — are added in Sprint 10 (Task 10.5).
+Two cadences run from one loop:
+
+* **Temp sweep** (every ``interval_seconds``): delete temp download files/dirs older
+  than ``max_age_seconds`` (Section 14.6).
+* **DB maintenance** (every ``maintenance_interval_seconds``, Task 10.5): pre-create
+  the rolling partition window, sweep orphaned ``active_downloads``/``job_waiters``
+  (e.g. left by a crashed worker), and drop partitions past each table's retention
+  (D-015 partitioned drop). The DB work runs through the injected
+  ``DbMaintenanceProtocol`` so this worker keeps the Section 8.1 layering (no
+  ``infrastructure`` import).
+
+The minimal Sprint 6 temp-only worker remains the default when no maintenance port is
+injected, so existing call sites and tests are unaffected.
 """
 
 from __future__ import annotations
@@ -11,11 +20,17 @@ from __future__ import annotations
 import asyncio
 import shutil
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from core.logging import get_logger
+from domain.protocols.maintenance import DbMaintenanceProtocol
 
 _log = get_logger("workers.cleanup_worker")
+
+RetentionReader = Callable[[], Awaitable[dict[str, int]]]
+
+_DEFAULT_MAINTENANCE_INTERVAL = 3600.0  # hourly; partition/retention work is not hot.
 
 
 class CleanupWorker:
@@ -25,10 +40,16 @@ class CleanupWorker:
         *,
         max_age_seconds: float = 60.0,
         interval_seconds: float = 60.0,
+        maintenance: DbMaintenanceProtocol | None = None,
+        retention_reader: RetentionReader | None = None,
+        maintenance_interval_seconds: float = _DEFAULT_MAINTENANCE_INTERVAL,
     ) -> None:
         self._temp_dir = temp_dir
         self._max_age = max_age_seconds
         self._interval = interval_seconds
+        self._maintenance = maintenance
+        self._retention_reader = retention_reader
+        self._maintenance_interval = maintenance_interval_seconds
 
     def sweep_once(self, *, now: float | None = None) -> int:
         """Remove temp entries older than ``max_age_seconds``; return the count removed."""
@@ -51,8 +72,41 @@ class CleanupWorker:
             _log.info("cleanup_swept", removed=removed)
         return removed
 
-    async def run_forever(self) -> None:  # pragma: no cover - thin loop over sweep_once
+    async def maintain_once(self) -> None:
+        """Run partition rollover, orphan sweep, and retention drops (Task 10.5).
+
+        Each duty is isolated: a failure in one is logged and the others still run,
+        and the periodic loop is never crashed by a maintenance error.
+        """
+        if self._maintenance is None:
+            return
+        try:
+            ensured = await self._maintenance.ensure_partitions()
+            _log.info("cleanup_partitions_ensured", count=len(ensured))
+        except Exception as exc:  # boundary: a maintenance failure must not stop cleanup
+            _log.warning("cleanup_partitions_failed", error=str(exc))
+        try:
+            active, waiters = await self._maintenance.sweep_orphans()
+            if active or waiters:
+                _log.info("cleanup_orphans_swept", active_downloads=active, job_waiters=waiters)
+        except Exception as exc:  # boundary
+            _log.warning("cleanup_orphans_failed", error=str(exc))
+        if self._retention_reader is not None:
+            try:
+                retention = await self._retention_reader()
+                dropped = await self._maintenance.drop_expired_partitions(retention)
+                if dropped:
+                    _log.info("cleanup_partitions_dropped", partitions=dropped)
+            except Exception as exc:  # boundary
+                _log.warning("cleanup_retention_failed", error=str(exc))
+
+    async def run_forever(self) -> None:  # pragma: no cover - thin loop over the once-methods
         _log.info("cleanup_worker_started", temp_dir=str(self._temp_dir))
+        await self.maintain_once()  # run maintenance once at startup, then on its cadence
+        last_maintenance = time.monotonic()
         while True:
             self.sweep_once()
+            if time.monotonic() - last_maintenance >= self._maintenance_interval:
+                await self.maintain_once()
+                last_maintenance = time.monotonic()
             await asyncio.sleep(self._interval)

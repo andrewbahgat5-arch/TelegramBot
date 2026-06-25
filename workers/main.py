@@ -10,6 +10,8 @@ runs concurrently: the provider health-check task (Section 12.6.4), ``worker_cou
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,10 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 # the bot token); the worker uses it to sign ad click buttons so the bot verifies them
 # with the same scheme (flow 16.7 W6). import-linter permits workers -> bot here.
 from bot.callbacks.factory import CallbackSigner
+from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
-from core.sentry import init_sentry
+from core.sentry import init_sentry, set_component
 from infrastructure.database.engine import create_engine
+from infrastructure.database.maintenance import DbMaintenance
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
 from infrastructure.database.repositories.ad_button import AdButtonRepository
@@ -43,9 +47,11 @@ from infrastructure.downloader.providers.ytdlp_provider import YtdlpProvider
 from infrastructure.downloader.registry import DownloaderRegistry
 from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
+from infrastructure.redis.heartbeat import WorkerHeartbeat
 from infrastructure.redis.locks import RedisLock
 from infrastructure.redis.queue import RedisQueue
 from infrastructure.telegram.ad_sender import TelegramAdSender
+from infrastructure.telegram.alerter import TelegramAlerter, make_alert_sink
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.ad_service import AdService
@@ -84,6 +90,21 @@ async def provider_health_check_task(registry: DownloaderRegistry, interval_seco
     """Refresh provider health every ``interval_seconds`` (Section 12.6.4)."""
     while True:
         await registry.refresh_health()
+        await asyncio.sleep(interval_seconds)
+
+
+async def heartbeat_task(
+    heartbeat: WorkerHeartbeat, worker_ids: list[str], interval_seconds: int
+) -> None:
+    """Refresh one heartbeat per worker loop every ``interval_seconds`` (Section 21).
+
+    The TTL is ``2 x interval`` so a crashed process's heartbeats self-evict, which
+    drives the ``active_workers`` gauge and the ``/v1/ready`` worker-presence check.
+    """
+    ttl = max(interval_seconds * 2, 1)
+    while True:
+        for worker_id in worker_ids:
+            await heartbeat.beat(worker_id, ttl_seconds=ttl)
         await asyncio.sleep(interval_seconds)
 
 
@@ -159,10 +180,12 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     configure_logging(settings.log_level, settings.log_format)
     if settings.sentry_enabled:
         init_sentry(settings)
+        set_component("worker")
 
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     redis_clients = create_redis_clients(settings)
+    heartbeat = WorkerHeartbeat(redis_clients.cache)
 
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
@@ -172,6 +195,17 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     bot = build_bot(settings)
     file_sender = TelegramFileSender(bot)
     ad_sender = TelegramAdSender(bot)
+
+    # Telegram alerter (Task 10.3): re-install logging with the CRITICAL-record sink
+    # now that the bot exists. No-op when no alerts chat is configured.
+    if settings.telegram_alerts_chat_id is not None:
+        alerter = TelegramAlerter(bot, settings.telegram_alerts_chat_id)
+        configure_logging(
+            settings.log_level,
+            settings.log_format,
+            extra_processors=[TelegramAlertProcessor(make_alert_sink(alerter))],
+        )
+
     ad_signer = CallbackSigner(settings.bot_token.get_secret_value())
     message_sender = TelegramMessageSender(bot)
     notification_service = NotificationService(message_sender)
@@ -207,7 +241,23 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
 
     interval = await _read_health_interval(session_factory)
     chunk_size = await _read_broadcast_chunk_size(session_factory)
-    cleanup = CleanupWorker(Path(settings.download_temp_dir))
+
+    async def read_retention() -> dict[str, int]:
+        async with session_factory() as session:
+            retention_settings = SettingsService(
+                SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
+            )
+            return {
+                "downloads": int(await retention_settings.get("downloads_retention_days")),
+                "jobs": int(await retention_settings.get("jobs_retention_days")),
+                "error_logs": int(await retention_settings.get("error_log_retention_days")),
+            }
+
+    cleanup = CleanupWorker(
+        Path(settings.download_temp_dir),
+        maintenance=DbMaintenance(engine, session_factory),
+        retention_reader=read_retention,
+    )
     broadcast_worker = BroadcastWorker(
         session_factory=session_factory,
         build_broadcast_repo=BroadcastRepository,
@@ -218,8 +268,11 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         build_ad_service=build_ad_service,
     )
 
+    process_id = f"{socket.gethostname()}:{os.getpid()}"
+    worker_ids = [f"{process_id}:{n}" for n in range(settings.worker_count)]
     tasks = [
         provider_health_check_task(registry, interval),
+        heartbeat_task(heartbeat, worker_ids, settings.worker_heartbeat_interval),
         cleanup.run_forever(),
         broadcast_worker.run_forever(),
     ]

@@ -8,6 +8,8 @@ from every outgoing event so tokens and passwords never reach the Sentry backend
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import sentry_sdk
@@ -41,6 +43,33 @@ def init_sentry(settings: Settings) -> bool:
         send_default_pii=False,
     )
     return True
+
+
+def set_component(component: str) -> None:
+    """Tag every subsequent Sentry event with the process ``component`` (Section 15.5).
+
+    A no-op when Sentry is disabled. Called once at each process's startup
+    (``bot``, ``worker``, ``api``) so captured events carry their origin (Task 10.1).
+    """
+    sentry_sdk.set_tag("component", component)
+
+
+@contextmanager
+def request_scope(
+    *, correlation_id: str | None = None, job_id: str | None = None
+) -> Iterator[None]:
+    """Tag an isolated Sentry scope with ``correlation_id`` / ``job_id`` (Section 15.5).
+
+    Each unit of work (a bot update, a worker job) gets its own isolation scope so
+    concurrent units do not overwrite one another's tags. A harmless no-op when
+    Sentry is disabled — ``sentry_sdk`` always supplies a scope (Task 10.1).
+    """
+    with sentry_sdk.isolation_scope() as scope:
+        if correlation_id is not None:
+            scope.set_tag("correlation_id", correlation_id)
+        if job_id is not None:
+            scope.set_tag("job_id", job_id)
+        yield
 
 
 def _available_integrations() -> list[Integration]:

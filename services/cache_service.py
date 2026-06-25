@@ -11,6 +11,7 @@ from typing import Any
 
 import orjson
 
+from core import metrics
 from core.config import Settings
 from core.redis_keys import RedisKeys
 from domain.protocols.cache import CacheProtocol, LockProtocol
@@ -24,7 +25,9 @@ class CacheService:
 
     # --- file_id cache (authoritative source: cached_files) ---
     async def get_file_id(self, media_id: int, format_: str, quality: str) -> str | None:
-        return await self._cache.get(RedisKeys.file_id(media_id, format_, quality))
+        value = await self._cache.get(RedisKeys.file_id(media_id, format_, quality))
+        metrics.record_cache("fileid", hit=value is not None)
+        return value
 
     async def set_file_id(self, media_id: int, format_: str, quality: str, file_id: str) -> None:
         await self._cache.set(
@@ -39,6 +42,7 @@ class CacheService:
     # --- metadata cache ---
     async def get_metadata(self, platform: str, video_id: str) -> dict[str, Any] | None:
         raw = await self._cache.get(RedisKeys.metadata(platform, video_id))
+        metrics.record_cache("metadata", hit=raw is not None)
         return None if raw is None else _loads(raw)
 
     async def set_metadata(self, platform: str, video_id: str, data: dict[str, Any]) -> None:
@@ -51,6 +55,7 @@ class CacheService:
     # --- user cache (D-014) ---
     async def get_user(self, telegram_id: int) -> dict[str, Any] | None:
         raw = await self._cache.get(RedisKeys.user(telegram_id))
+        metrics.record_cache("user", hit=raw is not None)
         return None if raw is None else _loads(raw)
 
     async def set_user(self, telegram_id: int, data: dict[str, Any]) -> None:

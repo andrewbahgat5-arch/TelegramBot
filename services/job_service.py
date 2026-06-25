@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from enum import StrEnum, auto
 from typing import Any
 
+from core import metrics
 from core.config import Settings
 from core.constants import PRIORITY_NORMAL
 from core.logging import get_logger
@@ -162,6 +163,7 @@ class JobService:
             correlation_id=correlation_id,
             status=JobStatus.QUEUED.value,
         )
+        metrics.record_job_created()
         await self._waiters.add_waiter(
             job_id=job_id, user_id=user_id, correlation_id=correlation_id
         )

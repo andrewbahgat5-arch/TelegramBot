@@ -15,12 +15,15 @@ pre-approved in Section 6.2 but not yet vendored — is deferred to a later spri
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from core import metrics
 from core.constants import PRIORITY_LOW
 from core.logging import get_logger
+from core.sentry import request_scope
 from services.download_service import RETRYABLE_ERRORS, DownloadService
 from services.queue_service import QueueService
 
@@ -62,20 +65,30 @@ class DownloadWorker:
 
     async def _handle(self, job_id: str) -> None:
         failure: Exception | None = None
-        try:
-            async with self._session_factory() as session:
-                service = self._build(session)
-                await service.process(job_id)
-                await session.commit()
-        except Exception as exc:  # boundary: classify + record, never crash the worker loop
-            failure = exc
-            _log.warning("job_processing_failed", job_id=job_id, error=str(exc))
+        started = time.perf_counter()
+        # Tag any Sentry capture during this job with its id (Task 10.1).
+        with request_scope(job_id=job_id):
+            try:
+                async with self._session_factory() as session:
+                    service = self._build(session)
+                    await service.process(job_id)
+                    await session.commit()
+            except Exception as exc:  # boundary: classify + record, never crash the worker loop
+                failure = exc
+                _log.warning("job_processing_failed", job_id=job_id, error=str(exc))
 
+        metrics.observe_job_processing(time.perf_counter() - started)
         if failure is not None:
-            await self._on_failure(job_id, failure)
+            metrics.record_error(type(failure).__name__)
+            requeued = await self._on_failure(job_id, failure)
+            if not requeued:
+                metrics.record_job_completed("failed")
+        else:
+            metrics.record_job_completed("completed")
         await self._queue.ack(job_id)
 
-    async def _on_failure(self, job_id: str, exc: Exception) -> None:
+    async def _on_failure(self, job_id: str, exc: Exception) -> bool:
+        """Record the failure; re-queue at LOW priority if retryable. Returns whether re-queued."""
         retryable = isinstance(exc, RETRYABLE_ERRORS)
         async with self._session_factory() as session:
             service = self._build(session)
@@ -85,3 +98,4 @@ class DownloadWorker:
             await session.commit()
         if requeued:
             await self._queue.enqueue(job_id, priority=PRIORITY_LOW)
+        return requeued

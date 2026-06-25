@@ -33,9 +33,10 @@ from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
+from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
-from core.sentry import init_sentry
+from core.sentry import init_sentry, set_component
 from infrastructure.database.engine import create_engine
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
@@ -62,6 +63,7 @@ from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.locks import RedisLock
 from infrastructure.redis.queue import RedisQueue
 from infrastructure.telegram.ad_sender import TelegramAdSender
+from infrastructure.telegram.alerter import TelegramAlerter, make_alert_sink
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.ad_service import AdService
@@ -138,6 +140,7 @@ async def main() -> None:
     configure_logging(settings.log_level, settings.log_format)
     if settings.sentry_enabled:
         init_sentry(settings)
+        set_component("bot")
 
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
@@ -159,6 +162,16 @@ async def main() -> None:
     file_sender = TelegramFileSender(bot)
     ad_sender = TelegramAdSender(bot)
     notification_service = NotificationService(TelegramMessageSender(bot))
+
+    # Telegram alerter (Task 10.3): re-install logging with the CRITICAL-record sink
+    # now that the bot exists. No-op when no alerts chat is configured.
+    if settings.telegram_alerts_chat_id is not None:
+        alerter = TelegramAlerter(bot, settings.telegram_alerts_chat_id)
+        configure_logging(
+            settings.log_level,
+            settings.log_format,
+            extra_processors=[TelegramAlertProcessor(make_alert_sink(alerter))],
+        )
 
     def make_user_service(session: AsyncSession) -> UserService:
         return UserService(

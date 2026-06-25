@@ -25,6 +25,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from core import metrics
 from core.logging import get_logger
 from domain.enums import (
     UNLIMITED_ROLES,
@@ -242,6 +243,7 @@ class AdService:
             _log.warning("ad_delivery_failed", ad_id=ad.id, chat_id=chat_id, error=str(exc))
             return False
         await self._ads.increment_impressions(ad.id)
+        metrics.record_ad_shown()
         _log.info("ad_shown", ad_id=ad.id, chat_id=chat_id)
         return True
 

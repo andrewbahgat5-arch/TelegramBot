@@ -7,8 +7,13 @@ import uuid
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from infrastructure.database.models import ActiveDownload
+from domain.enums import JobStatus
+from infrastructure.database.models import ActiveDownload, Job
 from infrastructure.database.repositories.base import SqlAlchemyRepository
+
+# Terminal job states (MASTER_PLAN 12.3): an active_downloads row whose job has
+# reached one of these (or no longer exists) is orphaned and safe to sweep.
+_TERMINAL_STATUSES = tuple(s.value for s in JobStatus if s.is_terminal)
 
 
 class ActiveDownloadRepository(SqlAlchemyRepository[ActiveDownload]):
@@ -48,5 +53,21 @@ class ActiveDownloadRepository(SqlAlchemyRepository[ActiveDownload]):
         result = await self.session.execute(
             delete(ActiveDownload).where(ActiveDownload.job_id == job_id)
         )
+        await self.session.flush()
+        return result.rowcount
+
+    async def delete_orphaned(self) -> int:
+        """Sweep slots whose job is terminal or missing (CleanupWorker, Task 10.5).
+
+        A slot is live only while a non-terminal job still references it; anything
+        else is a leak (e.g. a crashed worker) that would otherwise block new
+        requests for the same (media, format, quality).
+        """
+        live_job = (
+            select(Job.id)
+            .where(Job.id == ActiveDownload.job_id, Job.status.notin_(_TERMINAL_STATUSES))
+            .exists()
+        )
+        result = await self.session.execute(delete(ActiveDownload).where(~live_job))
         await self.session.flush()
         return result.rowcount

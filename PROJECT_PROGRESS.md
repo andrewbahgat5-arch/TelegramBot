@@ -51,15 +51,15 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 
 | Field | Value |
 |---|---|
-| Master Plan version | v2.2 (+ D-040, D-041, `BOT_API_BASE_URL` env var) |
-| Current sprint | Sprint 9 — **`[~]` Under Review** (tasks 9.1–9.4 code-complete; awaiting Owner human-verification before Sprint 10). Sprint 8 `[x]` Completed (`df530a8`); 8.3 HTTP API deferred. |
-| Sprints completed | 8 / 13 (S0–S8 signed off; S8 with 8.3 HTTP API deferred). S9 under review. |
-| Tasks completed | 75 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred; S9: 4/4 under review) + Owner-feedback hardening rounds #14–#27 |
+| Master Plan version | v2.2 (+ D-040, D-041, D-049, D-050; `BOT_API_BASE_URL` env var) |
+| Current sprint | Sprint 10 — **`[~]` Under Review** (10.1–10.8 code/ops-complete; awaiting Owner verification of the restore-drill report + runbook). Sprint 9 + 9.5 also still `[~]` Under Review (Owner directed Sprint 10 to proceed before signing them off). |
+| Sprints completed | 8 / 13 signed off (S0–S8; 8.3 HTTP API deferred). S9, S9.5, S10 under review. |
+| Tasks completed | 83 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred; S9: 4/4; S10: 8/8 — all under review) + Owner-feedback hardening rounds #14–#31 |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (approve FastAPI/uvicorn + reconcile `ADMIN_API_KEY` §13.2 vs §20.3) + ratify the documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`) + **approve & schedule Sprint 9.5 (Ads v2)** (spec/governance ready; D-042–D-045). None block Sprint 9 sign-off. |
-| Last code change | 2026-06-25 — Sprint 9.5 Ads v2 implemented (9.5.1–9.5.8): migration `202606240001`, audience targeting, multi-button, copy-mode, placements, ad broadcast, commands. Uncommitted in worktree `happy-bose-71ed46`. |
-| Last documentation change | 2026-06-25 — Sprint 9.5 implementation + doc reconciliation (MASTER_PLAN §23/§5/§13.6/§19.3 PLANNED→IMPLEMENTED; COMMANDS.md). |
-| Next recommended action | **Owner human-verification of Sprint 9 + Sprint 9.5** (create a targeted/rich ad, preview it, broadcast it, confirm placement + audience behavior + per-button counts), then sign off. Then authorize Sprint 10. |
+| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (admin HTTP API — FastAPI/uvicorn now approved & added for health/metrics per D-049, but the admin surface + `ADMIN_API_KEY` §13.2 vs §20.3 reconciliation stay deferred) + ratify documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). Sprint 9/9.5/10 sign-offs pending. |
+| Last code change | 2026-06-25 — Sprint 10 Observability & Backup (10.1–10.8): `core/metrics.py`, `core/alerting.py`, `api/` FastAPI process (health/ready/metrics), `infrastructure/redis/heartbeat.py`, `infrastructure/database/maintenance.py` + CleanupWorker full duties, Sentry tagging, metric instrumentation; deps fastapi/uvicorn/prometheus-client added (D-049/D-050). Uncommitted in worktree `happy-bose-71ed46`. |
+| Last documentation change | 2026-06-25 — Sprint 10: MASTER_PLAN §6.1/§6.2 (deps) + §5 (D-049, D-050); `deploy/README.md` runbook; `deploy/restore-drill-report.md`; PERFORMANCE_REPORT DR section; PgBouncer compose fix. |
+| Next recommended action | **Owner verification of Sprint 10** (read `deploy/restore-drill-report.md`, approve `deploy/README.md`; optionally force a CRITICAL log + test Sentry exception in a DSN-configured env), then sign off Sprint 10 — alongside the still-pending Sprint 9 + 9.5 human-verification. Then authorize Sprint 11. |
 
 ---
 
@@ -78,10 +78,10 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 8 | Admin and Ops | `[x]` Completed | 100% | 2 / 3 | Owner sign-off 2026-06-24 (`df530a8`); 8.3 HTTP API deferred |
 | 9 | Smart Advertisements | `[~]` Under Review | 100% | 4 / 4 | code complete; awaiting Owner sign-off |
 | 9.5 | Ads v2 (Advertisements expansion) | `[~]` Under Review | 80% | 8 / 10 | 9.5.1–9.5.8 built + tested; 9.5.9/9.5.10 deferred by design |
-| 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
+| 10 | Observability and Backup | `[~]` Under Review | 100% | 8 / 8 | code/ops complete; awaiting Owner sign-off |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **71%** | **75 / 105** |  |
+| **Total** |  |  | **79%** | **83 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -539,24 +539,25 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 8) |
+| **Status** | `[~]` Under Review (10.1–10.8 code/ops-complete; awaiting Owner human-verification of the restore-drill report + runbook) |
+| **Completion** | 100% (8 / 8) |
 | **Goal** | Production-grade across logs, metrics, alerts, and DR. (Security validation and load testing are Sprint 11.) |
 | **Stop Point** | Owner reads restore-drill report; approves runbook. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **10.1** Verify Sentry from bot, worker, api processes; tags wired.
-- [ ] **10.2** Implement `/v1/metrics` with all metrics in Section 15.3.
-- [ ] **10.3** Telegram alerter (throttled, deduplicated).
-- [ ] **10.4** `/v1/health` and `/v1/ready` per Section 15.7.
-- [ ] **10.5** `CleanupWorker` full duties (partitions, temp, stale rows, retention).
-- [ ] **10.6** PgBouncer wired; connection counts verified (D-020).
-- [ ] **10.7** Backup-restore drill into throwaway DB; sample download flow works.
-- [ ] **10.8** Operational runbook at `deploy/README.md`.
+- [x] **10.1** Sentry process tagging: `core/sentry.py` `set_component()` (bot/worker/api) + `request_scope(correlation_id, job_id)` context manager; bot `LoggingMiddleware` tags each update, `DownloadWorker` tags each job. (Deliberate-exception capture per process is the Owner's manual check.)
+- [x] **10.2** `/v1/metrics` (Prometheus) — `core/metrics.py` registry with the full Section 15.3 set (8 counters, 4 histograms, 4 live gauges); instrumented at JobService/DownloadService/DownloadWorker/CacheService/AdService/BroadcastWorker; renders ≥30 series (92 locally). Multiprocess aggregation via `PROMETHEUS_MULTIPROC_DIR` (D-050).
+- [x] **10.3** Telegram alerter — `core/alerting.py` (`AlertThrottle` 1/fingerprint/5 min + `TelegramAlertProcessor`) + `infrastructure/telegram/alerter.py`; wired into bot + worker composition roots (CRITICAL log lines → alerts chat). Sentry-webhook path documented as deferred.
+- [x] **10.4** `/v1/health` + `/v1/ready` — `api/` FastAPI process (`api/app.py`, `api/readiness.py`, `api/main.py`); readiness checks DB+Redis ping ≤500 ms, queue depth, worker heartbeat. Worker heartbeats via `infrastructure/redis/heartbeat.py` (`WorkerHeartbeat`). 503 when a dependency is down.
+- [x] **10.5** `CleanupWorker` full duties — partition rollover + retention drops (`infrastructure/database/maintenance.py` + `partitioning.py` helpers, D-015 partitioned drop) + orphan sweeps (`active_downloads`/`job_waiters` `delete_orphaned`), via `DbMaintenanceProtocol` (keeps the worker infrastructure-free). Temp sweep unchanged.
+- [x] **10.6** PgBouncer verified (D-020). **Fixed a real config bug:** the edoburu image defaulted to `LISTEN_PORT 5432`, leaving the published `6432` dead — set `LISTEN_PORT=6432` + `ADMIN_USERS`/`STATS_USERS`. `SHOW POOLS` confirms transaction pooling; data path works on 6432.
+- [x] **10.7** Backup-restore drill — PASS. `pg_dump -Fc` → throwaway DB → `pg_restore` → integrity match (head `202606240001`, all row counts, 260 partitions, sample query). Reports: `deploy/restore-drill-report.md` + `PERFORMANCE_REPORT.md` DR section.
+- [x] **10.8** Operational runbook at `deploy/README.md` — topology, config, deploy, rollback, backup verify, and the 5 most-likely failure modes with responses.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Validation Results:** ruff + format clean; mypy --strict 212 files; import-linter 7 contracts; bandit 0; **pytest 473 passed** (live pg:15 + redis:7), +28 new tests over Sprint 9.5's 445. New deps (Owner-approved 2026-06-25, D-049/D-050): `fastapi==0.115.6`, `uvicorn==0.34.0`, `prometheus-client==0.21.1`. No schema change; no new migration (Sprint 10 touches no tables). No new env vars (all observability keys already in §13.2/.env.example).
+**Known Issues:** (1) Cross-process metric **counters** read ~0 at `/v1/metrics` unless `PROMETHEUS_MULTIPROC_DIR` is set (the live gauges are always accurate); deploy wiring of that shared volume lands with the app containers in Sprint 12. (2) `telegram_send_seconds` histogram is defined/exposed but not yet observed (NotificationService not instrumented). (3) Sentry "deliberate test exception per process" + "forced CRITICAL → Telegram alert" are Owner **manual** checks (Sentry is DSN-gated, off in dev). (4) The `api` process is run directly (`python -m api.main`); adding it to `docker-compose` with the bot/worker app containers is Sprint 12 scope.
+**Owner action:** read `deploy/restore-drill-report.md` + approve `deploy/README.md`; optionally force a CRITICAL log + a test Sentry exception in a DSN-configured env to confirm alerts/captures. Then sign off Sprint 10.
 
 ---
 
@@ -684,6 +685,19 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-25 — Sprint 10 Observability and Backup implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation (Sprint 10) — Owner directed "start sprint 10" before signing off S9/S9.5 |
+| **Active sprint** | 10 — **10.1–10.8 code/ops-complete, `[~]` Under Review.** Stops at the Sprint 10 stop point for Owner verification. S9 + S9.5 remain `[~]` Under Review. Uncommitted in worktree `happy-bose-71ed46`. |
+| **Decision gate resolved** | The HTTP/metrics stack was the one real blocker (8.3 was deferred pending FastAPI approval). Owner approved **FastAPI+uvicorn** (HTTP layer) and **prometheus-client** (metrics) → D-049, D-050; deps pinned in `pyproject.toml`; §6.1/§6.2 rows added. Admin API (8.3) + `ADMIN_API_KEY` stay deferred — the three new endpoints are public. |
+| **What was built** | **10.1** Sentry `set_component()`/`request_scope()` in `core/sentry.py`; bot middleware tags correlation_id, worker tags job_id. **10.2** `core/metrics.py` (full §15.3 set; ≥30 series; `PROMETHEUS_MULTIPROC_DIR` aggregation) + instrumentation across JobService/DownloadService/DownloadWorker/CacheService/AdService/BroadcastWorker. **10.3** `core/alerting.py` (throttle 1/fp/5 min + processor) + `infrastructure/telegram/alerter.py`, wired into bot+worker. **10.4** `api/` FastAPI process (`app.py`/`readiness.py`/`main.py`) serving health/ready/metrics; `infrastructure/redis/heartbeat.py` (`WorkerHeartbeat`) + worker heartbeat task. **10.5** CleanupWorker full duties via `DbMaintenanceProtocol` + `infrastructure/database/maintenance.py` (partition rollover, retention drops D-015, orphan sweeps) + partitioning helpers + repo `delete_orphaned`. **10.6** PgBouncer verified + **fixed dead `6432` mapping** (`LISTEN_PORT`/`ADMIN_USERS`/`STATS_USERS`). **10.7** restore drill PASS (`deploy/restore-drill-report.md`). **10.8** `deploy/README.md` runbook. |
+| **Validation** | ruff + format clean; mypy --strict 212 files; import-linter 7 contracts; bandit 0; **pytest 473 passed** (live pg:15 + redis:7), +28 tests. No schema change / no migration. `alembic` head unchanged at `202606240001`. |
+| **Owner action** | Read `deploy/restore-drill-report.md`; approve `deploy/README.md`. Optionally (DSN-configured env): force a CRITICAL log → expect one throttled Telegram alert; raise a test exception in each process → expect Sentry events tagged `component`/`correlation_id`/`job_id`. Then sign off Sprint 10. |
+| **Known issues / deferred** | Cross-process metric **counters** need `PROMETHEUS_MULTIPROC_DIR` (shared volume) — that wiring + the api/bot/worker app containers are Sprint 12. `telegram_send_seconds` defined but not yet observed. Sentry/alert checks are DSN-gated (manual). Sentry-webhook → alert path documented as deferred (no inbound HTTP webhook in V1). |
+| **Notes for the next agent** | Run gates with `J:/…/.venv/Scripts/<tool>.exe`. The `api/` package keeps infrastructure imports in `api/main.py` only (import-linter contract) — `app.py`/`readiness.py` take probes as injected callables. Metrics call sites use `core.metrics.record_*`/`observe_*` (core import, no wiring). CleanupWorker stays infrastructure-free via `domain/protocols/maintenance.py`. Next: **Sprint 11** (testing framework, security, load/stress) — only after Owner sign-off of S9 + S9.5 + S10. |
 
 ### Session Handoff — 2026-06-25 — Owner feedback #28–#31 (quality/size + ad UX) + #32–#34 roadmap
 

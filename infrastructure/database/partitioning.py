@@ -9,6 +9,7 @@ rollover task (to keep a rolling window ahead of "now").
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
 
@@ -16,6 +17,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 PARTITIONED_TABLES: tuple[str, ...] = ("downloads", "jobs", "error_logs")
+
+# Matches the ``y{YYYY}m{MM}`` suffix of a partition name (possibly schema-qualified).
+_PARTITION_SUFFIX_RE = re.compile(r"_y(\d{4})m(\d{2})$")
 
 
 def _first_of_month(value: date) -> date:
@@ -94,3 +98,55 @@ async def ensure_partitions_for_next_n_months(
             await conn.execute(text(create_partition_sql(table, year, month)))
             ensured.append(partition_name(table, year, month))
     return ensured
+
+
+def partitions_to_drop(
+    existing: Sequence[str], *, table: str, cutoff_year: int, cutoff_month: int
+) -> list[str]:
+    """Names among ``existing`` that belong to ``table`` and predate the cutoff month.
+
+    Pure helper (testable without a database). A partition for month ``(y, m)`` is
+    dropped when ``(y, m) < (cutoff_year, cutoff_month)``. Names not matching the
+    ``{table}_y…m…`` scheme are ignored.
+    """
+    cutoff = (cutoff_year, cutoff_month)
+    selected: list[str] = []
+    for name in existing:
+        bare = name.split(".")[-1]
+        if not bare.startswith(f"{table}_y"):
+            continue
+        match = _PARTITION_SUFFIX_RE.search(bare)
+        if match is None:
+            continue
+        if (int(match.group(1)), int(match.group(2))) < cutoff:
+            selected.append(name)
+    return selected
+
+
+async def list_partitions(conn: AsyncConnection, table: str) -> list[str]:
+    """Return the child partition names of ``table`` (schema-qualified)."""
+    result = await conn.execute(
+        text(
+            "SELECT inhrelid::regclass::text FROM pg_inherits "
+            "WHERE inhparent = CAST(:table AS regclass)"
+        ),
+        {"table": table},
+    )
+    return [row[0] for row in result]
+
+
+async def drop_partitions_older_than(
+    conn: AsyncConnection, table: str, *, cutoff: date
+) -> list[str]:
+    """Drop ``table`` partitions for months strictly before ``cutoff``'s month (D-015).
+
+    Retention by partition drop is O(1) per month and reclaims storage immediately,
+    unlike a row-by-row DELETE. Returns the dropped partition names.
+    """
+    existing = await list_partitions(conn, table)
+    to_drop = partitions_to_drop(
+        existing, table=table, cutoff_year=cutoff.year, cutoff_month=cutoff.month
+    )
+    for name in to_drop:
+        await conn.execute(text(f"DROP TABLE IF EXISTS {name}"))
+    return to_drop

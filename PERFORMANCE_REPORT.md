@@ -233,6 +233,26 @@ For `pytest-benchmark` runs under `tests/performance/`.
 
 ---
 
+## Disaster Recovery — Backup/Restore Drills (Section 14.8, Task 10.7)
+
+Append one entry per drill. Full procedure + report: [`deploy/restore-drill-report.md`](deploy/restore-drill-report.md).
+
+### 2026-06-25 — Restore drill #1 (Sprint 10, dev stack)
+
+| Field | Value |
+|---|---|
+| Source DB | `telegram_bot` @ `tgbot_postgres` (postgres:15) |
+| Method | `pg_dump -Fc` → `createdb` throwaway → `pg_restore` → integrity compare → drop throwaway |
+| Dump size | 251 KB (custom format) |
+| Migration head (source = restore) | `202606240001` ✅ |
+| Row-count parity (source = restore) | settings 31=31, users 4=4, advertisements 8=8, media_metadata 38=38, cached_files 60=60 ✅ |
+| Partitions restored | 260 = 260 (`pg_inherits`) ✅ |
+| Sample query on restore | `settings` read OK (`ads_enabled=true`, `free_daily_limit=10`) ✅ |
+| Result | **PASS** — restore produces a byte-faithful, queryable database. |
+| Notes | Drill run against the dev stack. Production drill (real volumes, PITR/WAL) is scheduled 30 days post-launch (Task 12.6). |
+
+---
+
 ## Release Snapshots
 
 ```

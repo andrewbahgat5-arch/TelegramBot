@@ -37,6 +37,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from core import metrics
 from core.config import Settings
 from core.logging import get_logger
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaInfo
@@ -172,10 +173,12 @@ class DownloadService:
             uploaded = await self._deliver(
                 job_id, ctx, produced, info, format_, quality, file_size, media_id
             )
+            upload_elapsed = time.monotonic() - upload_started
+            metrics.observe_upload(upload_elapsed)
             _log.info(
                 "upload_seconds",
                 job_id=job_id_str,
-                upload_seconds=round(time.monotonic() - upload_started, 3),
+                upload_seconds=round(upload_elapsed, 3),
                 file_size=file_size,
             )
 
@@ -205,9 +208,11 @@ class DownloadService:
     ) -> tuple[Path, int]:
         download_started = time.monotonic()
         downloaded = await self._downloader.download(info, format_, quality, dest)
+        download_elapsed = time.monotonic() - download_started
+        metrics.observe_download(download_elapsed)
         _log.info(
             "download_seconds",
-            download_seconds=round(time.monotonic() - download_started, 3),
+            download_seconds=round(download_elapsed, 3),
             platform=info.platform,
             format=format_.value,
             quality=quality.value,
@@ -309,6 +314,12 @@ class DownloadService:
                 format_=format_.value,
                 quality=quality.value,
                 file_size=file_size,
+            )
+            metrics.record_download(
+                platform=info.platform,
+                format_=format_.value,
+                quality=quality.value,
+                result="completed",
             )
             await self._users.increment_download_counters(waiter.user_id)
             # Invalidate the user snapshot so the next rate-limit read sees the new count.

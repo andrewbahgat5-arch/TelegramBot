@@ -51,8 +51,18 @@ class SensitiveScrubber:
         return any(token in lowered for token in self._substrings)
 
 
-def configure_logging(log_level: str = "INFO", log_format: str = "json") -> None:
-    """Configure structlog + stdlib logging. Idempotent; call once at startup."""
+def configure_logging(
+    log_level: str = "INFO",
+    log_format: str = "json",
+    *,
+    extra_processors: list[structlog.typing.Processor] | None = None,
+) -> None:
+    """Configure structlog + stdlib logging. Idempotent; safe to call again.
+
+    ``extra_processors`` run after the secret scrubber and before the renderer — the
+    composition root passes the Telegram alert processor (Task 10.3) here once the
+    bot exists, calling this a second time to install it (the config is idempotent).
+    """
     level_no = logging.getLevelNamesMapping().get(log_level.upper(), logging.INFO)
 
     # force=True rebinds the root handler to the current sys.stdout, so repeated
@@ -67,6 +77,7 @@ def configure_logging(log_level: str = "INFO", log_format: str = "json") -> None
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         SensitiveScrubber(),
+        *(extra_processors or []),
     ]
 
     renderer: structlog.typing.Processor = (

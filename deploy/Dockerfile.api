@@ -21,5 +21,7 @@ COPY . .
 USER appuser
 
 EXPOSE 8080
-# Placeholder command; replaced when api/main.py exists (Sprint 8/10).
-CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# api/main.py is the composition root: it builds the FastAPI app and serves it with
+# uvicorn (host/port from API_BIND_HOST/API_BIND_PORT). Sprint 10 serves
+# /v1/health, /v1/ready, /v1/metrics only (admin API 8.3 deferred).
+CMD ["python", "-m", "api.main"]

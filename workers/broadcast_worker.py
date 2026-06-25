@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from core import metrics
 from core.logging import get_logger
 from domain.protocols.advertising import AdSenderProtocol
 from domain.protocols.file_sender import MessageSenderProtocol
@@ -130,6 +131,11 @@ class BroadcastWorker:
                         user_id=user.id,
                         error=str(exc),
                     )
+
+            if sent:
+                metrics.record_broadcast_sent("ok", count=sent)
+            if failed:
+                metrics.record_broadcast_sent("failed", count=failed)
 
             async with self._session_factory() as session:
                 await self._build_broadcast_repo(session).add_counts(

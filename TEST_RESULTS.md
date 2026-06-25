@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-25 | PASS (~374) | + Ads v2 & feedback #28–#31 (exact-format-id download, URL ad buttons, ad-under-media reply) | Sprint 1–9.5 |
-| Integration | 2026-06-25 | PASS (~71) | + Ads v2 repos; migration `202606240001` applied | Sprint 2–9.5 |
+| Unit | 2026-06-25 | PASS (~398) | + Sprint 10: metrics, readiness, api app, alerting, cleanup maintenance | Sprint 1–10 |
+| Integration | 2026-06-25 | PASS (~75) | + Sprint 10: worker heartbeat, orphan sweeps | Sprint 2–10 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,22 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-25 — Unit + Integration — Sprint 10 exit (Observability and Backup, 10.1–10.8)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer) |
+| Suite | all (unit + integration) |
+| Triggered by | Sprint 10 exit (tasks 10.1–10.8) |
+| Total tests | 473 | Passed | 473 | Failed | 0 | Skipped | 0 |
+| Coverage by path | metrics: registry render (≥30 series), recording helpers, live gauges (`test_metrics`); readiness: all-pass / no-workers / db-failure / timeout (`test_readiness`); api: health 200, ready 200/503, metrics exposition + refresh over ASGI (`test_api_app`); alerting: throttle window + per-fingerprint + critical-only processor (`test_alerting`); heartbeat: beat/count/list + TTL expiry (`test_heartbeat`, integration); cleanup: `partitions_to_drop` selection + `maintain_once` orchestration/isolation (`test_cleanup_maintenance`); orphan sweep: terminal-job `active_downloads`/`job_waiters` removal, live kept (`test_orphan_sweep`, integration). |
+| Notes | +28 tests over Sprint 9.5's 445. New Owner-approved deps (D-049/D-050): fastapi 0.115.6, uvicorn 0.34.0, prometheus-client 0.21.1. No schema change, no migration (head stays `202606240001`). Gates: ruff + format clean; mypy --strict 212 files; import-linter 7 contracts; bandit 0. Operational drills outside pytest: PgBouncer `SHOW POOLS` transaction-pooling verified on 6432 (10.6, fixed dead port mapping); backup-restore drill PASS (10.7, see `deploy/restore-drill-report.md`). |
+
+**Failures:** None.
+
+---
 
 ### 2026-06-25 — Unit + Integration — Owner feedback #28–#31
 

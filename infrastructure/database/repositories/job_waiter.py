@@ -8,8 +8,11 @@ from collections.abc import Sequence
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from infrastructure.database.models import JobWaiter
+from domain.enums import JobStatus
+from infrastructure.database.models import Job, JobWaiter
 from infrastructure.database.repositories.base import SqlAlchemyRepository
+
+_TERMINAL_STATUSES = tuple(s.value for s in JobStatus if s.is_terminal)
 
 
 class JobWaiterRepository(SqlAlchemyRepository[JobWaiter]):
@@ -36,5 +39,16 @@ class JobWaiterRepository(SqlAlchemyRepository[JobWaiter]):
     async def delete_for_job(self, job_id: uuid.UUID) -> int:
         """Delete all waiters for a job in one statement; return rows removed."""
         result = await self.session.execute(delete(JobWaiter).where(JobWaiter.job_id == job_id))
+        await self.session.flush()
+        return result.rowcount
+
+    async def delete_orphaned(self) -> int:
+        """Sweep waiters whose job is terminal or missing (CleanupWorker, Task 10.5)."""
+        live_job = (
+            select(Job.id)
+            .where(Job.id == JobWaiter.job_id, Job.status.notin_(_TERMINAL_STATUSES))
+            .exists()
+        )
+        result = await self.session.execute(delete(JobWaiter).where(~live_job))
         await self.session.flush()
         return result.rowcount

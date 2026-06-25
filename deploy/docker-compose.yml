@@ -47,17 +47,24 @@ services:
   pgbouncer:
     image: edoburu/pgbouncer:latest
     container_name: tgbot_pgbouncer
-    # Transaction pooling (MASTER_PLAN D-020).
+    # Transaction pooling (MASTER_PLAN D-020). LISTEN_PORT must be 6432 so the
+    # container's listener matches the published 6432 mapping and pgbouncer.ini
+    # (the image otherwise defaults to 5432, leaving the published port dead —
+    # caught by the Sprint 10 Task 10.6 verification drill). ADMIN_USERS/STATS_USERS
+    # let the app user run the `SHOW POOLS`/`SHOW STATS` connection-count checks.
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"
       DB_USER: telegram_bot
       DB_PASSWORD: change-me-local
       DB_NAME: telegram_bot
+      LISTEN_PORT: "6432"
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "500"
       DEFAULT_POOL_SIZE: "20"
       AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: telegram_bot
+      STATS_USERS: telegram_bot
     ports:
       - "6432:6432"
     depends_on:

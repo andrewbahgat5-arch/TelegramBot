@@ -29,6 +29,12 @@ dependencies = [
     # Sprint 4 (User Identity) is the first sprint to use the Telegram framework.
     # aiogram is pre-approved in MASTER_PLAN Section 6.1; pinned exactly here.
     "aiogram==3.29.0",
+    # Sprint 10 (Observability) — HTTP layer for /v1/health, /v1/ready, /v1/metrics
+    # (MASTER_PLAN Section 6.1, EP-8, D-049) and the Prometheus metrics registry
+    # (Section 15.3, D-050). Owner-approved 2026-06-25.
+    "fastapi==0.115.6",
+    "uvicorn==0.34.0",
+    "prometheus-client==0.21.1",
 ]
 
 [project.optional-dependencies]
