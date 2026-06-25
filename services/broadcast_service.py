@@ -79,3 +79,37 @@ class BroadcastService:
             target_language=target_language,
         )
         return broadcast
+
+    async def create_from_ad(
+        self,
+        *,
+        created_by_user_id: int,
+        advertisement_id: int,
+        target_language: str | None = None,
+        target_role: str | None = None,
+    ) -> Any:
+        """Queue a broadcast that delivers a stored ad via copyMessage (Sprint 9.5, D-045).
+
+        Reuses the Sprint 8 audience snapshot + chunked fan-out; the ``BroadcastWorker``
+        copies the linked ad to each recipient instead of sending ``message_text``.
+        """
+        if target_role is not None and target_role not in _VALID_ROLES:
+            raise InvalidBroadcastError(f"Unknown target role: {target_role}")
+        expected_total = await self._users.count_for_broadcast(
+            role=target_role, language=target_language
+        )
+        broadcast = await self._broadcasts.create_pending(
+            created_by=created_by_user_id,
+            message_text="",  # content comes from the linked ad
+            target_language=target_language,
+            target_role=target_role,
+            expected_total=expected_total,
+            advertisement_id=advertisement_id,
+        )
+        _log.info(
+            "ad_broadcast_queued",
+            broadcast_id=broadcast.id,
+            advertisement_id=advertisement_id,
+            expected_total=expected_total,
+        )
+        return broadcast

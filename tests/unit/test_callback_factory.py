@@ -68,6 +68,20 @@ def test_resend_tampered_rejected() -> None:
     assert signer.unpack(data.replace("987", "988", 1)) is None
 
 
+def test_ad_click_round_trip() -> None:
+    signer = _signer()
+    parsed = signer.unpack(signer.pack_ad_click(42))
+    assert parsed is not None
+    assert parsed.action == "a"
+    assert parsed.arg == 42
+
+
+def test_ad_click_tampered_rejected() -> None:
+    signer = _signer()
+    data = signer.pack_ad_click(42)
+    assert signer.unpack(data.replace("42", "43", 1)) is None
+
+
 def test_within_telegram_64_byte_limit() -> None:
     data = _signer().pack_quality(9_999_999_999, MediaFormat.VIDEO, Quality.P2160)
     assert len(data.encode()) <= 64

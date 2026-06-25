@@ -31,6 +31,15 @@ class Advertisement(Base):
     button_text: Mapped[str | None] = mapped_column(String(100))
     button_url: Mapped[str | None] = mapped_column(Text)
     target_role: Mapped[str | None] = mapped_column(String(20))
+    # Ads v2 (Sprint 9.5): placement, delivery mode, copy-mode source, rich text, audience.
+    placement: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default="post_download"
+    )
+    delivery_mode: Mapped[str] = mapped_column(String(10), nullable=False, server_default="fields")
+    storage_chat_id: Mapped[int | None] = mapped_column(BigInteger)
+    storage_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    parse_mode: Mapped[str | None] = mapped_column(String(10))
+    audience_mode: Mapped[str] = mapped_column(String(10), nullable=False, server_default="all")
     show_every_n_downloads: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

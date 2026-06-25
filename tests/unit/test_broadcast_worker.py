@@ -115,3 +115,75 @@ async def test_run_once_returns_false_when_nothing_pending() -> None:
     worker, _, _ = _build(sender=sender)
     assert await worker.run_once() is False
     assert sender.sent == []
+
+
+# --- ad broadcast (Sprint 9.5, D-045) -------------------------------------
+async def test_ad_broadcast_delivers_the_ad_to_each_recipient() -> None:
+    from bot.callbacks.factory import CallbackSigner
+    from services.ad_service import AdService
+    from services.audience_service import AudienceService
+    from services.settings_service import SettingsService
+    from tests.unit._fakes import (
+        FakeAdButtonRepo,
+        FakeAdRepo,
+        FakeAdRow,
+        FakeAdSender,
+        FakeAudienceRuleRepo,
+        FakeCache,
+        FakeSegmentMemberRepo,
+        FakeSettingsStore,
+    )
+
+    ad_repo = FakeAdRepo()
+    ad_repo.by_id[9] = FakeAdRow(
+        id=9,
+        title="Promo",
+        type="album",
+        delivery_mode="copy",
+        storage_chat_id=-100,
+        storage_message_id=7,
+    )
+    ad_sender = FakeAdSender()
+    settings = SettingsService(
+        FakeSettingsStore({"ads_enabled": ("true", "bool")}), FakeCache(), cache_ttl=60
+    )
+
+    def build_ad_service(_s: Any) -> AdService:
+        return AdService(
+            ad_repo=ad_repo,
+            settings=settings,
+            sender=ad_sender,
+            signer=CallbackSigner("x"),
+            button_repo=FakeAdButtonRepo(),
+            audience=AudienceService(
+                rule_repo=FakeAudienceRuleRepo(), member_repo=FakeSegmentMemberRepo()
+            ),
+        )
+
+    text_sender = _Sender()
+    broadcasts = FakeBroadcastRepo()
+    users = FakeUserRepo()
+    worker = BroadcastWorker(
+        session_factory=lambda: _FakeSession(),  # type: ignore[arg-type]
+        build_broadcast_repo=lambda s: broadcasts,
+        build_user_repo=lambda s: users,
+        sender=text_sender,
+        chunk_size=2,
+        ad_sender=ad_sender,
+        build_ad_service=build_ad_service,
+    )
+    _seed_audience(users)
+    row = await broadcasts.create_pending(
+        created_by=1,
+        message_text="",
+        target_language=None,
+        target_role=None,
+        expected_total=0,
+        advertisement_id=9,
+    )
+
+    await worker.run_once()
+
+    assert text_sender.sent == []  # plain-text path not used for an ad broadcast
+    assert sorted(c["chat_id"] for c in ad_sender.copied) == [101, 102, 103]
+    assert row.total_sent == 3 and row.status == "completed"

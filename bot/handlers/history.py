@@ -21,9 +21,12 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
+from bot.handlers.ads import show_placement_ad
 from bot.keyboards.history import build_history_keyboard
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
+from domain.enums import AdPlacement
+from services.ad_service import AdService
 from services.history_service import HistoryPage, HistoryService, ResendKind
 from services.notification_service import NotificationService
 
@@ -31,6 +34,7 @@ router = Router(name="history")
 _log = get_logger("bot.handlers.history")
 
 HistoryServiceFactory = Callable[[AsyncSession], HistoryService]
+AdServiceFactory = Callable[[AsyncSession], AdService]
 
 _EMPTY_TEXT = "🗂 You have no downloads yet. Send me a link to get started!"
 _RELINK_TEXT = "This file is no longer available — please send the link again."
@@ -44,10 +48,13 @@ async def handle_history(
     user: UserSnapshot,
     history_service_factory: HistoryServiceFactory,
     callback_signer: CallbackSigner,
+    ad_service_factory: AdServiceFactory | None = None,
 ) -> None:
     page = await history_service_factory(session).list_history(user.id, page=0)
     text, keyboard = _render(page, callback_signer)
     await message.answer(text, reply_markup=keyboard)
+    if ad_service_factory is not None:  # best-effort history placement (Sprint 9.5)
+        await show_placement_ad(ad_service_factory(session), user, AdPlacement.HISTORY.value)
 
 
 @router.callback_query(F.data.startswith("h|"))

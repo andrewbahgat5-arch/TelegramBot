@@ -15,11 +15,19 @@ from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+# The composition root may build the shared callback signer (a leaf crypto helper over
+# the bot token); the worker uses it to sign ad click buttons so the bot verifies them
+# with the same scheme (flow 16.7 W6). import-linter permits workers -> bot here.
+from bot.callbacks.factory import CallbackSigner
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry
 from infrastructure.database.engine import create_engine
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
+from infrastructure.database.repositories.ad_button import AdButtonRepository
+from infrastructure.database.repositories.advertisement import AdRepository
+from infrastructure.database.repositories.audience_segment import AudienceSegmentMemberRepository
 from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
 from infrastructure.database.repositories.download import DownloadRepository
@@ -37,8 +45,11 @@ from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.locks import RedisLock
 from infrastructure.redis.queue import RedisQueue
+from infrastructure.telegram.ad_sender import TelegramAdSender
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
+from services.ad_service import AdService
+from services.audience_service import AudienceService
 from services.cache_service import CacheService
 from services.download_service import DownloadService
 from services.notification_service import NotificationService
@@ -100,6 +111,8 @@ def make_download_service_factory(
     redis_cache: RedisCache,
     transcoder: FFmpegClient,
     file_sender: TelegramFileSender,
+    ad_sender: TelegramAdSender,
+    ad_signer: CallbackSigner,
     notification_service: NotificationService,
 ) -> Callable[[AsyncSession], DownloadService]:
     """Return a ``session -> DownloadService`` builder (per-job unit of work)."""
@@ -109,6 +122,17 @@ def make_download_service_factory(
             SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
         )
         analyzer = URLAnalyzerService(registry, cache_service, MediaRepository(session))
+        ad_service = AdService(
+            ad_repo=AdRepository(session),
+            settings=settings_service,
+            sender=ad_sender,
+            signer=ad_signer,
+            button_repo=AdButtonRepository(session),
+            audience=AudienceService(
+                rule_repo=AdAudienceRuleRepository(session),
+                member_repo=AudienceSegmentMemberRepository(session),
+            ),
+        )
         return DownloadService(
             job_repo=JobRepository(session),
             cached_file_repo=CachedFileRepository(session),
@@ -124,6 +148,7 @@ def make_download_service_factory(
             cache_service=cache_service,
             settings_service=settings_service,
             settings=settings,
+            ad_service=ad_service,
         )
 
     return build
@@ -146,6 +171,8 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
 
     bot = build_bot(settings)
     file_sender = TelegramFileSender(bot)
+    ad_sender = TelegramAdSender(bot)
+    ad_signer = CallbackSigner(settings.bot_token.get_secret_value())
     message_sender = TelegramMessageSender(bot)
     notification_service = NotificationService(message_sender)
     transcoder = FFmpegClient(settings.ffmpeg_path)
@@ -157,8 +184,26 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         redis_cache=redis_cache,
         transcoder=transcoder,
         file_sender=file_sender,
+        ad_sender=ad_sender,
+        ad_signer=ad_signer,
         notification_service=notification_service,
     )
+
+    def build_ad_service(session: AsyncSession) -> AdService:
+        settings_service = SettingsService(
+            SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
+        )
+        return AdService(
+            ad_repo=AdRepository(session),
+            settings=settings_service,
+            sender=ad_sender,
+            signer=ad_signer,
+            button_repo=AdButtonRepository(session),
+            audience=AudienceService(
+                rule_repo=AdAudienceRuleRepository(session),
+                member_repo=AudienceSegmentMemberRepository(session),
+            ),
+        )
 
     interval = await _read_health_interval(session_factory)
     chunk_size = await _read_broadcast_chunk_size(session_factory)
@@ -169,6 +214,8 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         build_user_repo=UserRepository,
         sender=message_sender,
         chunk_size=chunk_size,
+        ad_sender=ad_sender,
+        build_ad_service=build_ad_service,
     )
 
     tasks = [

@@ -224,6 +224,7 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         target_language: str | None,
         target_role: str | None,
         expected_total: int,
+        advertisement_id: int | None = None,
     ) -> T:
         """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8)."""
         ...
@@ -243,7 +244,97 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         ...
 
 
-class AdRepositoryProtocol(Repository[T], Protocol[T]): ...
+class AdRepositoryProtocol(Repository[T], Protocol[T]):
+    async def list_active_for_role(self, effective_role: str) -> Sequence[T]:
+        """Active ads matching ``effective_role`` or untargeted, ranked for selection.
+
+        WHERE ``is_active`` AND (``target_role`` IS NULL OR ``target_role`` =
+        ``effective_role``), ORDER BY ``priority`` DESC, ``id`` ASC (flow 16.7 step 3,
+        index ``ix_ads_active_priority_role``).
+        """
+        ...
+
+    async def list_all_ads(self) -> Sequence[T]:
+        """Every ad for the admin ``/ad_list`` / ``/ad_stats`` surface, ranked."""
+        ...
+
+    async def create_ad(
+        self,
+        *,
+        title: str,
+        ad_type: str,
+        content_text: str | None,
+        content_media_file_id: str | None,
+        button_text: str | None,
+        button_url: str | None,
+        target_role: str | None,
+        show_every_n_downloads: int,
+        priority: int,
+        created_by: int,
+        placement: str = "post_download",
+        delivery_mode: str = "fields",
+        storage_chat_id: int | None = None,
+        storage_message_id: int | None = None,
+        parse_mode: str | None = None,
+        audience_mode: str = "all",
+    ) -> T:
+        """Insert an ``advertisements`` row (10.10 + Sprint 9.5). ORM stays in infra."""
+        ...
+
+    async def apply_update(self, ad: T, changes: dict[str, Any]) -> T:
+        """Set ``changes`` on a loaded ad row, refresh ``updated_at``, flush (10.10)."""
+        ...
+
+    async def increment_impressions(self, ad_id: int) -> None:
+        """Atomic ``impressions += 1`` after a delivered ad (flow 16.7 step 5)."""
+        ...
+
+    async def increment_clicks(self, ad_id: int) -> None:
+        """Atomic ``clicks += 1`` when a user taps the ad's button (flow 16.7 step 6)."""
+        ...
+
+    async def list_active_for_placement(self, placement: str) -> Sequence[T]:
+        """Active ads for a placement, ranked priority DESC, id ASC (Sprint 9.5, D-044)."""
+        ...
+
+
+class AdButtonRepositoryProtocol(Repository[T], Protocol[T]):
+    async def list_for_ad(self, ad_id: int) -> Sequence[T]:
+        """An ad's buttons in keyboard order (row, position) (Sprint 9.5)."""
+        ...
+
+    async def create_button(
+        self, *, advertisement_id: int, text: str, url: str | None, row: int, position: int
+    ) -> T: ...
+    async def delete_for_ad(self, ad_id: int) -> int: ...
+    async def increment_clicks(self, button_id: int) -> None: ...
+
+
+class AdAudienceRuleRepositoryProtocol(Repository[T], Protocol[T]):
+    async def list_for_ad(self, ad_id: int) -> Sequence[T]:
+        """An ad's audience rules (Sprint 9.5, D-043)."""
+        ...
+
+    async def create_rule(
+        self, *, advertisement_id: int, effect: str, dimension: str, value: str
+    ) -> T: ...
+    async def delete_for_ad(self, ad_id: int) -> int: ...
+
+
+class AudienceSegmentRepositoryProtocol(Repository[T], Protocol[T]):
+    async def create_segment(self, *, name: str, description: str | None, created_by: int) -> T: ...
+    async def get_by_name(self, name: str) -> T | None: ...
+    async def list_all_segments(self) -> Sequence[T]: ...
+
+
+class AudienceSegmentMemberRepositoryProtocol(Protocol):
+    async def add_member(self, *, segment_id: int, user_id: int) -> bool:
+        """INSERT ON CONFLICT DO NOTHING; True if newly added (Sprint 9.5)."""
+        ...
+
+    async def remove_member(self, *, segment_id: int, user_id: int) -> bool: ...
+    async def list_segment_ids_for_user(self, user_id: int) -> set[int]: ...
+    async def count_members(self, segment_id: int) -> int: ...
 
 
 class ErrorLogRepositoryProtocol(Repository[T], Protocol[T]): ...

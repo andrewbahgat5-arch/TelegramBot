@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, `BOT_API_BASE_URL` env var) |
-| Current sprint | Sprint 8 — **`[x]` Completed (Owner sign-off 2026-06-24, `df530a8`)**; 8.3 HTTP API deferred. Sprint 7 also Owner-signed-off this round. **Next: Sprint 9 (Smart Advertisements).** |
-| Sprints completed | 8 / 13 (S0–S8 signed off; S8 with 8.3 HTTP API deferred) |
-| Tasks completed | 71 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred) + Owner-feedback hardening rounds #14–#27 |
+| Current sprint | Sprint 9 — **`[~]` Under Review** (tasks 9.1–9.4 code-complete; awaiting Owner human-verification before Sprint 10). Sprint 8 `[x]` Completed (`df530a8`); 8.3 HTTP API deferred. |
+| Sprints completed | 8 / 13 (S0–S8 signed off; S8 with 8.3 HTTP API deferred). S9 under review. |
+| Tasks completed | 75 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred; S9: 4/4 under review) + Owner-feedback hardening rounds #14–#27 |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (approve FastAPI/uvicorn + reconcile `ADMIN_API_KEY` §13.2 vs §20.3) + ratify the documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). None block Sprint 9. |
-| Last code change | 2026-06-24 — Owner feedback #21–#24 (Owner unlimited; time-bounded active-job cap; limit-change freshness). Committed `df530a8`. |
-| Last documentation change | 2026-06-24 — Owner sign-off Sprint 7 + 8; this state update. |
-| Next recommended action | **Start Sprint 9 (Smart Advertisements)** — tasks 9.1–9.4 (AdService per §16.7, ad admin commands, post-delivery hook in DownloadService, click-tracking). Run the integration suite with Docker up at some point to green #14/#24. |
+| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (approve FastAPI/uvicorn + reconcile `ADMIN_API_KEY` §13.2 vs §20.3) + ratify the documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`) + **approve & schedule Sprint 9.5 (Ads v2)** (spec/governance ready; D-042–D-045). None block Sprint 9 sign-off. |
+| Last code change | 2026-06-25 — Sprint 9.5 Ads v2 implemented (9.5.1–9.5.8): migration `202606240001`, audience targeting, multi-button, copy-mode, placements, ad broadcast, commands. Uncommitted in worktree `happy-bose-71ed46`. |
+| Last documentation change | 2026-06-25 — Sprint 9.5 implementation + doc reconciliation (MASTER_PLAN §23/§5/§13.6/§19.3 PLANNED→IMPLEMENTED; COMMANDS.md). |
+| Next recommended action | **Owner human-verification of Sprint 9 + Sprint 9.5** (create a targeted/rich ad, preview it, broadcast it, confirm placement + audience behavior + per-button counts), then sign off. Then authorize Sprint 10. |
 
 ---
 
@@ -76,11 +76,12 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 6 | Job Pipeline (single-user) | `[x]` Completed | 100% | 10 / 10 | Owner sign-off 2026-06-24 (live-tested) |
 | 7 | Fan-Out and Resend | `[x]` Completed | 100% | 4 / 4 | Owner sign-off 2026-06-24 (`7b18b7f`) |
 | 8 | Admin and Ops | `[x]` Completed | 100% | 2 / 3 | Owner sign-off 2026-06-24 (`df530a8`); 8.3 HTTP API deferred |
-| 9 | Smart Advertisements | `[ ]` Not Started | 0% | 0 / 4 | ready — next sprint |
+| 9 | Smart Advertisements | `[~]` Under Review | 100% | 4 / 4 | code complete; awaiting Owner sign-off |
+| 9.5 | Ads v2 (Advertisements expansion) | `[~]` Under Review | 80% | 8 / 10 | 9.5.1–9.5.8 built + tested; 9.5.9/9.5.10 deferred by design |
 | 10 | Observability and Backup | `[ ]` Not Started | 0% | 0 / 8 | depends on S9 |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **68%** | **71 / 105** |  |
+| **Total** |  |  | **71%** | **75 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -479,20 +480,58 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 4) |
+| **Status** | `[~]` Under Review (code complete; awaiting Owner human-verification before Sprint 10) |
+| **Completion** | 100% (4 / 4) |
 | **Goal** | Admin manages ads; ads are delivered per the algorithm. |
 | **Stop Point** | Owner creates an ad, runs downloads, sees the ad, clicks the button, confirms count rises. |
 
-**Pending Tasks**
+**Completed Tasks**
 
-- [ ] **9.1** `services/ad_service.py` per Section 16.7 (post-increment modulo, D-010).
-- [ ] **9.2** Admin commands: `/ad_create`, `/ad_list`, `/ad_edit`, `/ad_toggle`, `/ad_delete`, `/ad_stats`, `/ad_global`.
-- [ ] **9.3** Hook `DownloadService` to call `AdService.maybe_show(user)` after delivery.
-- [ ] **9.4** Click-tracking callback for ads with buttons.
+- [x] **9.1** `services/ad_service.py` — selection algorithm per Section 16.7 (post-increment modulo, D-010); impression increment; click tracking; admin CRUD + validation. Premium **and** `UNLIMITED_ROLES` (Owner) are exempt from untargeted ads (#21). → `services/ad_service.py`, `domain/protocols/advertising.py` (`AdSenderProtocol`/`AdClickSignerProtocol`/`AdShowProtocol`), `infrastructure/database/repositories/advertisement.py` (+`AdRepositoryProtocol`).
+- [x] **9.2** Owner-only ad commands `/ad_create`, `/ad_list`, `/ad_edit`, `/ad_toggle`, `/ad_delete`, `/ad_stats`, `/ad_global` — silently ignored for non-owners (item #18). → `bot/handlers/ads.py`, wired via `ad_service_factory` in `bot/main.py`.
+- [x] **9.3** `DownloadService._deliver` runs `AdService.maybe_show` for each **newly-delivered** waiter with their post-increment total; best-effort (an ad failure never fails the job; a retry never re-shows). → `services/download_service.py`, worker wiring in `workers/main.py`.
+- [x] **9.4** Ad-click callback (`a|<ad_id>`, HMAC-signed) records the click and delivers the destination link (Telegram URL buttons fire no callback, so the button is a callback button). → `bot/callbacks/factory.py` (`pack_ad_click` + `a` action), `bot/handlers/ads.py` (`handle_ad_click`), `infrastructure/telegram/ad_sender.py`.
 
-**Validation Results:** pending.
-**Known Issues:** none.
+**Validation Results (2026-06-24):**
+- **405 tests pass** (340 unit + 65 integration, live pg:15 + redis:7). New: `test_ad_service.py` (selection truth table §16.7 + CRUD + click), `test_ad_handler.py` (7 commands + click callback), `test_ad_repository.py` (live impression/click increments + role-ranked select), ad-hook tests in `test_download_service.py`, ad-click round-trip in `test_callback_factory.py`.
+- ruff + ruff-format clean; mypy --strict 185 files; import-linter 7 contracts; bandit 0 issues (all severities). No schema/dependency/migration changes (the `advertisements` table + indexes shipped in Sprint 2).
+- Validation checklist: ad frequency (post-increment) ✓, premium/Owner skip untargeted ✓, `target_role='premium'` premium-only ✓, `ads_enabled=false` suppresses all ✓, impressions/clicks persisted ✓, highest-priority wins (with frequency fall-through) ✓, photo/video/animation send paths ✓.
+
+**Known Issues:**
+- Ad-click UX: arbitrary external URLs cannot open directly from `answerCallbackQuery` (Telegram restricts `url` to game/`t.me` links), so the click button is a **callback** button — the handler records the click, then sends the link as a tap-able message. This is the only way to track clicks on arbitrary URLs.
+- `workers/main.py` imports `bot.callbacks.factory.CallbackSigner` (the shared HMAC helper) to sign ad buttons the bot verifies — permitted by import-linter for a composition root; flagged for Owner awareness.
+
+---
+
+### Sprint 9.5 — Ads v2 (Advertisements expansion)
+
+| Field | Value |
+|---|---|
+| **Status** | `[~]` Under Review (9.5.1–9.5.8 built + tested; awaiting Owner human-verification) |
+| **Completion** | 80% (8 / 10) — 9.5.9 + 9.5.10 deferred by design |
+| **Goal** | Flexible, audience-targeted ads: broadcast ads, placement-based persistent ads, rich Telegram content, media reuse (file_id + copyMessage), audience segmentation, management commands. |
+| **Stop Point** | Owner creates a targeted/rich ad, previews it, broadcasts it, confirms placement + audience behavior + per-button counts. |
+
+**Definition (full spec):** MASTER_PLAN §23 "Sprint 9.5 — Ads v2". Decisions D-042–D-045. Config §13.6 (seeded by `202606240001`). Schema roadmap §19.3. Extension points EP-19/EP-20.
+
+**Completed Tasks:**
+
+- [x] **9.5.1** Migration `202606240001_ads_v2_schema` (advertisements ALTERs; `ad_buttons`, `ad_audience_rules`, `audience_segments`, `audience_segment_members`; `broadcasts.advertisement_id`; placement index; §13.6 seed) + models/repos/protocols + new enums (`AdPlacement`, `AdDeliveryMode`, `Audience*`; widened `AdType`). No data backfill — AdService dual-reads legacy ads.
+- [x] **9.5.2** Multi-button rendering + per-button signed callbacks (`a|<ad_id>|<button_id>`) + per-button click counters + `/ad_preview` + `/ad_button_add`/`/ad_button_clear`.
+- [x] **9.5.3** Widened `fields`-mode content: document / audio send paths (album → copy mode).
+- [x] **9.5.4** `copy`-mode delivery (`bot.copy_message`, storage channel setting `ads_storage_chat_id`); `/ad_create delivery=copy` captures a replied-to message.
+- [x] **9.5.5** `AudienceService` (include/exclude × role/plan/language/user_id/segment; OR-within / AND-across; legacy `target_role` fallback) + `/ad_audience` + `/ad_segment_create|_add|_remove|_list`.
+- [x] **9.5.6** `placement` column + per-placement settings toggles + placement-aware `AdService.maybe_show`. Live surfaces: `post_download` (download completion), `home` (`/start`), `history` (`/history`), `broadcast` (`/ad_broadcast`). The `video_delivery`/`audio_delivery`/`quality_select` placement values exist and are selectable but their in-flow triggers are a follow-up (the `post_download` hook covers the download case).
+- [x] **9.5.7** `/ad_broadcast` — `BroadcastService.create_from_ad` + `BroadcastWorker` copyMessage branch; delivery counts via `total_sent`/`total_failed`.
+- [x] **9.5.8** Command surface (`/ad_enable`, `/ad_disable`, `/ad_preview`, `/ad_broadcast`, `/ad_audience`, `/ad_segment_*`, `/ad_button_*`); COMMANDS.md updated.
+
+**Deferred (by design):**
+
+- [ ] **9.5.9** *(Optional/last)* `ad_events` analytics table — non-wired skeleton retained in `migrations/planned/ads_v2_schema.py`.
+- [ ] **9.5.10** *(Later sprint)* scheduling scaffold (`scheduled_at` + due-poller).
+
+**Validation Results (2026-06-25):** 441 tests pass (live pg:15 + redis:7). New suites: `test_audience_service.py` (targeting truth table), `test_ad_service_v2.py` (multi-button/copy-mode/placement/audience/preview), `test_ad_repository.py` (+buttons/rules/segments/broadcast-link), ad-broadcast worker test, new ad-handler command tests. ruff/format clean; mypy --strict 196 files; import-linter 7 contracts; bandit 0. Migration round-trips (downgrade↔upgrade) verified.
+**Known Issues:** Album ads require `delivery=copy` (a media group can't carry an inline keyboard directly). Copy-mode needs a stored source message (delete it → dead ad). `workers/main.py` imports `bot.callbacks.factory.CallbackSigner` (composition-root wiring; import-linter-permitted).
 
 ---
 
@@ -583,6 +622,10 @@ Append a row when a PR merges. Newest first.
 
 | Date | PR | Files Affected | Sprint / Task | Author |
 |---|---|---|---|---|
+| 2026-06-25 | — (uncommitted) | **Owner feedback #28–#31.** #28/#29 (quality + size accuracy): `infrastructure/downloader/providers/ytdlp_provider.py` (`_format_selector` downloads the exact offered `format_id`; capped fallback, no uncapped `/best`) + `tests/unit/test_ytdlp_provider.py`. #30 (ad under media): `domain/protocols/file_sender.py` + `infrastructure/telegram/file_sender.py` (`upload`/`send_cached` return message id); `services/download_service.py` (capture + pass `reply_to_message_id`); `domain/protocols/advertising.py` + `services/ad_service.py` + `infrastructure/telegram/ad_sender.py` (thread `reply_to_message_id`). #31 (direct-open URL buttons): `AdButtonSpec` (+`url`), `ad_sender._build_markup`, `AdService._build_buttons`. Tests: `tests/unit/{_fakes,test_file_sender,test_download_service,test_ad_service,test_ad_service_v2}.py`. Docs: `MASTER_PLAN.md` (D-046–D-048; EP-21–23; §23 F-1/F-2/F-3 roadmap for #32–#34), `COMMANDS.md`, `ADS_MANUAL_TEST.md`. | Post-9.5 feedback #28–#31 | Implementation agent |
+| 2026-06-25 | — (uncommitted) | **Sprint 9.5 Ads v2 — implementation (9.5.1–9.5.8).** New: `migrations/versions/202606240001_ads_v2_schema.py`; `domain/enums/{ad_placement,ad_audience}.py` (+widened `ad_type`); `infrastructure/database/models/{ad_button,ad_audience_rule,audience_segment}.py`; `infrastructure/database/repositories/{ad_button,ad_audience_rule,audience_segment}.py`; `services/audience_service.py`; `tests/unit/{test_audience_service,test_ad_service_v2}.py`. Updated: `domain/protocols/{advertising,repositories}.py`; `services/{ad_service,broadcast_service,download_service}.py`; `infrastructure/telegram/ad_sender.py`; `infrastructure/database/models/{advertisement,broadcast}.py` + repos + `__init__`; `bot/callbacks/factory.py` (per-button `a\|ad\|btn`); `bot/handlers/ads.py` (11 new commands); `bot/main.py` + `workers/{main,broadcast_worker}.py` (wiring); `tests/unit/{_fakes,test_ad_service,test_ad_handler,test_broadcast_worker,test_bot_composition,test_download_service,test_callback_factory,test_enums}.py`; `tests/integration/test_ad_repository.py`; `migrations/planned/{ads_v2_schema.py,README.md}` (now only deferred `ad_events`); docs (`MASTER_PLAN.md`, `COMMANDS.md`, `PROJECT_PROGRESS.md`, `TEST_RESULTS.md`). Migration applied (head `202606240001`). | Sprint 9.5 / 9.5.1–9.5.8 | Implementation agent |
+| 2026-06-24 | — (uncommitted) | **Sprint 9.5 Ads v2 — planning/governance only (NO runtime code).** New: `migrations/planned/ads_v2_schema.py` (non-wired skeleton), `migrations/planned/README.md`. Updated (docs): `MASTER_PLAN.md` (§23 Sprint 9.5 spec; §5 D-042–D-045; §13.6 planned settings; §18 EP-19/EP-20; §19.3 roadmap; §9 AdHandlers/TelegramAdSender cards from Sprint 9); `PROJECT_PROGRESS.md` (overview row + Sprint 9.5 detail + this log + handoff). Updated (tooling): `pyproject.toml` + `mypy.ini` (exclude `migrations/planned` like `migrations/versions`). No schema/migration applied; Alembic head unchanged (`202606230002`); no settings seeded; bot flow untouched. | Sprint 9.5 (planned) | Planning agent |
+| 2026-06-24 | — (uncommitted) | Sprint 9 Smart Advertisements. New: `services/ad_service.py`; `domain/protocols/advertising.py`; `infrastructure/telegram/ad_sender.py`; `bot/handlers/ads.py`; `tests/unit/{test_ad_service,test_ad_handler}.py`; `tests/integration/test_ad_repository.py`. Updated: `infrastructure/database/repositories/advertisement.py` (select/increment/CRUD); `domain/protocols/repositories.py` (`AdRepositoryProtocol` methods); `services/download_service.py` (`AdShowProtocol` hook in `_deliver` + `_show_ads`); `bot/callbacks/factory.py` (`pack_ad_click` + `a` action); `bot/main.py` (`ad_service_factory` + ads router + `TelegramAdSender`); `workers/main.py` (AdService injected into the download-service factory; `CallbackSigner`/`TelegramAdSender`); `tests/unit/{_fakes,test_bot_composition,test_callback_factory,test_download_service}.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 9 / 9.1–9.4 | Implementation agent |
 | 2026-06-24 | — (uncommitted) | Owner feedback #21–#24. New: `domain/enums/user_role.py` (`UNLIMITED_ROLES`). Updated: `services/rate_limit_service.py` (Owner bypass in `check_download`); `bot/middlewares/throttle.py` (Owner not throttled); `bot/handlers/download.py` (`_subject_to_free_cap`); `infrastructure/database/repositories/job.py` + `domain/protocols/repositories.py` (`count_active_for_user(within_seconds=…)`); `services/job_service.py` (pass `worker_job_timeout`); `domain/enums/__init__.py`; `tests/unit/{_fakes,test_rate_limit_service,test_job_service,test_download_handler,test_bot_middlewares}.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Post-Sprint-8 feedback #21–#27 | Implementation agent |
 | 2026-06-24 | — (uncommitted) | Owner feedback #14–#20 + history carry-over. Updated: `bot/handlers/download.py` (rate-limit `authorize_download` + `single_active`/`_is_free`); `bot/handlers/admin.py` (`/users`, removed denied catch-all); `services/{job_service,download_service}.py` (single-active BUSY + user-cache invalidation); `services/{rate_limit_service,user_service}.py` (`authorize_download`; `list_users`); `services/history_service.py` + `bot/main.py` (settings-driven `history_page_size`; `rate_limit_service_factory` injection); `infrastructure/database/repositories/{job,user}.py` (`count_active_for_user`; staff-excluding audience); `domain/protocols/repositories.py` (`count_active_for_user`); `tests/unit/{_fakes,test_job_service,test_download_handler,test_admin_handler,test_broadcast_service,test_history_service}.py`; `tests/integration/test_admin_repositories.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Post-Sprint-8 feedback #14–#20 | Implementation agent |
 | 2026-06-24 | — (uncommitted) | New: `services/broadcast_service.py`; `workers/broadcast_worker.py`; `bot/handlers/admin.py`; `tests/unit/{test_broadcast_service,test_broadcast_worker,test_admin_handler,test_settings_validation}.py`; `tests/integration/test_admin_repositories.py`. Updated: `services/{user_service,settings_service}.py` (`UserStats`/`get_stats`/`find`; `SettingView`/`list_all`/`set_validated`/`InvalidSettingValueError`); `domain/protocols/repositories.py` (User stats+audience methods, BroadcastRepository methods, SettingsStore `list_all`); `infrastructure/database/repositories/{user,broadcast,setting}.py`; `bot/main.py` (admin router + settings/broadcast factories + queue injection); `workers/main.py` (BroadcastWorker wiring + `broadcast_chunk_size`); `tests/unit/{_fakes,test_bot_composition}.py`; `PROJECT_PROGRESS.md`, `TEST_RESULTS.md` | Sprint 8 / 8.1–8.2 (8.3 deferred) | Implementation agent |
@@ -605,6 +648,7 @@ Append a row whenever a validation suite runs.
 
 | Date | Sprint / Task | Suite | Result | Notes |
 |---|---|---|---|---|
+| 2026-06-24 | Sprint 9 / 9.1–9.4 | Unit + Integration (405 total, live pg:15 + redis:7) + all gates | PASS | AdService selection truth table (§16.7: master switch, premium/Owner untargeted exemption, role targeting, post-increment frequency, priority + frequency fall-through, signed click button, best-effort send), CRUD + validation, click tracking; ad handlers (7 owner-only commands + click callback, forged-callback rejection); live-DB impression/click increments + role-ranked candidate select; DownloadService ad hook (post-increment total, per-waiter, retry-safe, failure-isolated). mypy --strict 185 files; import-linter 7 contracts; bandit 0 (all severities); no new deps/schema/migrations. Also re-greened the 4 pre-existing settings integration tests (dev-DB `free_daily_limit` had drifted to 50 from manual `/setting_set`; reset to seeded 10). |
 | 2026-06-24 | Sprint 8 / 8.1–8.2 | Unit + Integration (328 total, live pg:15 + redis:7) + all gates | PASS | BroadcastService audience snapshot + filters; BroadcastWorker chunked fan-out, failure isolation, role filter, FIFO pickup; admin handlers (stats/userinfo/ban/unban/settings/setting_set/broadcast) incl. validation + owner-gating + denied catch-all; SettingsService write-path validation (int/bool/json/float); live-DB user aggregate counts + broadcast audience cursor + broadcast lifecycle. mypy --strict 178 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. 8.3 (HTTP API) deferred — API-key/401 check not yet covered. |
 | 2026-06-24 | Sprint 7 / 7.1–7.4 | Unit + Integration (290 total, live pg:15 + redis:7) + all gates | PASS | Idempotent fan-out (retry-after-partial never double-delivers), per-waiter completion notifications, one-waiter-failure isolation, history pagination + resend (cache-hit / evict+requeue / needs-relink / not-found), signed resend+page callbacks, `get_for_user` owner-scoping. mypy --strict 170 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. Two schema deviations documented for Owner ratification (no `job_id`/`media_id` on `downloads`). |
 | 2026-06-23 | Sprint 5 / 5.1–5.11 + 4K fix | Unit + Integration (214 total, live pg+redis) + all gates | PASS | Registry failover/health/cooldown, signed-callback tamper rejection, yt-dlp JSON parse + error mapping, COALESCE upsert verified. Post-validation 4K quality-mapping fix added with parametrized regression test; verified against the reported video (offers 2160p…144p). mypy --strict 146 files; import-linter 7 contracts; bandit 0; pip-audit no new deps. |
@@ -640,6 +684,60 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-25 — Owner feedback #28–#31 (quality/size + ad UX) + #32–#34 roadmap
+
+| Field | Value |
+|---|---|
+| **Session type** | Bug-fix + UX refinement (download pipeline + Ads v2) + roadmap |
+| **Active sprint** | Post-9.5 feedback. Sprint 9 + 9.5 remain `[~]` Under Review. Uncommitted in worktree `happy-bose-71ed46`. |
+| **#28 — quality mismatch (FIXED)** | Root cause: the quality button only carries `(media_id, format, quality)`, so the worker re-derived the format via a **height cap** with an uncapped `/best` fallback — which could deliver a different/higher quality than displayed. Fix (D-046): `_format_selector` now downloads the **exact `format_id`** offered for the chosen tier (looked up from `media.formats`, served with `provider_format_id` from the metadata cache); the height-capped path is fallback-only and its last branch is also capped (uncapped `/best` removed) so a download can never exceed the selected tier. |
+| **#29 — size inaccuracy (FIXED by the same change)** | The displayed size belongs to a specific format; downloading that exact format makes delivered size ≈ displayed size. |
+| **#30 — ad attached under media (DONE)** | The post-download ad is sent as a **reply** to the delivered file (`reply_to_message_id`). `FileSenderProtocol.upload`/`send_cached` now return the delivered message id; `DownloadService._deliver` captures it per waiter and passes it through `AdService.maybe_show` → `AdSenderProtocol`. (D-048) |
+| **#31 — direct-open buttons (DONE)** | Ad buttons are now Telegram **URL buttons** (tap opens the destination directly, no extra step). `AdButtonSpec` gained `url`; `_build_markup` renders URL buttons. **Trade-off:** URL buttons fire no callback, so per-button click counts are not incremented (impressions still are). `AdButtonSpec.callback_data` is kept for a future redirect-based tracked mode (ties to #32). (D-047) |
+| **#32/#33/#34 — roadmap (design-only)** | Added MASTER_PLAN §23 "Future — Ads & Admin roadmap": F-1 quota-unlock sponsored ads (#32, EP-21), F-2 admin inline control panel (#33, EP-22), F-3 rich ad builder FSM (#34, EP-23). #34 note: nearly all rich content is **already** built in 9.5 (all media types, copy-mode, multiple buttons, formatting) — only the step-by-step builder FSM remains. |
+| **Validation** | **445 tests pass** (live pg:15 + redis:7). ruff/format clean; mypy --strict 196 files; import-linter 7 contracts; bandit 0. New/updated tests: exact-format-id selector + capped-fallback (`test_ytdlp_provider`), URL-button rendering + reply threading (`test_ad_service`, `test_ad_service_v2`), message-id returns (`test_file_sender`, `_fakes`). |
+| **Owner action** | Re-test: pick 480p → receive 480p (and size ≈ shown); see the ad **attached under** the delivered file; tap an ad button → it **opens the link directly**. Note `/ad_stats` clicks stay 0 for URL-button ads (by design, #31). |
+| **Notes for the next agent** | The download now honors the exact offered `format_id` — if a platform's `format_id`s are unstable across the display→download window, the height-capped fallback still bounds quality (never exceeds the tier). Click tracking for ads now requires the reserved redirect mode (EP-21), the right home for the #32 quota-unlock "press Open → unlock" metric. |
+
+### Session Handoff — 2026-06-25 — Sprint 9.5 Ads v2 implemented (9.5.1–9.5.8, Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation (Sprint 9.5 Ads v2) |
+| **Active sprint** | 9.5 — **9.5.1–9.5.8 code-complete + tested, `[~]` Under Review.** 9.5.9 (ad_events analytics) + 9.5.10 (scheduling) deferred by design. Sprint 9 also still Under Review (Owner has not yet signed it off; Owner directed implementation to proceed). Uncommitted in worktree `happy-bose-71ed46`. |
+| **What was built** | **Schema** (`202606240001`, applied): advertisements ALTERs (placement/delivery_mode/storage_*/parse_mode/audience_mode), `ad_buttons`, `ad_audience_rules`, `audience_segments`+`audience_segment_members`, `broadcasts.advertisement_id`, placement index, §13.6 seed — additive, no backfill (AdService dual-reads legacy ads). **Audience targeting** (`AudienceService`): include/exclude × role/plan/language/user_id/segment, OR-within/AND-across, segment lazy-load; legacy `target_role` fallback. **Multi-button**: `ad_buttons` rendered as a keyboard; per-button signed callback `a\|ad\|btn`; per-button click counts. **Rich content**: document/audio send paths; **copy-mode** via `bot.copy_message` + storage channel. **Placements**: `placement` column + per-placement toggles + placement-aware `maybe_show`. **Ad broadcast**: `BroadcastService.create_from_ad` + `BroadcastWorker` copyMessage branch. **11 new commands**: `/ad_enable /ad_disable /ad_preview /ad_button_add /ad_button_clear /ad_audience /ad_broadcast /ad_segment_create/_add/_remove/_list`. |
+| **Validation** | **441 tests pass** (live pg:15 + redis:7). ruff/format clean; mypy --strict 196 files; import-linter 7 contracts; bandit 0. Migration round-trips (downgrade↔upgrade) verified; head `202606240001`. |
+| **Owner action** | Verify: create a `target=` or `/ad_audience` ad → confirm only the intended audience sees it; `/ad_preview`; add 2 buttons via `/ad_button_add` → confirm both render + per-button click counts; `/ad_broadcast <id>` → confirm delivery; enable a placement toggle (e.g. `ad_placement_home_enabled`) and confirm a `placement=home` ad appears. Then sign off Sprint 9 + 9.5. |
+| **Known issues** | Album ads require `delivery=copy`. Copy-mode depends on a persistent stored source message. Per-placement toggles default new placements OFF (only `post_download` on) — the download flow's ad behavior is byte-for-byte Sprint 9 unless a new placement is enabled. `ad_events` analytics + scheduling deferred. |
+| **Notes for the next agent** | `AdService` is the delivery + ad/button CRUD hub; `AudienceService` owns rule/segment CRUD + evaluation. Selection: `list_active_for_placement(placement)` → `AudienceService.matches` (dual-read) → frequency → deliver. `maybe_show` placement default is `post_download`. To add `ad_events` (9.5.9), promote `migrations/planned/ads_v2_schema.py`. The DownloadService post-download hook is unchanged in intent (now passes language/telegram_id/user_row_id). |
+
+### Session Handoff — 2026-06-24 — Sprint 9.5 Ads v2 fully specified (PLANNING ONLY, no code)
+
+| Field | Value |
+|---|---|
+| **Session type** | Planning / governance (forward design for a future sprint) |
+| **Active sprint** | 9 still `[~]` Under Review (unchanged). **Sprint 9.5 (Ads v2) added as `[ ]` Planned (design-complete).** No implementation, no schema change, no config seeded, no bot-flow change. |
+| **What was produced** | The complete Sprint 9.5 spec + all required governance artifacts: MASTER_PLAN **§23** Sprint 9.5 section (scope, proposed schema, audience-evaluation semantics, tasks 9.5.1–9.5.10, validation/exit/human-verification, risks, testing); **§5** decisions **D-042** (dual delivery mode fields/copyMessage + storage channel), **D-043** (first-class audience targeting: `audience_mode` + `ad_audience_rules` + segments, supersedes D-004 additively), **D-044** (placement enum + per-placement toggles), **D-045** (broadcast↔ad unification + `ad_events` + deferred scheduling); **§13.6** planned settings (not seeded); **§18** EP-19/EP-20 (monetization/geo hooks); **§19.3** roadmap row. **Migration skeleton** `migrations/planned/ads_v2_schema.py` (+`README.md`) — intentionally **outside** the Alembic `versions/` scan path, so head stays `202606230002`. Tooling: `pyproject.toml`/`mypy.ini` exclude `migrations/planned` (same as `versions`). |
+| **Explicit non-actions (per Owner instruction)** | Did NOT implement runtime behavior, modify the bot flow, activate ads, run/seed any migration, or seed any setting. Sprint 9's behavior is byte-for-byte unchanged. |
+| **Audience targeting (first-class, as requested)** | Modeled via `audience_mode` (all/include/exclude) + `ad_audience_rules` (effect × dimension role/plan/language/user_id/segment/country × value) + reusable `audience_segments`. Semantics: within-dimension OR, across-dimension AND; exclude covers "all except premium"; explicit user-ids and custom segments are dimensions. Owner/premium exemptions preserved + overridable. Examples A–E (free-only / premium-only / Arabic-only / specific user-ids / all-except-premium) map directly to rule rows. |
+| **Owner action** | Review the Sprint 9.5 spec (MASTER_PLAN §23) + D-042–D-045 + the migration skeleton. Approve to schedule for implementation (it slots after Sprint 9 sign-off; can be re-prioritized vs Sprint 10). Separately: still pending your Sprint 9 human-verification + sign-off. |
+| **Validation** | Docs + non-wired skeleton only. Re-ran gates after the tooling-config change: ruff/format clean, mypy --strict 185 files, import-linter 7 contracts, pytest 405 passed, bandit 0. `alembic heads` = `202606230002` (unchanged). |
+| **Notes for the next agent** | Ads v2 is additive over Sprint 9: `AdService` selection stays the core (audience eval is a new evaluator over a small candidate list), `AdSenderProtocol` gains a `copy_ad` method, buttons become first-class (`ad_buttons`), broadcasts reuse Sprint 8 plumbing via `broadcasts.advertisement_id`. When implementing, promote `migrations/planned/ads_v2_schema.py` into `versions/` (set `down_revision` to the then-current head, finish the two backfill TODOs) and seed the §13.6 keys via that migration. Per-placement toggles default new placements OFF (no surprise ads). |
+
+### Session Handoff — 2026-06-24 — Sprint 9 Smart Advertisements implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation (Sprint 9) |
+| **Active sprint** | 9 — **9.1–9.4 code-complete, `[~]` Under Review.** Stops here for Owner human-verification + sign-off before Sprint 10. Uncommitted in worktree `happy-bose-71ed46` (branch `claude/happy-bose-71ed46`). 8.3 HTTP API still deferred. |
+| **Tasks moved** | Sprint 9 9.1–9.4 all `[x]`; Sprint 9 → `[~]` Under Review (100%). |
+| **What was built** | **9.1** `services/ad_service.py` — selection algorithm §16.7 (LOCKED post-increment, D-010): walks active, role-matching candidates highest-priority-first, falls through on a frequency miss, premium **and** `UNLIMITED_ROLES` (Owner) skip untargeted ads (#21), increments impressions on a delivered ad, best-effort (a send failure is logged + swallowed). Admin CRUD + validation. Ports in `domain/protocols/advertising.py` (`AdSenderProtocol`/`AdClickSignerProtocol`/`AdShowProtocol`); repo SQL in `infrastructure/database/repositories/advertisement.py` (+`AdRepositoryProtocol`). **9.2** `bot/handlers/ads.py` owner-only `/ad_create /ad_list /ad_edit /ad_toggle /ad_delete /ad_stats /ad_global` (silent for non-owners, #18); `key=value` arg parser; media `file_id` pulled from attached/replied media. **9.3** `DownloadService._deliver` calls `AdService.maybe_show` for each **newly-delivered** waiter with their post-increment total — never fails the job, never re-shows on retry. **9.4** signed `a|<ad_id>` ad-click callback records the click + hands the user the link (URL buttons fire no callback, so it's a callback button). |
+| **Validation** | **405 tests pass** (340 unit + 65 integration, live pg:15 + redis:7). ruff + format clean; mypy --strict 185 files; import-linter 7 contracts; bandit 0 (all severities); no new deps/schema/migrations (the `advertisements` table + `ix_ads_*` indexes shipped Sprint 2). Also reset the dev-DB `free_daily_limit` (had drifted to 50 via manual `/setting_set`) back to the seeded 10, re-greening 4 pre-existing settings integration tests. |
+| **Owner action** | Live verify: `/ad_create title=Promo text=Try premium! button_text=Open button_url=https://example.com every=1`; run a download → see the ad; tap the button → `/ad_stats` shows clicks rising. Check `/ad_global off` suppresses ads; a premium user (and you, the Owner) do not see an untargeted ad; a `target=premium` ad shows to premium only. Then sign off Sprint 9 and authorize Sprint 10. |
+| **Known issues** | (1) Ad-click is a callback button (not a URL button) because Telegram's `answerCallbackQuery` cannot open arbitrary URLs — the handler records the click then sends the link as a tap-able message. (2) `workers/main.py` imports `bot.callbacks.factory.CallbackSigner` (shared HMAC helper) to sign ad buttons the bot verifies — import-linter permits it for a composition root; flagged for awareness. (3) Media-ad creation needs a `file_id`: attach/reply to the media, or pass `file_id=...`. |
+| **Recommended next task** | After Owner sign-off: Sprint 10 Task 10.1 (Sentry wiring) — see §23 Sprint 10. |
+| **Notes for the next agent** | Run gates with `J:/TelegramProjectNewCustomer/TelegramBot/.venv/Scripts/<tool>.exe`. The ad selection lives entirely in `AdService.maybe_show`; effective role = `premium` if an unexpired premium grant else `user`; untargeted exemption = `is_premium_active OR role in UNLIMITED_ROLES`. The post-increment total is computed in `DownloadService._deliver` as `user.total_downloads + 1` captured **before** the counter bump. AdService is injected into `DownloadService` as the `AdShowProtocol` port (optional; `None` = no ads). The same `CallbackSigner` secret (bot token) signs ad clicks in the worker and verifies them in the bot. Admin authz is declarative (`OwnerFilter`); never add authz inside a handler. |
 
 ### Session Handoff — 2026-06-24 — Owner sign-off Sprint 7 + Sprint 8 → start Sprint 9
 

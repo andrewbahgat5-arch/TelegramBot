@@ -21,7 +21,13 @@ from infrastructure.telegram.file_sender import TelegramFileSender, _extract_upl
 
 
 def _msg(**media: Any) -> SimpleNamespace:
-    fields = {"video": None, "audio": None, "document": None, "voice": None}
+    fields: dict[str, Any] = {
+        "video": None,
+        "audio": None,
+        "document": None,
+        "voice": None,
+        "message_id": 4242,
+    }
     fields.update(media)
     return SimpleNamespace(**fields)
 

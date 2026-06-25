@@ -47,11 +47,44 @@ def _settings_store() -> FakeSettingsStore:
     return FakeSettingsStore(data)
 
 
+class RecordingAdHook:
+    """An ``AdShowProtocol`` stub that records each post-delivery ad invocation."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def maybe_show(
+        self,
+        *,
+        chat_id: int,
+        role: str,
+        is_premium: bool,
+        premium_expires_at: Any,
+        total_downloads: int,
+        language: str | None = None,
+        telegram_id: int | None = None,
+        user_row_id: int | None = None,
+        placement: str | None = None,
+        reply_to_message_id: int | None = None,
+    ) -> bool:
+        self.calls.append(
+            {
+                "chat_id": chat_id,
+                "role": role,
+                "is_premium": is_premium,
+                "total_downloads": total_downloads,
+                "reply_to_message_id": reply_to_message_id,
+            }
+        )
+        return True
+
+
 def _build(
     *,
     downloader: Any,
     temp_dir: Path,
     settings_store: FakeSettingsStore | None = None,
+    ad_service: Any = None,
 ) -> dict[str, Any]:
     cache_service, _ = make_cache_service()
     settings = load_settings()
@@ -89,6 +122,7 @@ def _build(
         cache_service=cache_service,
         settings_service=settings_service,
         settings=settings,
+        ad_service=ad_service,
     )
     return env
 
@@ -282,3 +316,61 @@ async def test_handle_failure_non_retryable_is_permanent(tmp_path: Path) -> None
     assert not await service.handle_failure(job_id, reason="gone", retryable=False, max_retries=3)
     jobs: FakeJobRepo = env["jobs"]
     assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.PERMANENTLY_FAILED.value
+
+
+# --- ad hook (Task 9.3, flow 16.7) ----------------------------------------
+async def test_ad_hook_runs_once_with_post_increment_total(tmp_path: Path) -> None:
+    hook = RecordingAdHook()
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path, ad_service=hook)
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+
+    await env["service"].process(job_id)
+
+    # The single waiter is offered an ad once, with their post-increment total (0 → 1),
+    # attached as a reply to the delivered media (#30 — reply_to_message_id is set).
+    assert len(hook.calls) == 1
+    call = hook.calls[0]
+    assert call["chat_id"] == 555 and call["total_downloads"] == 1
+    assert call["reply_to_message_id"] is not None
+
+
+async def test_ad_hook_fires_per_waiter_on_fan_out(tmp_path: Path) -> None:
+    hook = RecordingAdHook()
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path, ad_service=hook)
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+    await _add_second_waiter(env, job_id)
+
+    await env["service"].process(job_id)
+
+    chats = sorted(call["chat_id"] for call in hook.calls)
+    assert chats == [555, 556]
+    assert all(call["total_downloads"] == 1 for call in hook.calls)
+
+
+async def test_ad_hook_skips_waiters_delivered_on_a_prior_attempt(tmp_path: Path) -> None:
+    # Retry after partial delivery: waiter 7 already had the file (prior attempt), so
+    # only the newly-delivered waiter 8 is offered an ad — a retry never re-shows one.
+    hook = RecordingAdHook()
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path, ad_service=hook)
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+    await _add_second_waiter(env, job_id)
+    await env["cache_service"].record_uploaded_file(job_id, "minted-fid", "minted-unique")
+    await env["cache_service"].record_delivered(job_id, 7)
+
+    await env["service"].process(job_id)
+
+    assert [call["chat_id"] for call in hook.calls] == [556]
+
+
+async def test_ad_hook_failure_never_fails_the_job(tmp_path: Path) -> None:
+    class _BoomHook:
+        async def maybe_show(self, **_kwargs: Any) -> bool:
+            raise RuntimeError("ad subsystem down")
+
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path, ad_service=_BoomHook())
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+
+    await env["service"].process(job_id)  # must not raise
+
+    jobs: FakeJobRepo = env["jobs"]
+    assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.COMPLETED.value

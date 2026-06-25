@@ -13,7 +13,7 @@ from typing import Any
 import orjson
 import pytest
 
-from domain.entities.media import MediaInfo
+from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import ExtractionFailedError, URLNotSupportedError
 from domain.protocols.downloader import ProviderHealth, ProviderRetryElsewhere
@@ -200,14 +200,39 @@ async def test_health_check_ok_and_unavailable(monkeypatch: pytest.MonkeyPatch) 
     assert await YtdlpProvider().health_check() is ProviderHealth.UNAVAILABLE
 
 
-def test_format_selector_prefers_mp4_caps_height_and_merges_audio() -> None:
+def test_format_selector_downloads_the_exact_offered_format_id() -> None:
+    # The user was shown a 720p option backed by format_id "136"; the selector must
+    # download exactly that format (so delivered quality + size match — #28/#29).
+    media = MediaInfo(
+        platform="youtube",
+        video_id="v",
+        title="T",
+        source_url=_URL,
+        formats=(
+            MediaFormatOption(
+                format=MediaFormat.VIDEO, quality=Quality.P720, provider_format_id="136"
+            ),
+            MediaFormatOption(
+                format=MediaFormat.VIDEO, quality=Quality.P480, provider_format_id="135"
+            ),
+        ),
+    )
+    selector = _format_selector(media, MediaFormat.VIDEO, Quality.P720)
+    assert selector == "136+bestaudio[acodec^=mp4a]/136+bestaudio/136"
+    # A different tier resolves to its own format id.
+    assert _format_selector(media, MediaFormat.VIDEO, Quality.P480).startswith("135+bestaudio")
+    assert _format_selector(media, MediaFormat.AUDIO, Quality.MP3) == "bestaudio/best"
+
+
+def test_format_selector_fallback_is_height_capped_never_uncapped() -> None:
+    # No offered format id (stale/odd source): fall back to a height-capped selector that
+    # can never deliver above the selected tier — the trailing uncapped `/best` is gone.
     media = MediaInfo(platform="youtube", video_id="v", title="T", source_url=_URL)
     selector = _format_selector(media, MediaFormat.VIDEO, Quality.P720)
-    # Prefers H.264+AAC (mp4 → playable inline), always merges audio, caps the tier.
     assert selector.startswith("bestvideo[height<=720][vcodec^=avc1]+bestaudio[acodec^=mp4a]")
     assert "[height<=720]" in selector
-    assert selector.endswith("/best")  # graceful fallback for VP9/AV1-only tiers
-    assert _format_selector(media, MediaFormat.AUDIO, Quality.MP3) == "bestaudio/best"
+    assert selector.endswith("best[height<=720]")  # capped fallback, not a bare /best
+    assert "/best/" not in selector and not selector.endswith("/best")
 
 
 def test_video_only_size_includes_audio_muxed_not_double_counted() -> None:

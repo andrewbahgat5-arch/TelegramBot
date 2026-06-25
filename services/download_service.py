@@ -19,6 +19,12 @@ idempotent across worker retries — the minted ``file_id`` and the set of alrea
 delivered waiters are persisted in the Redis job context (outside the per-job DB
 transaction), so a retry after partial delivery never sends a waiter their file
 twice. One waiter's delivery failure is logged and skipped, never blocking the rest.
+
+Ads (Task 9.3): after a waiter is freshly delivered their file, the optional
+``AdShowProtocol`` hook (``AdService``) is invoked with that waiter's post-increment
+download total (flow 16.7, D-010). It is best-effort — an ad failure never fails the
+already-completed download, and a retry never re-shows an ad (only *newly* delivered
+waiters are offered one).
 """
 
 from __future__ import annotations
@@ -43,6 +49,7 @@ from domain.exceptions import (
     InfrastructureError,
     TelegramUploadError,
 )
+from domain.protocols.advertising import AdShowProtocol
 from domain.protocols.downloader import DownloaderProtocol, ProviderRetryElsewhere
 from domain.protocols.file_sender import FileSenderProtocol, UploadedFile
 from domain.protocols.repositories import (
@@ -112,6 +119,7 @@ class DownloadService:
         cache_service: CacheService,
         settings_service: SettingsService,
         settings: Settings,
+        ad_service: AdShowProtocol | None = None,
     ) -> None:
         self._jobs = job_repo
         self._cached = cached_file_repo
@@ -127,6 +135,7 @@ class DownloadService:
         self._cache = cache_service
         self._settings_service = settings_service
         self._settings = settings
+        self._ad_service = ad_service
 
     async def process(self, job_id_str: str) -> None:
         """Run a job to completion (flow 16.1 W1-W12). Raises on failure."""
@@ -245,6 +254,13 @@ class DownloadService:
         """
         job_id_str = str(job_id)
         delivered: set[int] = set(ctx.get("delivered", []))
+        # Waiters who receive the file *this* attempt (vs. on a prior, rolled-back try):
+        # only they get a post-delivery ad, so a retry never re-shows an ad (16.7, 9.3).
+        newly_delivered: set[int] = set()
+        post_totals: dict[int, int] = {}
+        # The delivered file's message id per waiter, so the post-download ad can be
+        # attached as a reply directly under the media (#30).
+        delivered_message_ids: dict[int, int] = {}
         file_id: str | None = ctx.get("file_id")
         unique_file_id: str | None = ctx.get("unique_file_id")
 
@@ -268,6 +284,9 @@ class DownloadService:
             )
             file_id, unique_file_id = uploaded.file_id, uploaded.unique_file_id
             delivered.add(target[0].user_id)
+            newly_delivered.add(target[0].user_id)
+            if uploaded.message_id is not None:
+                delivered_message_ids[target[0].user_id] = uploaded.message_id
             await self._cache.record_uploaded_file(job_id_str, file_id, unique_file_id)
             await self._cache.record_delivered(job_id_str, target[0].user_id)
 
@@ -280,6 +299,9 @@ class DownloadService:
             file_size=file_size,
         )
         for waiter, user in pairs:
+            # Capture the post-increment lifetime total *before* the bump (the ad
+            # frequency modulo is locked post-increment, D-010 / 16.7 step 4).
+            post_totals[waiter.user_id] = user.total_downloads + 1
             await self._downloads.create_completed(
                 user_id=waiter.user_id,
                 cached_file_id=cached.id,
@@ -294,7 +316,7 @@ class DownloadService:
             if waiter.user_id in delivered:
                 continue  # already received it (via the upload, or a prior attempt)
             try:
-                await self._file_sender.send_cached(
+                sent_message_id = await self._file_sender.send_cached(
                     user.telegram_id,
                     file_id,
                     format_=format_,
@@ -314,11 +336,50 @@ class DownloadService:
                 )
                 continue
             delivered.add(waiter.user_id)
+            newly_delivered.add(waiter.user_id)
+            if sent_message_id is not None:
+                delivered_message_ids[waiter.user_id] = sent_message_id
             await self._cache.record_delivered(job_id_str, waiter.user_id)
 
+        await self._show_ads(pairs, newly_delivered, post_totals, delivered_message_ids)
         return UploadedFile(
             file_id=file_id, unique_file_id=unique_file_id or "", size_bytes=file_size
         )
+
+    async def _show_ads(
+        self,
+        pairs: list[tuple[Any, Any]],
+        newly_delivered: set[int],
+        post_totals: dict[int, int],
+        delivered_message_ids: dict[int, int],
+    ) -> None:
+        """Run the post-delivery ad hook for each freshly-delivered waiter (Task 9.3).
+
+        The ad is attached as a reply to the delivered media so it sits directly under
+        it (#30). Entirely best-effort: the file is already delivered, so a failure here
+        must never fail the job (which would trigger a retry and re-deliver the file). The
+        hook itself swallows send errors; this guard additionally contains any unexpected
+        error per waiter.
+        """
+        if self._ad_service is None:
+            return
+        for waiter, user in pairs:
+            if waiter.user_id not in newly_delivered:
+                continue
+            try:
+                await self._ad_service.maybe_show(
+                    chat_id=user.telegram_id,
+                    role=str(user.role),
+                    is_premium=user.is_premium,
+                    premium_expires_at=user.premium_expires_at,
+                    total_downloads=post_totals[waiter.user_id],
+                    language=user.language,
+                    telegram_id=user.telegram_id,
+                    user_row_id=user.id,
+                    reply_to_message_id=delivered_message_ids.get(waiter.user_id),
+                )
+            except Exception as exc:  # an ad must never break a completed download
+                _log.warning("ad_hook_failed", user_id=waiter.user_id, error=str(exc))
 
     async def handle_failure(
         self, job_id_str: str, *, reason: str, retryable: bool, max_retries: int

@@ -19,6 +19,11 @@ class Broadcast(Base):
     )
     target_language: Mapped[str | None] = mapped_column(String(10))
     target_role: Mapped[str | None] = mapped_column(String(20))
+    # Ads v2 (Sprint 9.5): a broadcast may deliver a stored ad via copyMessage instead of
+    # plain text. NULL = plain-text broadcast (Sprint 8 behavior).
+    advertisement_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("advertisements.id", ondelete="SET NULL")
+    )
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_sent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

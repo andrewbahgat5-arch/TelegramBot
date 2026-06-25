@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-24 | PASS (289) | + Owner-feedback #21–#24 (Owner unlimited, time-bounded active-job cap, limit-freshness) | Sprint 1–8 |
-| Integration | 2026-06-24 | PENDING (52) | #14 audience + #24 time-bounded `count_active_for_user` need a re-run with Docker up | Sprint 2–8 |
+| Unit | 2026-06-25 | PASS (~374) | + Ads v2 & feedback #28–#31 (exact-format-id download, URL ad buttons, ad-under-media reply) | Sprint 1–9.5 |
+| Integration | 2026-06-25 | PASS (~71) | + Ads v2 repos; migration `202606240001` applied | Sprint 2–9.5 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,74 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-25 — Unit + Integration — Owner feedback #28–#31
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Environment | local (Docker up: postgres:15 + redis:7) |
+| Suite | all (unit + integration) |
+| Triggered by | Owner feedback #28 (quality), #29 (size), #30 (ad under media), #31 (URL buttons) |
+| Total tests | 445 | Passed | 445 | Failed | 0 | Skipped | 0 |
+| Coverage by path | ytdlp_provider: exact-`format_id` selector + height-capped fallback (no uncapped `/best`); ad_service/ad_sender: URL-button rendering + `reply_to_message_id` threading; download_service: capture delivered message id + attach ad as reply; file_sender: `upload`/`send_cached` return message id. |
+| Notes | #28/#29 fixed together (D-046): download the exact offered format so delivered quality + size match the display. #31 (D-047): direct-open URL buttons — per-button clicks no longer tracked (impressions unaffected); tracked redirect mode reserved. #30 (D-048): ad replies under the media. #32–#34 added to the roadmap (MASTER_PLAN §23 F-1/F-2/F-3, EP-21–23). Gates: ruff + format clean; mypy --strict 196 files; import-linter 7; bandit 0. |
+
+**Failures:** None.
+
+---
+
+### 2026-06-25 — Unit + Integration — Sprint 9.5 (Ads v2, 9.5.1–9.5.8)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows the Sprint 9 work) |
+| Environment | local (Docker up: postgres:15 + redis:7); migration `202606240001` applied |
+| Suite | all (unit + integration) |
+| Sprint | 9.5 |
+| Triggered by | Sprint 9.5 tasks 9.5.1–9.5.8 |
+| Total tests | 441 |
+| Passed | 441 |
+| Failed | 0 |
+| Skipped | 0 |
+| Duration | ~18 s |
+| Coverage by path | services.audience_service: include/exclude truth table across role/plan/language/user_id/segment (OR-within/AND-across) + legacy target_role fallback; services.ad_service: placement-aware selection + multi-button render + copy-mode + per-button click + preview + create/edit validation for the new fields; bot.handlers.ads: 11 new owner-only commands + per-button ad-click; workers.broadcast_worker: ad-broadcast copyMessage branch; infrastructure repos: ad_buttons/ad_audience_rules/audience_segments(+members) live CRUD + broadcast link; bot.callbacks.factory: 4-part `a\|ad\|btn` round-trip. |
+| Notes | Schema migration `202606240001_ads_v2_schema` applied; downgrade↔upgrade round-trip verified. Additive-only, no data backfill (AdService dual-reads legacy ads). 9.5.9 (ad_events) + 9.5.10 (scheduling) deferred. Gates: ruff + format clean; mypy --strict 196 files; import-linter 7 contracts; bandit 0. |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None — full integration suite ran against live Postgres + Redis.
+
+---
+
+### 2026-06-24 — Unit + Integration — Sprint 9 exit (Smart Advertisements, 9.1–9.4)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`; follows `ffe4ba3`) |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer + self-hosted bot-api) |
+| Suite | all (unit + integration) |
+| Sprint | 9 |
+| Triggered by | Sprint 9 exit (tasks 9.1–9.4) |
+| Total tests | 405 |
+| Passed | 405 |
+| Failed | 0 |
+| Skipped | 0 |
+| Duration | ~16 s |
+| Coverage by path | services.ad_service: selection algorithm §16.7 (master switch, premium/Owner untargeted exemption, role targeting, post-increment frequency, priority + frequency fall-through, best-effort send) + CRUD/validation + click tracking; bot.handlers.ads: 7 owner-only commands + signed click callback + forged-callback rejection; infrastructure.database.repositories.advertisement: live impression/click increments + role-ranked candidate select + apply_update; services.download_service: ad hook per newly-delivered waiter (post-increment total, retry-safe, failure-isolated); bot.callbacks.factory: `a` ad-click round-trip + tamper rejection. |
+| Notes | New `services/ad_service.py`, `domain/protocols/advertising.py`, `infrastructure/telegram/ad_sender.py`, `bot/handlers/ads.py`; new tests `test_ad_service.py`, `test_ad_handler.py`, `test_ad_repository.py`. No schema/dependency/migration changes (the `advertisements` table + `ix_ads_*` indexes shipped Sprint 2). Gates: ruff + ruff-format clean; mypy --strict (185 files); import-linter (7 contracts); bandit (0 issues, all severities). Reset dev-DB `free_daily_limit` 50→10 (seeded value; had drifted via manual `/setting_set`), re-greening 4 pre-existing settings integration tests that were red at the start of this session. |
+| Linked PR | — |
+
+**Failures (if any)**
+- None.
+
+**Skips (if non-trivial)**
+- None — the full integration suite ran against live Postgres + Redis.
+
+---
 
 ### 2026-06-24 — Unit — Owner verification feedback fixes (#21–#27)
 

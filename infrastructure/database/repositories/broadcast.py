@@ -21,14 +21,20 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
         target_language: str | None,
         target_role: str | None,
         expected_total: int,
+        advertisement_id: int | None = None,
     ) -> Broadcast:
-        """Insert a ``pending`` broadcast the worker will pick up (16.8 step 1)."""
+        """Insert a ``pending`` broadcast the worker will pick up (16.8 step 1).
+
+        ``advertisement_id`` (Sprint 9.5) links an ad to deliver via copyMessage instead
+        of plain ``message_text``.
+        """
         broadcast = Broadcast(
             created_by=created_by,
             message_text=message_text,
             target_language=target_language,
             target_role=target_role,
             expected_total=expected_total,
+            advertisement_id=advertisement_id,
             status="pending",
         )
         return await self.add(broadcast)

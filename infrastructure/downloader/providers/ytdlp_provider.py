@@ -349,24 +349,51 @@ _QUALITY_HEIGHT: dict[Quality, int] = {
 }
 
 
+def _selected_video_format_id(media: MediaInfo, quality: Quality) -> str | None:
+    """The exact yt-dlp ``format_id`` the user was shown for ``quality`` (D-046).
+
+    The quality keyboard offered one option per tier, each carrying the ``format_id``
+    whose size was displayed. Downloading *that* format guarantees the delivered
+    resolution and size match what was selected (#28/#29) — instead of re-deriving via a
+    height cap, which could resolve to a different (or higher) format.
+    """
+    for option in media.formats:
+        if (
+            option.format is MediaFormat.VIDEO
+            and option.quality is quality
+            and option.provider_format_id
+        ):
+            return option.provider_format_id
+    return None
+
+
 def _format_selector(media: MediaInfo, format_: MediaFormat, quality: Quality) -> str:
     """yt-dlp ``-f`` selector. Video always merges audio so downloads are never silent.
 
-    Using a height-capped ``bestvideo+bestaudio`` (rather than a single video-only
-    ``format_id``) guarantees the chosen resolution *and* an audio track, regardless of
-    which codecs the platform offers. Audio uses ``bestaudio/best`` so muxed-only
-    sources (TikTok) still yield an audio stream for FFmpeg to transcode.
+    Primary path (D-046): download the **exact** ``format_id`` that was offered for the
+    chosen tier, so the delivered quality and size match the displayed option (#28/#29).
+    A video-only format is merged with the best audio; an already-muxed format falls back
+    to itself. If the id is unavailable (stale/odd source) we fall back to a height-capped
+    ``bestvideo+bestaudio`` — **never** an uncapped ``best``, so the delivered video can
+    never exceed the selected tier. Audio uses ``bestaudio/best`` (then transcoded).
     """
     if format_ is MediaFormat.AUDIO:
         return "bestaudio/best"
+
+    fid = _selected_video_format_id(media, quality)
+    if fid:
+        return f"{fid}+bestaudio[acodec^=mp4a]/{fid}+bestaudio/{fid}"
+
     height = _QUALITY_HEIGHT.get(quality)
-    cap = f"[height<={height}]" if height is not None else ""
+    if height is None:  # no tier height (e.g. BEST) — best available, still no over-cap
+        return "bestvideo+bestaudio/best"
+    cap = f"[height<={height}]"
     # Prefer H.264 video + AAC audio in an mp4 (Telegram plays mp4 inline); then any
-    # codec at the tier; then any progressive format. Each step still caps the height.
+    # codec at the tier; then any progressive format. Every branch caps the height.
     return (
         f"bestvideo{cap}[vcodec^=avc1]+bestaudio[acodec^=mp4a]/"
         f"bestvideo{cap}[ext=mp4]+bestaudio[ext=m4a]/"
-        f"bestvideo{cap}+bestaudio/best{cap}/best"
+        f"bestvideo{cap}+bestaudio/best{cap}"
     )
 
 

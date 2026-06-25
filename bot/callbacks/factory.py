@@ -4,12 +4,13 @@ Inline-button callbacks carry ``(media_id, format[, quality])``. Each payload is
 HMAC-signed so a tampered callback is rejected and silently ignored (never echoed).
 The encoded form stays well within Telegram's 64-byte ``callback_data`` limit.
 
-Five actions:
+Six actions:
 * ``f`` — format chosen (``f|<media_id>|<format>|<sig>``) → show the quality keyboard.
 * ``q`` — quality chosen (``q|<media_id>|<format>|<quality>|<sig>``) → start download.
 * ``b`` — back (``b|<media_id>|<sig>``) → return to the format (Video/Audio) keyboard.
 * ``r`` — resend (``r|<download_id>|<sig>``) → re-send a history entry (flow 16.3).
 * ``h`` — history page (``h|<page>|<sig>``) → paginate the history list.
+* ``a`` — ad click (``a|<ad_id>|<sig>``) → record the click + deliver the link (16.7 W6).
 """
 
 from __future__ import annotations
@@ -26,11 +27,12 @@ _SIG_LEN = 10  # hex chars of the truncated HMAC — enough for this low-value t
 
 @dataclass(frozen=True, slots=True)
 class ParsedCallback:
-    action: str  # "f", "q", "b", "r", or "h"
-    media_id: int = 0  # the media id for f/q/b actions; 0 for r/h
+    action: str  # "f", "q", "b", "r", "h", or "a"
+    media_id: int = 0  # the media id for f/q/b actions; 0 for r/h/a
     format: MediaFormat | None = None
     quality: Quality | None = None
-    arg: int | None = None  # download_id for "r"; page index for "h"
+    arg: int | None = None  # download_id for "r"; page index for "h"; ad_id for "a"
+    button_id: int | None = None  # ad button id for "a" (None = legacy single button)
 
 
 class CallbackSigner:
@@ -62,6 +64,11 @@ class CallbackSigner:
         payload = f"h{_SEP}{page}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
+    def pack_ad_click(self, ad_id: int, button_id: int | None = None) -> str:
+        # 3-part (legacy single button) ``a|ad_id``; 4-part ``a|ad_id|button_id``.
+        payload = f"a{_SEP}{ad_id}" if button_id is None else f"a{_SEP}{ad_id}{_SEP}{button_id}"
+        return f"{payload}{_SEP}{self._sig(payload)}"
+
     def unpack(self, data: str) -> ParsedCallback | None:
         """Verify and parse callback data. Returns None on any malformed/forged input."""
         parts = data.split(_SEP)
@@ -76,6 +83,10 @@ class CallbackSigner:
                 return ParsedCallback(action="r", arg=int(parts[1]))
             if action == "h" and len(parts) == 3:
                 return ParsedCallback(action="h", arg=int(parts[1]))
+            if action == "a" and len(parts) == 3:
+                return ParsedCallback(action="a", arg=int(parts[1]))
+            if action == "a" and len(parts) == 4:
+                return ParsedCallback(action="a", arg=int(parts[1]), button_id=int(parts[2]))
             media_id = int(parts[1])
             if action == "b" and len(parts) == 3:
                 return ParsedCallback(action="b", media_id=media_id)

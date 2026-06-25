@@ -25,6 +25,7 @@ class UploadedFile:
     file_id: str
     unique_file_id: str
     size_bytes: int | None = None
+    message_id: int | None = None  # the delivered message (for an attached ad reply, #30)
 
 
 class FileSenderProtocol(Protocol):
@@ -53,8 +54,8 @@ class FileSenderProtocol(Protocol):
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
-    ) -> None:
-        """Deliver an already-uploaded file to ``telegram_id`` by ``file_id``."""
+    ) -> int | None:
+        """Deliver an already-uploaded file by ``file_id``; return its message id (#30)."""
         ...
 
 

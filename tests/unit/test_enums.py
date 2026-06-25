@@ -52,7 +52,15 @@ def test_quality_contains_resolution_ladder_and_audio() -> None:
 
 
 def test_ad_type_values() -> None:
-    assert {a.value for a in AdType} == {"text", "photo", "video", "animation"}
+    assert {a.value for a in AdType} == {
+        "text",
+        "photo",
+        "video",
+        "animation",
+        "document",
+        "audio",
+        "album",
+    }
 
 
 def test_error_type_values_fit_column_width() -> None:

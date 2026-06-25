@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
+from infrastructure.database.repositories.ad_button import AdButtonRepository
 from infrastructure.database.repositories.advertisement import AdRepository
+from infrastructure.database.repositories.audience_segment import (
+    AudienceSegmentMemberRepository,
+    AudienceSegmentRepository,
+)
 from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
 from infrastructure.database.repositories.download import DownloadRepository
@@ -17,7 +23,11 @@ from infrastructure.database.repositories.user_preference import UserPreferenceR
 
 __all__ = [
     "ActiveDownloadRepository",
+    "AdAudienceRuleRepository",
+    "AdButtonRepository",
     "AdRepository",
+    "AudienceSegmentMemberRepository",
+    "AudienceSegmentRepository",
     "BroadcastRepository",
     "CachedFileRepository",
     "DownloadRepository",

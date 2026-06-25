@@ -90,10 +90,10 @@ class TelegramFileSender:
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
-    ) -> None:
+    ) -> int | None:
         """Deliver an already-uploaded file to a user by ``file_id`` (16.2 / fan-out)."""
         try:
-            await self._send(
+            message = await self._send(
                 telegram_id, file_id, format_=format_, quality=quality, caption=caption
             )
         except TelegramBadRequest as exc:
@@ -103,6 +103,7 @@ class TelegramFileSender:
             raise TelegramUploadError("Delivering the file to the user failed.") from exc
         except Exception as exc:
             raise TelegramUploadError("Delivering the file to the user failed.") from exc
+        return message.message_id
 
     async def _send(
         self,
@@ -148,4 +149,5 @@ def _extract_upload(message: Message) -> UploadedFile:
         file_id=media.file_id,
         unique_file_id=media.file_unique_id,
         size_bytes=getattr(media, "file_size", None),
+        message_id=message.message_id,
     )

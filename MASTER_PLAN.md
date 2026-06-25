@@ -414,6 +414,13 @@ Every non-obvious decision is recorded here with date, rationale, and (if applic
 | D-039 | 2026-06-23 | Security testing is structured by category (Section 25.9.1 through 25.9.5). Categories may be added but never removed. Every release runs every category. | Locking the category set prevents quiet regressions in security coverage. | Ad-hoc security testing. |
 | D-040 | 2026-06-24 | V1 delivers files through a **self-hosted Telegram Bot API server** (2 GB upload cap), selected by a new `BOT_API_BASE_URL` env var (empty = public api.telegram.org, 50 MB). The bot and worker Telegram clients point at it; `max_file_size` (Section 13.4) stays the 2 GiB hard cap. | Owner directive (OQ-11) at Sprint 6 start: large media (HD video, lossless audio) routinely exceeds 50 MB, so the public API cap would make the core flow useless for most content. Base URL is a single env var; the public API remains the fallback. | Public Bot API only (50 MB); chunked/segmented delivery; external file hosts. |
 | D-041 | 2026-06-24 | **Per-codec audio** is modeled by extending the `Quality` enum with audio-codec members (`mp3`, `m4a`, `aac`, `ogg`, `opus`, `wav`, `flac`) and adding a descriptive `codec` field to `MediaFormatOption`. The chosen codec is the `quality` value, so the LOCKED `cached_files`/`active_downloads` unique key `(media_id, format, quality)` distinguishes codecs with no schema change. Audio targets are a fixed catalog offered whenever the media has any audio stream; native containers are remuxed, the rest are FFmpeg transcodes. | Owner carry-in: users want explicit MP3/M4A/Opus/etc. Encoding the codec in `quality` reuses the locked cache key (one cached file per codec) and keeps the enum additive (Section 9.4). | A parallel `audio_codec` column (schema change to the locked unique key); a separate `AudioCodec` enum carried out-of-band from the cache key (risks collisions). |
+| D-042 | 2026-06-24 | **(Sprint 9.5)** Ads v2 delivers content in two modes behind `AdSenderProtocol`: `fields` (Sprint 9, programmatic type+text+`file_id`+buttons) and `copy` (store `(storage_chat_id, storage_message_id)` in a bot-owned storage channel; deliver via `bot.copy_message`). Buttons are first-class in a new `ad_buttons` table (copyMessage drops inline keyboards, so they are re-attached on send and stay click-trackable in both modes). | Lets the Owner reuse a complete rich Telegram message (any media/album, caption, formatting, multiple buttons) with no re-upload and no raw-byte storage — the Owner's recommended architecture. A new sender method + table, not a refactor of the Sprint 9 selection core. No new Python dependency (`copy_message` is on the aiogram `Bot`). | Rebuilding every Telegram message variant field-by-field (brittle); storing raw media bytes (storage/upload cost). |
+| D-043 | 2026-06-24 | **(Sprint 9.5)** Audience targeting becomes first-class via `advertisements.audience_mode` (`all`/`include`/`exclude`) + an `ad_audience_rules` table (`effect`, `dimension` ∈ role/plan/language/user_id/segment/country, `value`) + reusable `audience_segments`/`audience_segment_members`. Within a dimension values OR, across dimensions AND. The Sprint 9 `target_role` (D-004) is retained as a denormalized fast pre-filter for one deprecation window and backfilled into an equivalent `include role=…` rule. | The Sprint 9 single `target_role` cannot express "Arabic users only", "user IDs [..]", "all except premium", or reusable segments. A rule table makes targeting (and future monetization segmentation) first-class and additive; the Owner/premium exemptions (16.7) are preserved and become overridable by an explicit include rule. | Boolean flags per audience (combinatorial explosion); a single JSON blob (not queryable/indexable for segment membership). Supersedes D-004 additively. |
+| D-044 | 2026-06-24 | **(Sprint 9.5)** Persistent ads are positioned by an `advertisements.placement` enum (`post_download` [compat], `video_delivery`, `audio_delivery`, `quality_select`, `home`, `history`, `broadcast`) plus one `settings` toggle per placement (Section 13.6). New-placement toggles default **OFF** (opt-in); the compat placement keeps Sprint 9 behavior. Selection narrows by an additive `ix_ads_placement_active_priority(placement, is_active, priority DESC)` index. | Placement is just another filter dimension on the existing `AdService` selection; per-placement toggles prevent surprise/spammy ads and let placements ship incrementally and be measured. The LOCKED `ix_ads_active_priority_role` is retained (additive index, no drop). | A single global "show persistent ads" flag (no per-surface control); hard-coding placements in handlers (business logic in handlers, forbidden by 1.5.1). |
+| D-046 | 2026-06-25 | **(#28/#29)** The download selects the **exact `format_id`** that was offered for the chosen tier (looked up from `media.formats` at download time), instead of re-deriving via a height cap. The height-capped selector is the fallback only, and its final branch is now also height-capped (the uncapped `/best` is removed) so a download can never exceed the selected tier. | Guarantees the delivered resolution **and** size match the displayed option: the same format whose size was shown is the one downloaded. The previous `bestvideo[height<=H]…/best` could resolve to a different (or, via the uncapped fallback, higher) format than displayed, causing 480p→720p mismatches and wrong size estimates. `analyze_by_media_id` serves `formats` (with `provider_format_id`) from the metadata cache, so the id is available at download time. | Threading the format_id through the signed callback (exceeds 64-byte limit); a stricter height-range filter (still mismatches nearest-tier display snapping). |
+| D-047 | 2026-06-25 | **(#31)** Ad buttons render as Telegram **URL buttons** (open the destination directly), not callback buttons. | Owner UX directive: pressing Open must launch the link immediately with no copy/paste step. Trade-off: a URL button fires no callback, so per-button click counts are not incremented for direct-open buttons (impressions still are). `AdButtonSpec` retains an optional `callback_data` so a future **redirect-based tracked** button (which both opens and counts) can be added without a refactor — the natural home for click analytics and the #32 quota-unlock flow. | Callback buttons (track clicks, but require an extra tap / message — rejected by the Owner); `answerCallbackQuery(url=…)` (Telegram restricts it to game/`t.me` links). |
+| D-048 | 2026-06-25 | **(#30)** The post-download ad is sent as a **reply to the delivered media message** (`reply_to_message_id`), so it sits visually attached directly under the file. `FileSenderProtocol.upload`/`send_cached` now return the delivered message id. | Owner UX directive: the ad must feel attached to the media, not a standalone message elsewhere. Threading the delivered message id is additive (optional param, defaults preserve prior behavior). | Sending the ad as an independent message (the prior behavior — appears below but not threaded). |
+| D-045 | 2026-06-24 | **(Sprint 9.5)** Ad broadcasts reuse the Sprint 8 `broadcasts` plumbing via a nullable `broadcasts.advertisement_id` FK (→`advertisements` ON DELETE SET NULL); `BroadcastWorker` gains one branch that delivers a stored ad via `copy_message` instead of plain text, reusing the chunked fan-out and `total_sent`/`total_failed` counters as the broadcast delivery-count analytic. Richer per-event/time-series analytics are an additive, monthly-partitioned `ad_events` table (last/optional task) that never touches the counter hot path. Scheduling (`scheduled_at` + due-poller) is specified but deferred to a later sprint. | Avoids forking a second broadcast subsystem; counters already exist. `ad_events` keeps the hot-path increments cheap while leaving room for analytics. | A separate ad-broadcast pipeline (duplicate logic); event rows on the hot path (write amplification); building scheduling before the core ad system is proven. |
 
 ---
 
@@ -710,12 +717,21 @@ If a component is not listed here, it does not exist yet. Adding a component req
 
 #### Component: `AdminHandlers`
 - **Purpose:** In-bot administrative commands for Owner and Moderator.
-- **Responsibilities:** `/stats`, `/ban`, `/unban`, `/userinfo`, `/broadcast`, `/ad_create`, `/ad_list`, `/ad_edit`, `/ad_toggle`, `/ad_delete`, `/ad_stats`, `/ad_global`, `/settings`, `/setting_set`. Authorization gating via `RoleFilter`.
-- **Dependencies:** `UserService`, `BroadcastService`, `AdService`, `SettingsService`.
+- **Responsibilities:** `/stats`, `/ban`, `/unban`, `/userinfo`, `/users`, `/broadcast`, `/settings`, `/setting_set`. Authorization gating via `RoleFilter` (non-staff are silently ignored). The ad commands (`/ad_*`) live in `AdHandlers`.
+- **Dependencies:** `UserService`, `BroadcastService`, `SettingsService`.
 - **Files/Folders:** `bot/handlers/admin.py`
 - **Related Services:** All admin-facing services.
 - **Can Modify:** Command surface (subject to versioning).
 - **Must Never Modify:** Authorization rules — those live in `RoleFilter` and `UserService`.
+
+#### Component: `AdHandlers`
+- **Purpose:** The ad admin surface (Owner-only) plus the public ad-click callback.
+- **Responsibilities:** `/ad_create`, `/ad_list`, `/ad_edit`, `/ad_toggle`, `/ad_delete`, `/ad_stats`, `/ad_global` gated by `OwnerFilter` (non-owners silently ignored); the signed `a|<ad_id>` ad-click callback (any user) → record the click + deliver the link (flow 16.7 W6). Parse/delegate/format only.
+- **Dependencies:** `AdService` (via `ad_service_factory`), `CallbackSigner`.
+- **Files/Folders:** `bot/handlers/ads.py`
+- **Related Services:** `AdService`.
+- **Can Modify:** Command + callback surface (subject to versioning).
+- **Must Never Modify:** Authorization rules (`OwnerFilter`); selection/click logic (lives in `AdService`).
 
 #### Component: `AuthMiddleware`
 - **Purpose:** Resolve the Telegram user to a `users` row on every update; populate context; reject banned users.
@@ -968,6 +984,12 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Files/Folders:** `infrastructure/telegram/file_sender.py`, `infrastructure/telegram/client.py`
 - **Can Modify:** Chunking thresholds; storage-chat target.
 - **Must Never Modify:** `FileSenderProtocol`, `MessageSenderProtocol`.
+
+#### Component: `TelegramAdSender`
+- **Purpose:** The only place that sends an advertisement message for the ad pipeline (`AdSenderProtocol`). The ad `type` selects the send method (text / photo / video / animation, re-using the admin-uploaded `content_media_file_id`); a button ad attaches one inline callback button carrying the signed ad-click `callback_data` (flow 16.7 W6).
+- **Files/Folders:** `infrastructure/telegram/ad_sender.py`
+- **Can Modify:** Send-method mapping per ad type; keyboard layout.
+- **Must Never Modify:** `AdSenderProtocol`; the ad selection/click logic (lives in `AdService`).
 
 ### 9.6 API Layer
 
@@ -1655,6 +1677,22 @@ Env vars are for things that must be available before the database (DB credentia
 - `updated_by` and `updated_at` are recorded.
 - Redis cache key is invalidated immediately.
 
+### 13.6 `settings` keys — Sprint 9.5 Ads v2 (SEEDED by migration 202606240001)
+
+These keys are **seeded by the Sprint 9.5 migration** (`migrations/versions/202606240001_ads_v2_schema.py`), separate from the LOCKED §13.4 set. D-042–D-044.
+
+| Key | Type | Planned Default | Description |
+|---|---|---|---|
+| `ads_storage_chat_id` | int | `0` | Bot-owned storage channel id for copy-mode ads (`0` = copy-mode disabled). |
+| `ad_placement_post_download_enabled` | bool | `true` | Compat placement (Sprint 9 post-delivery behavior). Default ON. |
+| `ad_placement_video_delivery_enabled` | bool | `false` | Persistent ad under video delivery. Opt-in. |
+| `ad_placement_audio_delivery_enabled` | bool | `false` | Persistent ad under audio delivery. Opt-in. |
+| `ad_placement_quality_select_enabled` | bool | `false` | Persistent ad on the quality-select screen. Opt-in. |
+| `ad_placement_home_enabled` | bool | `false` | Persistent ad on the home/start screen. Opt-in. |
+| `ad_placement_history_enabled` | bool | `false` | Persistent ad on history pages. Opt-in. |
+
+No new **environment variable** is required for Ads v2 (the storage channel is a `settings` key, not env), consistent with the "no new dependencies / minimal env surface" design goal.
+
 ---
 
 ## 14. Security Principles
@@ -2027,6 +2065,11 @@ Each row is a place V1 leaves intentionally open for a future version. V1 must *
 | EP-16 | `DownloaderRegistry` accepts `register(provider)` and routes by `priority` and `supported_platforms` | `infrastructure/downloader/registry.py` | V6 multi-engine adds providers without service-layer changes. The single most important V1→V6 extension. |
 | EP-17 | `provider_used` column reserved on `media_metadata` (added in V6 only) | `media_metadata` (migration in V6) | Per-row provenance for fallback diagnostics. Not added in V1 because 100% of rows would have the same value. |
 | EP-18 | `Capability` enum (`VIDEO`, `AUDIO`, ...) is open to additive values | `domain/enums/` | V6 may add `LIVE_STREAM`, `PLAYLIST`, `IMAGE`. |
+| EP-19 | Ads v2 `advertisements` + `ad_audience_rules` are open to a future `campaign_id` + `variant_group`/`weight` (weighted selection) | `advertisements` (Sprint 9.5 schema) | Monetization: partner **campaigns**, **A/B testing**, **sponsored placements**. Additive columns + a `ad_campaigns` table; no change to the selection contract. |
+| EP-20 | Ads v2 `ad_audience_rules.dimension` reserves `country` | `ad_audience_rules` (Sprint 9.5 schema) | Geo-targeting once a user→region source exists. Additive rule rows; evaluator already iterates dimensions. |
+| EP-21 | `AdButtonSpec.callback_data` (reserved) + a future `quota` placement | `services/ad_service.py`, rate-limit error path | F-1 quota-unlock sponsored ads (#32): tracked-click "Open Sponsor" button + unlock side-effect. |
+| EP-22 | `CallbackSigner` accepts new action prefixes; admin services already command-driven | `bot/handlers/` | F-2 admin inline control panel (#33): signed-callback keyboards delegating to existing services. |
+| EP-23 | `AdService.create`/`add_button` + copy-mode are operation-complete | `bot/handlers/` (FSM) | F-3 rich ad builder (#34): an FSM wizard over the existing ad operations. |
 
 ## 19. Database Evolution Strategy
 
@@ -2052,6 +2095,7 @@ Each row is a place V1 leaves intentionally open for a future version. V1 must *
 | Version | Migration | Description |
 |---|---|---|
 | V1 Sprint 1 | Initial schema | Tables 1–12 created, partitions seeded, indexes created. |
+| V1 Sprint 9.5 | `202606240001_ads_v2_schema` | **Applied** (head `202606240001`). ALTERs `advertisements` (placement, delivery_mode, storage_chat_id, storage_message_id, parse_mode, audience_mode; widens `type` via the domain enum); ALTERs `broadcasts` (`advertisement_id`); creates `ad_buttons`, `ad_audience_rules`, `audience_segments`, `audience_segment_members`; adds `ix_ads_placement_active_priority`; seeds the Section 13.6 keys. Additive-only — no data backfill (AdService dual-reads legacy ads). D-042–D-045. The deferred partitioned `ad_events` table (9.5.9) remains a non-wired skeleton in `migrations/planned/`. |
 | V2 | `add_premium_columns` | (None — already present.) |
 | V2 | `add_default_format_quality_to_preferences` | V2 power-user preferences. |
 | V3 | `add_admin_audit_log` | New `audit_logs` table for the web dashboard. |
@@ -2797,6 +2841,169 @@ Agent stops. Owner reviews. Approval required to begin Sprint 10.
 
 ---
 
+### Sprint 9.5 — Ads v2 (IMPLEMENTED — tasks 9.5.1–9.5.8; 9.5.9/9.5.10 deferred)
+
+> **Status: IMPLEMENTED (2026-06-25).** Tasks 9.5.1–9.5.8 are built, tested, and live: the core schema migration `migrations/versions/202606240001_ads_v2_schema.py` is applied (head `202606240001`), the Section 13.6 settings are seeded, and the engine (audience targeting, multi-button, copy-mode, placements, ad broadcast, commands) is wired. **Deferred:** 9.5.9 (`ad_events` analytics table — skeleton retained in `migrations/planned/`) and 9.5.10 (scheduling). Decisions D-042–D-045. The original design specification is preserved below for reference.
+
+**Goal:** Evolve the Sprint 9 ad foundation into a flexible, audience-targeted advertisement system supporting rich Telegram content, multiple placements, ad broadcasts, and first-class audience segmentation — all additively, with no rewrite of the Sprint 9 selection core and no new Python dependency.
+
+**Why it is low-risk:** Sprint 9 was built port-first. `AdService` is the single selection authority; `AdSenderProtocol` is an injected transport; click tracking is a generic signed callback; content is already stored as Telegram `file_id` (never raw bytes). Every item below is an added column, an added table, an added sender method, an added thin hook, or an added command — not a refactor of existing code paths.
+
+#### Scope
+
+1. **Broadcast advertisements** — send a stored ad to an audience (all / selected / language / role / segment), reusing the Sprint 8 broadcast plumbing.
+2. **Persistent + placement-based advertisements** — ads that appear in-flow at named placements (video delivery, audio delivery, quality-select, home, history), each behind a per-placement toggle.
+3. **Rich Telegram content** — text, photo, video, **document**, **audio**, animation/GIF, **album**, captions, Markdown/HTML formatting, and **multiple inline buttons**.
+4. **Media reuse** — two delivery modes behind `AdSenderProtocol`: `fields` (Sprint 9, programmatic) and `copy` (store a complete message in a bot-owned storage channel; deliver via `bot.copy_message`). Minimises storage and upload cost.
+5. **First-class audience targeting & segmentation** — include/exclude by role, plan (free/premium), language, explicit user IDs, and reusable custom segments; "everyone except X" semantics; Owner exemption preserved and overridable.
+6. **Management commands** — create/list/edit/enable/disable/delete/preview/broadcast/stats + audience and segment management.
+7. **Future analytics** (designed, partly deferred) — impressions, per-button clicks, broadcast delivery counts, active status, and placement dimension; optional `ad_events` table for per-event/time-series reporting added without touching the increment hot path.
+8. **Future scheduling** (designed, deferred) — `scheduled_at` column + a due-poller worker, specified but not built in this sprint.
+
+#### Design goals (LOCKED for this sprint)
+
+- **No new Python dependency** — `copyMessage`/`copyMessages`, `send_document`, `send_audio`, `send_media_group` are already on the aiogram `Bot`.
+- **Reuse existing aiogram capabilities** and the Sprint 8 `broadcasts` plumbing.
+- **Minimise storage/upload cost** — store Telegram `file_id`/`message_id`, never bytes; copy-mode re-sends without re-upload.
+- **Audience targeting is first-class from day one**, not bolted on.
+- **Extensible for monetization** — campaigns, A/B variants, sponsored placements, and partner targeting are reachable as additive extensions (EP-19, EP-20); not built here.
+
+#### Proposed schema (PLANNED — pending the Section-19 migration; not in live Section 10 yet)
+
+`advertisements` (ALTER, all additive with back-compat defaults):
+
+| Column | Type | Default | Notes |
+|---|---|---|---|
+| `placement` | VARCHAR(30) NOT NULL | `'post_download'` | enum: `post_download` (compat = today), `video_delivery`, `audio_delivery`, `quality_select`, `home`, `history`, `broadcast`. |
+| `delivery_mode` | VARCHAR(10) NOT NULL | `'fields'` | `fields` (Sprint 9) \| `copy` (copyMessage). |
+| `storage_chat_id` | BIGINT NULL | NULL | copy-mode source (bot-owned storage channel). |
+| `storage_message_id` | BIGINT NULL | NULL | copy-mode source message. |
+| `parse_mode` | VARCHAR(10) NULL | NULL | fields-mode rich text (`HTML`/`MarkdownV2`). |
+| `audience_mode` | VARCHAR(10) NOT NULL | `'all'` | `all` \| `include` \| `exclude`. |
+| `type` (widen enum) | — | — | + `document`, `audio`, `album` (additive to text/photo/video/animation). |
+
+`ad_buttons` (NEW — replaces the single `button_text`/`button_url` pair, which is retained one deprecation window for back-compat):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | BIGINT PK Identity | |
+| `advertisement_id` | BIGINT NOT NULL FK→`advertisements` ON DELETE CASCADE | |
+| `text` | VARCHAR(100) NOT NULL | |
+| `url` | TEXT NULL | NULL = callback-only button (reserved). |
+| `row` | SMALLINT NOT NULL DEFAULT 0 | keyboard row. |
+| `position` | SMALLINT NOT NULL DEFAULT 0 | within-row order. |
+| `clicks` | BIGINT NOT NULL DEFAULT 0 | per-button analytics. |
+
+Indexes: `ix_ad_buttons_ad(advertisement_id, row, position)`.
+
+`ad_audience_rules` (NEW — first-class targeting):
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | BIGINT PK Identity | |
+| `advertisement_id` | BIGINT NOT NULL FK→`advertisements` ON DELETE CASCADE | |
+| `effect` | VARCHAR(10) NOT NULL | `include` \| `exclude`. |
+| `dimension` | VARCHAR(20) NOT NULL | `role` \| `plan` \| `language` \| `user_id` \| `segment` \| `country` (reserved). |
+| `value` | VARCHAR(64) NOT NULL | e.g. `premium`, `ar`, `12345`, or a segment id. |
+
+Indexes: `ix_ad_audience_rules_ad(advertisement_id)`, `ix_ad_audience_rules_dim(dimension, value)`.
+
+`audience_segments` (NEW — reusable custom groups) + `audience_segment_members` (NEW):
+
+| Table | Columns |
+|---|---|
+| `audience_segments` | `id` PK, `name` VARCHAR(100) UNIQUE NOT NULL, `description` TEXT NULL, `created_by` BIGINT FK→`users.id` ON DELETE RESTRICT, `created_at`, `updated_at`. |
+| `audience_segment_members` | PK (`segment_id` FK→`audience_segments` ON DELETE CASCADE, `user_id` FK→`users.id` ON DELETE CASCADE); index `(user_id)`. |
+
+`broadcasts` (ALTER): `+ advertisement_id BIGINT NULL FK→advertisements ON DELETE SET NULL` (a broadcast may deliver a stored ad via copyMessage instead of plain text).
+
+`ad_events` (NEW — **deferred to the last task / optional**; monthly RANGE-partitioned like `error_logs`): `id`, `advertisement_id`, `user_id` NULL, `event_type` (`impression`/`click`), `placement` NULL, `button_id` NULL, `created_at` (partition key). Counters on `advertisements`/`ad_buttons` stay the hot path; this is the additive route to per-placement/time-series analytics with **no hot-path change**.
+
+New index for placement selection (additive; the LOCKED `ix_ads_active_priority_role` is retained): `ix_ads_placement_active_priority(placement, is_active, priority DESC)`.
+
+#### Audience evaluation semantics (LOCKED for this sprint)
+
+- `audience_mode='all'` → everyone, still subject to the global Owner/premium exemptions (Section 16.7) unless an explicit rule overrides.
+- `audience_mode='include'` → show only to users matching the include expression.
+- `audience_mode='exclude'` → show to everyone **except** users matching the exclude expression (covers "all users except Premium").
+- Within a dimension, multiple values are **OR** (`role ∈ {free, premium}`). Across dimensions it is **AND** (`role∈X AND language∈Y`).
+- `dimension='user_id'` and `dimension='segment'` are evaluated against the requesting user's id / segment membership (`audience_segment_members`, indexed by `user_id`, cache-friendly).
+- Evaluation runs in Python over the small per-placement candidate list (ads are post-action, not on the hottest path); supersedes the Sprint 9 `target_role` fast-path, which is migrated into an equivalent `include`/`role` rule (D-043). `target_role` is retained as a denormalized fast pre-filter for one deprecation window.
+- Examples: *Ad A* free-only → `include role=free`; *Ad B* premium-only → `include role=premium`; *Ad C* Arabic-only → `include language=ar`; *Ad D* → `include user_id=12345`, `include user_id=67890`; *Ad E* all-except-premium → `exclude plan=premium`.
+
+#### Tasks
+
+- **9.5.1** Migration + models + repos + protocols for the schema above; backfill existing single-button → `ad_buttons` and existing `target_role` → an audience rule. (Section-19 entry; D-042–D-045.)
+- **9.5.2** Multi-button rendering + per-button signed click callbacks (`a|<ad_id>|<button_id>`) + per-button click counters; `/ad_preview`.
+- **9.5.3** Widen `fields`-mode content: `document` / `audio` / `album` send paths in `TelegramAdSender`.
+- **9.5.4** `copy`-mode delivery: bot-owned storage channel (`ads_storage_chat_id` setting), `AdSenderProtocol.copy_ad` via `bot.copy_message`; `/ad_create` copy-mode (forward/reply to store the source message). Buttons re-attached from `ad_buttons` (copyMessage drops the original keyboard).
+- **9.5.5** Audience targeting engine: an `AudienceService` evaluator + rules/segments CRUD (`/ad_audience`, `/ad_segment_*`); integrate into `AdService` selection.
+- **9.5.6** Placement model: `placement` column + per-placement `settings` toggles + thin hooks at `quality_select`, `home` (start), `history` (video/audio placements reuse the Sprint 9 hook).
+- **9.5.7** `/ad_broadcast`: `BroadcastService.create_from_ad` + a `BroadcastWorker` copyMessage branch; broadcast delivery-count analytics (reuses `broadcasts.total_sent`/`total_failed`).
+- **9.5.8** Command surface: `/ad_enable`, `/ad_disable` (alias `/ad_toggle`), `/ad_preview`, `/ad_broadcast`; `/ad_stats` gains placement + per-button + delivery-count breakdown.
+- **9.5.9** *(Optional / last)* `ad_events` analytics table + per-placement / per-button reporting.
+- **9.5.10** *(Deferred to a later sprint)* scheduling scaffold: `scheduled_at` column + a due-poller worker — specified here, not implemented in 9.5.
+
+#### Command surface (target)
+
+`/ad_create` (fields **or** copy-mode), `/ad_list`, `/ad_edit`, `/ad_enable`, `/ad_disable` (`/ad_toggle` alias kept), `/ad_delete`, `/ad_preview`, `/ad_broadcast`, `/ad_stats`, `/ad_global` (master switch, unchanged), `/ad_audience <id> ...`, `/ad_segment_create|_add|_remove|_list`. All Owner-only via `OwnerFilter`; non-owners silently ignored (item #18). Public surface: the existing signed ad-click callback (extended with `button_id`).
+
+#### Configuration (PLANNED — see Section 13.6; NOT seeded in this sprint)
+
+`ads_storage_chat_id`, `ad_placement_post_download_enabled`, `ad_placement_video_delivery_enabled`, `ad_placement_audio_delivery_enabled`, `ad_placement_quality_select_enabled`, `ad_placement_home_enabled`, `ad_placement_history_enabled`. Per-placement toggles default the compat placement ON and the new placements OFF (opt-in), so persistent ads never appear until the Owner enables a placement.
+
+#### Future monetization readiness (design hooks; NOT built in 9.5 — EP-19, EP-20)
+
+Different ads per plan (audience rules), no ads for premium (default exclude rule / Section 16.7 exemption), premium-specific promotions (`include plan=premium`), partner campaigns (a future `ad_campaigns` table + `advertisements.campaign_id`), A/B testing (a `variant_group` + `weight` on ads, weighted selection), sponsored placements (`placement` + a future `sponsor`/`advertiser` field + budget caps). All reachable additively; reserved as extension points, not implemented.
+
+#### Validation Checklist (for when implemented)
+
+- [ ] Existing Sprint 9 ads keep working unchanged after migration (compat defaults).
+- [ ] Multi-button ads render and track per-button clicks.
+- [ ] `document` / `audio` / `album` ads deliver correctly (fields-mode).
+- [ ] copy-mode ad reproduces a rich message (media + caption + formatting) with re-attached buttons.
+- [ ] Audience include/exclude across role / plan / language / user_id / segment behaves per the semantics above (full truth table).
+- [ ] Owner exemption preserved; overridable by an explicit include rule.
+- [ ] `/ad_broadcast` reaches exactly the targeted audience; delivery counts persisted.
+- [ ] Per-placement toggles gate persistent placements; all default safe (no surprise ads).
+- [ ] No regression in the Sprint 9 post-download flow.
+
+#### Exit Criteria
+
+1. Validation checklist passes.
+2. Synthetic audience matrix: ads A–E from the semantics examples each reach exactly their intended users and no others.
+3. A copy-mode rich ad broadcast to a synthetic 100-user segment delivers once per recipient with correct counts.
+
+#### Human Verification Required
+
+Create a rich copy-mode ad with two buttons; preview it; target it to a segment; broadcast it; place a persistent ad under video delivery; confirm a premium/Owner account is excluded as configured; verify per-button click counts and delivery counts rise.
+
+#### Stop Point
+
+Agent stops after each task per the standard per-task DoD; full-sprint sign-off (Gate-style) required before the sprint is marked Completed.
+
+#### Risks
+
+| Risk | Mitigation |
+|---|---|
+| Storage channel is a hard dependency for copy-mode (delete the source post → dead ad). | Document the constraint; `/ad_preview` doubles as a health check; validate source on create. |
+| Placement density feels spammy and depresses conversion. | Per-placement toggles default OFF for new placements; ship placements incrementally; measure. |
+| copyMessage drops inline keyboards. | Buttons are first-class in `ad_buttons` and re-attached on delivery; impressions always tracked, clicks only on attached callback buttons. |
+| Audience rule evaluation cost. | Tiny per-placement candidate sets; Python evaluation; segment membership indexed by `user_id` + cacheable. |
+| Album ads are multi-message and can't carry buttons on the group. | Buttons sent as a follow-up message; phase album last. |
+| Migrating the LOCKED `target_role` semantics. | Retain `target_role` as a fast pre-filter for one deprecation window; backfill into rules (D-043). |
+
+#### Testing Requirements
+
+- Audience evaluator unit tests (full include/exclude truth table across all dimensions).
+- Multi-button + per-button click unit + integration tests.
+- copy-mode delivery integration test (mocked Bot.copy_message).
+- `/ad_broadcast` integration test (synthetic segment, delivery counts).
+- Placement-toggle gating tests.
+- Regression: the entire Sprint 9 suite stays green.
+
+---
+
 ### Sprint 10 — Observability and Backup
 
 **Goal:** The system is production-grade across logs, metrics, alerts, and DR. (Security validation and the load-test framework move to Sprint 11.)
@@ -2967,6 +3174,57 @@ Project enters maintenance mode. V2 sprint planning begins only on Owner instruc
 **Testing Requirements**
 
 - Production smoke-test checklist (above).
+
+---
+
+### Future — Ads & Admin roadmap (post-V1; design-only, not scheduled)
+
+Captured from Owner feedback #32–#34. Not implemented; the Ads v2 architecture is built
+to accommodate them additively.
+
+#### F-1 — Quota-unlock sponsored ads (#32, monetization)
+
+When a user hits a limit (daily-limit / cooldown / rate-limit), the bot may show a
+sponsored ad with an **Open Sponsor** button instead of a plain "limit reached" message;
+optionally, interacting unlocks extra usage per future business rules.
+
+- **Where it hooks in:** `RateLimitService.authorize_download` raises `DailyLimitExceededError`/
+  `CooldownActiveError`/`RateLimitExceededError`; the download handler catches these. The
+  hook is to call `AdService.maybe_show(..., placement="quota")` (a new placement) at that
+  point instead of (or alongside) the error text.
+- **What Ads v2 already provides:** placement model + per-placement toggle, audience
+  targeting (sponsor campaigns can target free users), URL buttons (direct open).
+- **What's needed:** a `quota` placement value + toggle; a tracked-click button (D-047's
+  reserved `callback_data` redirect mode) so "press Open → unlock" can be measured and
+  gated; an unlock side-effect (e.g. grant N bonus downloads via a Redis counter). Reserved
+  as EP-21.
+
+#### F-2 — Admin inline control panel (#33)
+
+Owner/Admin management primarily via inline keyboards instead of memorized commands:
+a root panel (`Ads`, `Users`, `Limits`, `Broadcast`, `Channels`, `Statistics`) drilling into
+per-area actions (e.g. Ads → `Create`/`List`/`Enable`/`Disable`/`Delete`/`Preview`).
+
+- **What's needed:** a new `bot/handlers/admin_panel.py` rendering signed callback keyboards
+  (reuse `CallbackSigner` with new actions, e.g. `p|ads|list`), gated by `OwnerFilter`. Each
+  button delegates to the **existing** services (`AdService`, `UserService`, `BroadcastService`,
+  `SettingsService`) — no business-logic duplication; the commands remain as the scriptable
+  surface. Multi-step flows (create ad, set audience) use an aiogram FSM. Reserved as EP-22.
+
+#### F-3 — Rich ad content builder (#34)
+
+A guided builder: *Create Ad → Add Text → Add Media → Add Buttons → Preview → Save*, or
+*Create Ad → forward/send an existing Telegram message → Save*, preserving Telegram-native
+formatting.
+
+- **Already implemented in Ads v2:** all content types (text/photo/video/document/audio/
+  animation/album), Markdown/HTML via `parse_mode`, **copy-mode** (store + reuse a complete
+  forwarded message verbatim — the "forward a message → save" path), captions, and **multiple
+  buttons** (`/ad_button_add`).
+- **What's needed (the "builder"):** an aiogram **FSM** wrapping those existing operations
+  into a step-by-step wizard (part of F-2's panel), so the Owner is prompted for each part
+  instead of composing a `key=value` command. No new storage — it drives `AdService.create` +
+  `add_button` + `/ad_audience`. Reserved as EP-23.
 
 ---
 

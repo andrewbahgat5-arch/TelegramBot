@@ -779,6 +779,11 @@ class FakeFileSender:
         self.uploads: list[tuple[int, Path]] = []
         self.filenames: list[str] = []
         self.sent: list[tuple[int, str]] = []
+        self._next_message_id = 7000
+
+    def _message_id(self) -> int:
+        self._next_message_id += 1
+        return self._next_message_id
 
     async def upload(
         self,
@@ -795,7 +800,12 @@ class FakeFileSender:
         self.uploads.append((chat_id, path))
         self.filenames.append(filename)
         size = path.stat().st_size if path.exists() else None
-        return UploadedFile(file_id=self._file_id, unique_file_id=self._unique, size_bytes=size)
+        return UploadedFile(
+            file_id=self._file_id,
+            unique_file_id=self._unique,
+            size_bytes=size,
+            message_id=self._message_id(),
+        )
 
     async def send_cached(
         self,
@@ -805,10 +815,11 @@ class FakeFileSender:
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
-    ) -> None:
+    ) -> int | None:
         if self._send_cached_error is not None:
             raise self._send_cached_error
         self.sent.append((telegram_id, file_id))
+        return self._message_id()
 
 
 class FakeMessageSender:
@@ -887,6 +898,7 @@ class FakeBroadcastRow:
     total_failed: int = 0
     status: str = "pending"
     completed_at: datetime.datetime | None = None
+    advertisement_id: int | None = None
 
 
 class FakeBroadcastRepo:
@@ -916,6 +928,7 @@ class FakeBroadcastRepo:
         target_language: str | None,
         target_role: str | None,
         expected_total: int,
+        advertisement_id: int | None = None,
     ) -> FakeBroadcastRow:
         row = FakeBroadcastRow(
             id=self._next_id,
@@ -924,6 +937,7 @@ class FakeBroadcastRepo:
             target_language=target_language,
             target_role=target_role,
             expected_total=expected_total,
+            advertisement_id=advertisement_id,
             status="pending",
         )
         self._next_id += 1
@@ -948,3 +962,370 @@ class FakeBroadcastRepo:
         if row is not None:
             row.total_sent += sent
             row.total_failed += failed
+
+
+# --- Sprint 9 ad fakes ----------------------------------------------------
+@dataclass
+class FakeAdRow:
+    id: int
+    title: str
+    type: str = "text"
+    content_text: str | None = None
+    content_media_file_id: str | None = None
+    button_text: str | None = None
+    button_url: str | None = None
+    target_role: str | None = None
+    show_every_n_downloads: int = 1
+    is_active: bool = True
+    priority: int = 0
+    impressions: int = 0
+    clicks: int = 0
+    created_by: int = 1
+    updated_at: datetime.datetime | None = None
+    # Ads v2 (Sprint 9.5).
+    placement: str = "post_download"
+    delivery_mode: str = "fields"
+    storage_chat_id: int | None = None
+    storage_message_id: int | None = None
+    parse_mode: str | None = None
+    audience_mode: str = "all"
+
+
+class FakeAdRepo:
+    """In-memory ``AdRepositoryProtocol[FakeAdRow]``."""
+
+    def __init__(self) -> None:
+        self.by_id: dict[int, FakeAdRow] = {}
+        self._next_id = 1
+
+    async def add(self, entity: FakeAdRow) -> FakeAdRow:
+        self.by_id[entity.id] = entity
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeAdRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[FakeAdRow]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: FakeAdRow) -> None:
+        self.by_id.pop(entity.id, None)
+
+    def _ranked(self, ads: list[FakeAdRow]) -> list[FakeAdRow]:
+        return sorted(ads, key=lambda a: (-a.priority, a.id))
+
+    async def list_active_for_role(self, effective_role: str) -> Sequence[FakeAdRow]:
+        matching = [
+            a
+            for a in self.by_id.values()
+            if a.is_active and (a.target_role is None or a.target_role == effective_role)
+        ]
+        return self._ranked(matching)
+
+    async def list_active_for_placement(self, placement: str) -> Sequence[FakeAdRow]:
+        matching = [a for a in self.by_id.values() if a.is_active and a.placement == placement]
+        return self._ranked(matching)
+
+    async def list_all_ads(self) -> Sequence[FakeAdRow]:
+        return self._ranked(list(self.by_id.values()))
+
+    async def create_ad(
+        self,
+        *,
+        title: str,
+        ad_type: str,
+        content_text: str | None,
+        content_media_file_id: str | None,
+        button_text: str | None,
+        button_url: str | None,
+        target_role: str | None,
+        show_every_n_downloads: int,
+        priority: int,
+        created_by: int,
+        placement: str = "post_download",
+        delivery_mode: str = "fields",
+        storage_chat_id: int | None = None,
+        storage_message_id: int | None = None,
+        parse_mode: str | None = None,
+        audience_mode: str = "all",
+    ) -> FakeAdRow:
+        row = FakeAdRow(
+            id=self._next_id,
+            title=title,
+            type=ad_type,
+            content_text=content_text,
+            content_media_file_id=content_media_file_id,
+            button_text=button_text,
+            button_url=button_url,
+            target_role=target_role,
+            show_every_n_downloads=show_every_n_downloads,
+            priority=priority,
+            created_by=created_by,
+            placement=placement,
+            delivery_mode=delivery_mode,
+            storage_chat_id=storage_chat_id,
+            storage_message_id=storage_message_id,
+            parse_mode=parse_mode,
+            audience_mode=audience_mode,
+        )
+        self._next_id += 1
+        self.by_id[row.id] = row
+        return row
+
+    async def apply_update(self, ad: FakeAdRow, changes: dict[str, Any]) -> FakeAdRow:
+        for key, value in changes.items():
+            setattr(ad, key, value)
+        ad.updated_at = datetime.datetime.now(datetime.UTC)
+        return ad
+
+    async def increment_impressions(self, ad_id: int) -> None:
+        row = self.by_id.get(ad_id)
+        if row is not None:
+            row.impressions += 1
+
+    async def increment_clicks(self, ad_id: int) -> None:
+        row = self.by_id.get(ad_id)
+        if row is not None:
+            row.clicks += 1
+
+
+class FakeAdSender:
+    """In-memory ``AdSenderProtocol`` recording each ad sent (Sprint 9.5)."""
+
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self._error = error
+        self.sent: list[dict[str, Any]] = []
+        self.copied: list[dict[str, Any]] = []
+
+    async def send_ad(
+        self,
+        chat_id: int,
+        *,
+        ad_type: str,
+        text: str | None,
+        media_file_id: str | None,
+        buttons: Sequence[Any],
+        parse_mode: str | None = None,
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        if self._error is not None:
+            raise self._error
+        self.sent.append(
+            {
+                "chat_id": chat_id,
+                "ad_type": ad_type,
+                "text": text,
+                "media_file_id": media_file_id,
+                "buttons": list(buttons),
+                "parse_mode": parse_mode,
+                "reply_to_message_id": reply_to_message_id,
+            }
+        )
+
+    async def copy_ad(
+        self,
+        chat_id: int,
+        *,
+        from_chat_id: int,
+        message_id: int,
+        buttons: Sequence[Any],
+        reply_to_message_id: int | None = None,
+    ) -> None:
+        if self._error is not None:
+            raise self._error
+        self.copied.append(
+            {
+                "chat_id": chat_id,
+                "from_chat_id": from_chat_id,
+                "message_id": message_id,
+                "buttons": list(buttons),
+                "reply_to_message_id": reply_to_message_id,
+            }
+        )
+
+
+@dataclass
+class FakeAdButtonRow:
+    id: int
+    advertisement_id: int
+    text: str
+    url: str | None
+    row: int = 0
+    position: int = 0
+    clicks: int = 0
+
+
+class FakeAdButtonRepo:
+    """In-memory ``AdButtonRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.by_id: dict[int, FakeAdButtonRow] = {}
+        self._next_id = 1
+
+    async def add(self, entity: FakeAdButtonRow) -> FakeAdButtonRow:
+        self.by_id[entity.id] = entity
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeAdButtonRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(
+        self, *, limit: int = 50, offset: int = 0
+    ) -> Sequence[FakeAdButtonRow]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: FakeAdButtonRow) -> None:
+        self.by_id.pop(entity.id, None)
+
+    async def list_for_ad(self, ad_id: int) -> Sequence[FakeAdButtonRow]:
+        rows = [b for b in self.by_id.values() if b.advertisement_id == ad_id]
+        return sorted(rows, key=lambda b: (b.row, b.position, b.id))
+
+    async def create_button(
+        self, *, advertisement_id: int, text: str, url: str | None, row: int, position: int
+    ) -> FakeAdButtonRow:
+        button = FakeAdButtonRow(
+            id=self._next_id,
+            advertisement_id=advertisement_id,
+            text=text,
+            url=url,
+            row=row,
+            position=position,
+        )
+        self._next_id += 1
+        self.by_id[button.id] = button
+        return button
+
+    async def delete_for_ad(self, ad_id: int) -> int:
+        ids = [bid for bid, b in self.by_id.items() if b.advertisement_id == ad_id]
+        for bid in ids:
+            del self.by_id[bid]
+        return len(ids)
+
+    async def increment_clicks(self, button_id: int) -> None:
+        button = self.by_id.get(button_id)
+        if button is not None:
+            button.clicks += 1
+
+
+@dataclass
+class FakeAudienceRuleRow:
+    id: int
+    advertisement_id: int
+    effect: str
+    dimension: str
+    value: str
+
+
+class FakeAudienceRuleRepo:
+    """In-memory ``AdAudienceRuleRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.by_id: dict[int, FakeAudienceRuleRow] = {}
+        self._next_id = 1
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeAudienceRuleRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        self.by_id.pop(entity.id, None)
+
+    async def list_for_ad(self, ad_id: int) -> Sequence[FakeAudienceRuleRow]:
+        return [r for r in self.by_id.values() if r.advertisement_id == ad_id]
+
+    async def create_rule(
+        self, *, advertisement_id: int, effect: str, dimension: str, value: str
+    ) -> FakeAudienceRuleRow:
+        rule = FakeAudienceRuleRow(
+            id=self._next_id,
+            advertisement_id=advertisement_id,
+            effect=effect,
+            dimension=dimension,
+            value=value,
+        )
+        self._next_id += 1
+        self.by_id[rule.id] = rule
+        return rule
+
+    async def delete_for_ad(self, ad_id: int) -> int:
+        ids = [rid for rid, r in self.by_id.items() if r.advertisement_id == ad_id]
+        for rid in ids:
+            del self.by_id[rid]
+        return len(ids)
+
+
+class FakeSegmentMemberRepo:
+    """In-memory ``AudienceSegmentMemberRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.members: set[tuple[int, int]] = set()
+
+    async def add_member(self, *, segment_id: int, user_id: int) -> bool:
+        key = (segment_id, user_id)
+        if key in self.members:
+            return False
+        self.members.add(key)
+        return True
+
+    async def remove_member(self, *, segment_id: int, user_id: int) -> bool:
+        key = (segment_id, user_id)
+        if key in self.members:
+            self.members.discard(key)
+            return True
+        return False
+
+    async def list_segment_ids_for_user(self, user_id: int) -> set[int]:
+        return {s for s, u in self.members if u == user_id}
+
+    async def count_members(self, segment_id: int) -> int:
+        return sum(1 for s, _ in self.members if s == segment_id)
+
+
+@dataclass
+class FakeSegmentRow:
+    id: int
+    name: str
+    description: str | None = None
+    created_by: int = 1
+
+
+class FakeSegmentRepo:
+    """In-memory ``AudienceSegmentRepositoryProtocol``."""
+
+    def __init__(self) -> None:
+        self.by_id: dict[int, FakeSegmentRow] = {}
+        self._next_id = 1
+
+    async def add(self, entity: Any) -> Any:
+        return entity
+
+    async def get_by_id(self, id_: Any) -> FakeSegmentRow | None:
+        return self.by_id.get(id_)
+
+    async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[Any]:
+        return list(self.by_id.values())[offset : offset + limit]
+
+    async def delete(self, entity: Any) -> None:
+        self.by_id.pop(entity.id, None)
+
+    async def create_segment(
+        self, *, name: str, description: str | None, created_by: int
+    ) -> FakeSegmentRow:
+        row = FakeSegmentRow(
+            id=self._next_id, name=name, description=description, created_by=created_by
+        )
+        self._next_id += 1
+        self.by_id[row.id] = row
+        return row
+
+    async def get_by_name(self, name: str) -> FakeSegmentRow | None:
+        return next((s for s in self.by_id.values() if s.name == name), None)
+
+    async def list_all_segments(self) -> Sequence[FakeSegmentRow]:
+        return sorted(self.by_id.values(), key=lambda s: s.id)

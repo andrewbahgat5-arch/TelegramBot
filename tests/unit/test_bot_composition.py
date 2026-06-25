@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
+from services.ad_service import AdService
+from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.history_service import HistoryService
 from services.job_service import JobService
@@ -54,6 +56,14 @@ def _broadcast_factory(session: AsyncSession) -> BroadcastService:
     return cast(BroadcastService, None)
 
 
+def _ad_factory(session: AsyncSession) -> AdService:
+    return cast(AdService, None)
+
+
+def _audience_factory(session: AsyncSession) -> AudienceService:
+    return cast(AudienceService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
@@ -64,11 +74,13 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         history_service_factory=_history_factory,
         settings_service_factory=_settings_factory,
         broadcast_service_factory=_broadcast_factory,
+        ad_service_factory=_ad_factory,
+        audience_service_factory=_audience_factory,
         queue_service=QueueService(FakeQueueBackend()),
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
     )
     assert isinstance(dp, Dispatcher)
-    # start + help + admin + download + history routers are all included.
-    assert len(dp.sub_routers) == 5
+    # start + help + admin + ads + download + history routers are all included.
+    assert len(dp.sub_routers) == 6
