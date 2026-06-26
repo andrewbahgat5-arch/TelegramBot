@@ -40,6 +40,59 @@ class AudienceContext:
     untargeted_exempt: bool  # premium or role in UNLIMITED_ROLES (legacy exemption)
 
 
+def evaluate_audience(
+    mode: str,
+    rules: Sequence[Any],
+    ctx: AudienceContext,
+    segment_ids: set[int],
+) -> bool:
+    """Pure audience-rule evaluation — the semantics the SQL compiler must mirror.
+
+    ``mode`` is the expression's ``audience_mode`` (all/include/exclude); ``rules`` are
+    its include/exclude rules (ORM rows or :class:`~domain.entities.audience.AudienceRuleSpec`,
+    read by ``effect``/``dimension``/``value``); ``segment_ids`` is the viewer's segment
+    membership (already loaded). Within a dimension values OR, across dimensions AND, a
+    matching ``exclude`` removes the viewer. Kept dependency-free so the SQL compiler
+    (``infrastructure.database.audience_query``) can be pinned to it by a shared truth
+    table (design invariant #17).
+    """
+    includes = [r for r in rules if r.effect == AudienceEffect.INCLUDE]
+    excludes = [r for r in rules if r.effect == AudienceEffect.EXCLUDE]
+    if excludes and _expr_matches(excludes, ctx, segment_ids):
+        return False  # explicitly excluded
+    if mode == AudienceMode.EXCLUDE:
+        return True  # everyone except the (already-checked) exclude expression
+    if includes:
+        return _expr_matches(includes, ctx, segment_ids)
+    return True  # mode 'all' / only exclude rules: show unless excluded
+
+
+def _expr_matches(rules: Sequence[Any], ctx: AudienceContext, segment_ids: set[int]) -> bool:
+    """AND across dimensions, OR within a dimension."""
+    by_dimension: dict[str, list[Any]] = {}
+    for rule in rules:
+        by_dimension.setdefault(rule.dimension, []).append(rule)
+    return all(
+        any(_rule_hit(rule, ctx, segment_ids) for rule in dim_rules)
+        for dim_rules in by_dimension.values()
+    )
+
+
+def _rule_hit(rule: Any, ctx: AudienceContext, segment_ids: set[int]) -> bool:
+    dimension, value = rule.dimension, rule.value
+    if dimension == AudienceDimension.ROLE:
+        return bool(ctx.role == value)
+    if dimension == AudienceDimension.PLAN:
+        return bool(ctx.plan == value)
+    if dimension == AudienceDimension.LANGUAGE:
+        return ctx.language is not None and ctx.language == value
+    if dimension == AudienceDimension.USER_ID:
+        return bool(str(ctx.telegram_id) == value)
+    if dimension == AudienceDimension.SEGMENT:
+        return bool(value.isdigit() and int(value) in segment_ids)
+    return False  # country: reserved, no source yet (EP-20)
+
+
 class AudienceService:
     def __init__(
         self,
@@ -108,46 +161,10 @@ class AudienceService:
         return bool(ad.target_role == effective_role)
 
     async def _rule_matches(self, ad: Any, rules: Sequence[Any], ctx: AudienceContext) -> bool:
-        includes = [r for r in rules if r.effect == AudienceEffect.INCLUDE]
-        excludes = [r for r in rules if r.effect == AudienceEffect.EXCLUDE]
         segment_ids = await self._maybe_load_segments(rules, ctx)
-
-        if excludes and self._expr_matches(excludes, ctx, segment_ids):
-            return False  # explicitly excluded
-        if ad.audience_mode == AudienceMode.EXCLUDE:
-            return True  # everyone except the (already-checked) exclude expression
-        if includes:
-            return self._expr_matches(includes, ctx, segment_ids)
-        return True  # only exclude rules (mode 'all'): show unless excluded
+        return evaluate_audience(ad.audience_mode, rules, ctx, segment_ids)
 
     async def _maybe_load_segments(self, rules: Sequence[Any], ctx: AudienceContext) -> set[int]:
         if any(r.dimension == AudienceDimension.SEGMENT for r in rules):
             return await self._members.list_segment_ids_for_user(ctx.user_row_id)
         return set()
-
-    def _expr_matches(
-        self, rules: Sequence[Any], ctx: AudienceContext, segment_ids: set[int]
-    ) -> bool:
-        """AND across dimensions, OR within a dimension."""
-        by_dimension: dict[str, list[Any]] = {}
-        for rule in rules:
-            by_dimension.setdefault(rule.dimension, []).append(rule)
-        return all(
-            any(self._rule_hit(rule, ctx, segment_ids) for rule in dim_rules)
-            for dim_rules in by_dimension.values()
-        )
-
-    @staticmethod
-    def _rule_hit(rule: Any, ctx: AudienceContext, segment_ids: set[int]) -> bool:
-        dimension, value = rule.dimension, rule.value
-        if dimension == AudienceDimension.ROLE:
-            return bool(ctx.role == value)
-        if dimension == AudienceDimension.PLAN:
-            return bool(ctx.plan == value)
-        if dimension == AudienceDimension.LANGUAGE:
-            return ctx.language is not None and ctx.language == value
-        if dimension == AudienceDimension.USER_ID:
-            return bool(str(ctx.telegram_id) == value)
-        if dimension == AudienceDimension.SEGMENT:
-            return bool(value.isdigit() and int(value) in segment_ids)
-        return False  # country: reserved, no source yet (EP-20)
