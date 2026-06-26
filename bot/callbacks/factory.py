@@ -11,6 +11,15 @@ Six actions:
 * ``r`` — resend (``r|<download_id>|<sig>``) → re-send a history entry (flow 16.3).
 * ``h`` — history page (``h|<page>|<sig>``) → paginate the history list.
 * ``a`` — ad click (``a|<ad_id>|<sig>``) → record the click + deliver the link (16.7 W6).
+
+A seventh namespace, ``P``, carries the admin inline control panel (Sprint 9.6,
+F-2 / EP-22). Its payload is a fixed five-field, signed form
+``P|<section>|<action>|<arg>|<value>|<sig>`` where ``arg``/``value`` are optional
+ints (empty when unused). ``section`` and ``action`` are opaque short codes — the
+signer never enumerates them, so new panel sections (Analytics, Payments, …) need
+no change here; the section *registry* lives in the keyboard layer. Tampered panel
+data fails the signature check and is silently ignored (Section 14.2), and
+:meth:`CallbackSigner.pack_panel` refuses to emit data over Telegram's 64-byte limit.
 """
 
 from __future__ import annotations
@@ -23,6 +32,8 @@ from domain.enums import MediaFormat, Quality
 
 _SEP = "|"
 _SIG_LEN = 10  # hex chars of the truncated HMAC — enough for this low-value token.
+_PANEL = "P"  # admin-panel namespace prefix (Sprint 9.6); distinct from f/q/b/r/h/a.
+_TELEGRAM_CALLBACK_LIMIT = 64  # bytes; Telegram rejects callback_data above this.
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +44,22 @@ class ParsedCallback:
     quality: Quality | None = None
     arg: int | None = None  # download_id for "r"; page index for "h"; ad_id for "a"
     button_id: int | None = None  # ad button id for "a" (None = legacy single button)
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedPanel:
+    """A verified admin-panel callback (Sprint 9.6 ``P`` namespace).
+
+    ``section`` and ``action`` are the opaque short codes the keyboard registry
+    assigned; ``arg`` is the primary int (entity id / list page / setting-key index)
+    and ``value`` the secondary int (e.g. the stepper's candidate value). Both ints
+    are ``None`` when the originating button did not carry them.
+    """
+
+    section: str
+    action: str
+    arg: int | None = None
+    value: int | None = None
 
 
 class CallbackSigner:
@@ -68,6 +95,47 @@ class CallbackSigner:
         # 3-part (legacy single button) ``a|ad_id``; 4-part ``a|ad_id|button_id``.
         payload = f"a{_SEP}{ad_id}" if button_id is None else f"a{_SEP}{ad_id}{_SEP}{button_id}"
         return f"{payload}{_SEP}{self._sig(payload)}"
+
+    def pack_panel(
+        self, section: str, action: str, arg: int | None = None, value: int | None = None
+    ) -> str:
+        """Pack a signed admin-panel callback ``P|section|action|arg|value|sig``.
+
+        ``section``/``action`` are caller-supplied short codes; empty optional ints
+        render as empty fields. Raises ``ValueError`` if a code contains the field
+        separator (would corrupt the encoding) or if the result would exceed
+        Telegram's 64-byte ``callback_data`` limit — both are programmer errors that
+        must surface at build time, not silently produce an unusable button.
+        """
+        if _SEP in section or _SEP in action:
+            raise ValueError("panel section/action may not contain the field separator")
+        arg_field = "" if arg is None else str(arg)
+        value_field = "" if value is None else str(value)
+        payload = f"{_PANEL}{_SEP}{section}{_SEP}{action}{_SEP}{arg_field}{_SEP}{value_field}"
+        data = f"{payload}{_SEP}{self._sig(payload)}"
+        if len(data.encode()) > _TELEGRAM_CALLBACK_LIMIT:
+            raise ValueError(
+                f"panel callback_data exceeds {_TELEGRAM_CALLBACK_LIMIT} bytes: {data!r}"
+            )
+        return data
+
+    def unpack_panel(self, data: str) -> ParsedPanel | None:
+        """Verify and parse a ``P`` panel callback. Returns None on any forged/malformed input."""
+        parts = data.split(_SEP)
+        if len(parts) != 6 or parts[0] != _PANEL:
+            return None
+        payload, sig = _SEP.join(parts[:-1]), parts[-1]
+        if not hmac.compare_digest(sig, self._sig(payload)):
+            return None
+        section, action, arg_field, value_field = parts[1], parts[2], parts[3], parts[4]
+        if not section or not action:
+            return None
+        try:
+            arg = int(arg_field) if arg_field else None
+            value = int(value_field) if value_field else None
+        except ValueError:
+            return None
+        return ParsedPanel(section=section, action=action, arg=arg, value=value)
 
     def unpack(self, data: str) -> ParsedCallback | None:
         """Verify and parse callback data. Returns None on any malformed/forged input."""
