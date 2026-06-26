@@ -162,10 +162,25 @@ def test_stepper_back_returns_to_settings_menu() -> None:
 # --- confirm + nav --------------------------------------------------------
 def test_confirm_has_confirm_and_cancel() -> None:
     signer = _signer()
-    markup = build_confirm(signer, confirm=("u", "banc", 7), cancel=("u", "inf", 7))
+    markup = build_confirm(signer, confirm=("u", "banc", 7, None), cancel=("u", "inf", 7))
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
     assert by_action["banc"].arg == 7  # confirm carries the target id
     assert by_action["inf"].arg == 7  # cancel routes back to that user's detail
+
+
+def test_confirm_carries_value_for_settings_save() -> None:
+    signer = _signer()
+    markup = build_confirm(signer, confirm=("s", "sv", 0, 20), cancel=("s", "e", 0))
+    save = next(p for b in _flat(markup) if (p := _parse(signer, b)).action == "sv")
+    assert save.arg == 0 and save.value == 20  # typed value rides on the confirm button
+
+
+def test_stepper_has_enter_value_button() -> None:
+    signer = _signer()
+    field = setting_field(0)
+    assert field is not None
+    actions = {_parse(signer, b).action for b in _flat(build_setting_stepper(field, 3, signer))}
+    assert "ev" in actions  # Enter Value alongside the minus/plus/save controls
 
 
 def test_nav_row_includes_cancel_when_requested() -> None:

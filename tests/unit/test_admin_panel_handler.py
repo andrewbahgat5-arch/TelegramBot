@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.handlers.admin_panel import (
+    on_setting_value,
     open_panel,
     open_settings,
     panel_navigate,
@@ -42,6 +44,13 @@ def _user(role: UserRole = UserRole.OWNER) -> UserSnapshot:
 
 def _session() -> AsyncSession:
     return object()  # type: ignore[return-value]  # factories ignore it
+
+
+def _state(data: dict[str, Any] | None = None) -> Any:
+    """A fake FSMContext: records set_state/update_data/clear; returns ``data`` on get_data."""
+    fsm = AsyncMock()
+    fsm.get_data = AsyncMock(return_value=data or {})
+    return fsm
 
 
 def _call(mock: Any) -> Any:
@@ -106,6 +115,8 @@ def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = signer.pack_panel(section, action)
     callback.message = AsyncMock(spec=Message)
+    callback.message.chat = SimpleNamespace(id=10)
+    callback.message.message_id = 20
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
     return callback
@@ -119,6 +130,7 @@ async def _navigate(
         panel,
         _session(),
         user,
+        _state(),
         lambda s: _FakeUsers(),
         lambda s: _FakeSettings(),
         lambda s: _FakeAds(),
@@ -224,12 +236,15 @@ class _FakeSettingsRW:
         return int(value)
 
 
-async def _write(callback: Any, panel: ParsedPanel, settings: _FakeSettingsRW) -> None:
+async def _write(
+    callback: Any, panel: ParsedPanel, settings: _FakeSettingsRW, state: Any = None
+) -> None:
     await panel_write(
         callback,
         panel,
         _session(),
         _user(),
+        state or _state(),
         lambda s: _FakeUsersRW(),
         lambda s: settings,
         _signer(),
@@ -334,6 +349,7 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         panel,
         _session(),
         _user(),
+        _state(),
         lambda s: users,
         lambda s: _FakeSettingsRW(),
         _signer(),
@@ -411,6 +427,7 @@ async def test_user_detail_renders_via_navigation() -> None:
         ParsedPanel("u", "inf", 555),
         _session(),
         _user(),
+        _state(),
         lambda s: users,
         lambda s: _FakeSettings(),
         lambda s: _FakeAds(),
@@ -430,9 +447,54 @@ async def test_write_stub_acks_for_pending_section() -> None:
         ParsedPanel("a", "cr"),
         _session(),
         _user(),
+        _state(),
         lambda s: _FakeUsersRW(),
         lambda s: _FakeSettingsRW(),
         _signer(),
     )
     callback.answer.assert_awaited_once()
     assert _call(callback.answer).args  # a toast message was supplied
+
+
+# --- guided "Enter Value" for settings (9.6.7) ----------------------------
+async def test_enter_value_arms_input_state() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "ev")
+    state = _state()
+    await _write(callback, ParsedPanel("s", "ev", 0), _FakeSettingsRW(), state)
+    state.set_state.assert_awaited_once()  # wizard armed
+    assert "Send the new value" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_typed_value_shows_confirm_before_saving() -> None:
+    bot = AsyncMock()
+    state = _state({"field_index": 0, "chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "20"
+    await on_setting_value(message, state, bot, _signer())
+    state.clear.assert_awaited_once()
+    bot.edit_message_text.assert_awaited_once()
+    assert "Confirm" in bot.edit_message_text.await_args.args[0]
+
+
+async def test_typed_non_numeric_keeps_state() -> None:
+    bot = AsyncMock()
+    state = _state({"field_index": 0, "chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "notanumber"
+    message.reply = AsyncMock()
+    await on_setting_value(message, state, bot, _signer())
+    message.reply.assert_awaited_once()
+    state.clear.assert_not_awaited()  # stays armed for the next attempt
+    bot.edit_message_text.assert_not_awaited()
+
+
+async def test_typed_out_of_range_keeps_state() -> None:
+    bot = AsyncMock()
+    state = _state({"field_index": 0, "chat_id": 10, "message_id": 20})  # worker_count max 32
+    message: Any = AsyncMock(spec=Message)
+    message.text = "999"
+    message.reply = AsyncMock()
+    await on_setting_value(message, state, bot, _signer())
+    message.reply.assert_awaited_once()
+    state.clear.assert_not_awaited()

@@ -135,26 +135,45 @@ def build_setting_stepper(
             _btn(signer, "➕", "s", "+", field.index, incremented),  # noqa: RUF001
         ],
         [_btn(signer, "💾 Save", "s", "sv", field.index, value)],
+        [_btn(signer, "✏️ Enter Value", "s", "ev", field.index)],
         nav_row(signer, back=("s", "op")),
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_input_prompt(
+    signer: CallbackSigner,
+    *,
+    back: tuple[str, str, int | None],
+    cancel: tuple[str, str, int | None],
+) -> InlineKeyboardMarkup:
+    """The ❌ Cancel / ⬅️ Back row shown while waiting for the user to type a value."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _btn(signer, "❌ Cancel", cancel[0], cancel[1], cancel[2]),
+                _btn(signer, "⬅️ Back", back[0], back[1], back[2]),
+            ]
+        ]
+    )
+
+
 def build_confirm(
     signer: CallbackSigner,
     *,
-    confirm: tuple[str, str, int | None],
+    confirm: tuple[str, str, int | None, int | None],
     cancel: tuple[str, str, int | None],
 ) -> InlineKeyboardMarkup:
-    """The ✅ Confirm / ❌ Cancel screen for a destructive action.
+    """The ✅ Confirm / ❌ Cancel screen for a destructive or to-be-saved action.
 
-    Both ``confirm`` and ``cancel`` are (section, action, arg): ``confirm`` carries the
-    write to perform; ``cancel`` routes back to a menu or detail screen.
+    ``confirm`` is (section, action, arg, value) carrying the write to perform (``value``
+    lets a confirmed settings save carry the typed number); ``cancel`` is
+    (section, action, arg) routing back to a menu or detail screen.
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                _btn(signer, "✅ Confirm", confirm[0], confirm[1], confirm[2]),
+                _btn(signer, "✅ Confirm", confirm[0], confirm[1], confirm[2], confirm[3]),
                 _btn(signer, "❌ Cancel", cancel[0], cancel[1], cancel[2]),
             ]
         ]

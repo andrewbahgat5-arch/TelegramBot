@@ -24,9 +24,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from html import escape
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,6 +36,7 @@ from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.keyboards.admin_panel import (
     build_confirm,
+    build_input_prompt,
     build_main_menu,
     build_section_menu,
     build_setting_stepper,
@@ -43,6 +45,7 @@ from bot.keyboards.admin_panel import (
     build_user_list,
 )
 from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
+from bot.panel.states import PanelStates
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
@@ -94,6 +97,7 @@ async def panel_navigate(
     panel: ParsedPanel,
     session: AsyncSession,
     user: UserSnapshot,
+    state: FSMContext,
     user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
     ad_service_factory: Callable[[AsyncSession], object],
@@ -101,6 +105,7 @@ async def panel_navigate(
     queue_service: QueueService,
     callback_signer: CallbackSigner,
 ) -> None:
+    await state.clear()  # navigating away cancels any pending guided input
     # Owner-only sections are hidden from moderators; guard the callback too.
     if panel.section in _OWNER_ONLY_SECTIONS and user.role is not UserRole.OWNER:
         await callback.answer()
@@ -129,19 +134,21 @@ async def panel_write(
     panel: ParsedPanel,
     session: AsyncSession,
     user: UserSnapshot,
+    state: FSMContext,
     user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
-    if panel.section == "s":  # Settings stepper (9.6.5)
+    await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
+    if panel.section == "s":  # Settings stepper / guided entry (9.6.5, 9.6.7)
         await _settings_write(
-            callback, panel, settings_service_factory(session), user, callback_signer
+            callback, panel, settings_service_factory(session), user, callback_signer, state
         )
         return
     if panel.section == "u":  # Users management (9.6.6)
         await _users_write(callback, panel, user_service_factory(session), user, callback_signer)
         return
-    # ads / broadcast / wizards land in 9.6.7 onward.
+    # ads / broadcast / wizards land in 9.6.9 onward.
     await callback.answer("This action isn't available yet.", show_alert=False)
 
 
@@ -151,10 +158,26 @@ async def _settings_write(
     settings: SettingsService,
     user: UserSnapshot,
     signer: CallbackSigner,
+    state: FSMContext,
 ) -> None:
-    """Open / step / save a numeric setting via the stepper (LOCKED §13.4 keys only)."""
+    """Open / step / type / save a numeric setting (LOCKED §13.4 keys only)."""
     field = setting_field(panel.arg) if panel.arg is not None else None
     if field is None:
+        await callback.answer()
+        return
+    if panel.action == "ev":  # "✏️ Enter Value" → arm the guided-input wizard
+        if isinstance(callback.message, Message):
+            await state.set_state(PanelStates.setting_value)
+            await state.update_data(
+                field_index=field.index,
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+            )
+            await _safe_edit(
+                callback.message,
+                _enter_value_text(field),
+                build_input_prompt(signer, back=("s", "e", field.index), cancel=("s", "op", None)),
+            )
         await callback.answer()
         return
     if panel.action == "sv":  # persist the candidate value
@@ -207,7 +230,15 @@ def _stepper_text(field: SettingField, value: int) -> str:
         f"⚙️ <b>{escape(field.label)}</b>\n\n"
         f"Current value: <b>{value}</b>\n"
         f"Allowed: {field.min_value} to {field.max_value} (step {field.step})\n\n"
-        "Adjust with the buttons, then 💾 Save."
+        "Adjust with the buttons, or tap ✏️ Enter Value to type one, then 💾 Save."
+    )
+
+
+def _enter_value_text(field: SettingField) -> str:
+    return (
+        f"✏️ <b>{escape(field.label)}</b>\n\n"
+        f"Send the new value in chat (a whole number between {field.min_value} and "
+        f"{field.max_value})."
     )
 
 
@@ -244,7 +275,9 @@ async def _users_write(
             await _safe_edit(
                 callback.message,
                 prompt,
-                build_confirm(signer, confirm=("u", confirmed, tid), cancel=("u", "inf", tid)),
+                build_confirm(
+                    signer, confirm=("u", confirmed, tid, None), cancel=("u", "inf", tid)
+                ),
             )
         await callback.answer()
         return
@@ -325,6 +358,48 @@ def _users_list_text(rows: list[UserSnapshot]) -> str:
 @router.callback_query(F.data.startswith("P|"))
 async def panel_ignore(callback: CallbackQuery) -> None:
     await callback.answer()  # silent: forged signature or a moderator's owner-only tap
+
+
+# --- guided input: a typed setting value (9.6.7) --------------------------
+@router.message(PanelStates.setting_value, OwnerFilter)
+async def on_setting_value(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    callback_signer: CallbackSigner,
+) -> None:
+    """Capture the value the Owner typed for ✏️ Enter Value → confirm screen before saving."""
+    data = await state.get_data()
+    index, chat_id, message_id = (
+        data.get("field_index"),
+        data.get("chat_id"),
+        data.get("message_id"),
+    )
+    field = setting_field(index) if isinstance(index, int) else None
+    if field is None or chat_id is None or message_id is None:
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        await message.reply("Please send a whole number, or tap ❌ Cancel.")
+        return  # keep the state so the next message is still captured
+    if not (field.min_value <= value <= field.max_value):
+        await message.reply(f"Value must be between {field.min_value} and {field.max_value}.")
+        return
+    await state.clear()
+    text = f"💾 <b>Confirm</b>\n\nSet <b>{escape(field.label)}</b> to <b>{value}</b>?"
+    await bot.edit_message_text(
+        text,
+        chat_id=chat_id,
+        message_id=message_id,
+        reply_markup=build_confirm(
+            callback_signer,
+            confirm=("s", "sv", field.index, value),
+            cancel=("s", "e", field.index),
+        ),
+    )
 
 
 # --- rendering ------------------------------------------------------------
