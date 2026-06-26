@@ -4,8 +4,12 @@ In-bot administration for Owner and Moderator. Authorization lives in the
 ``RoleFilter`` (Section 9.1: handlers never decide authz); each command is gated by
 the role its API counterpart requires (Section 20.2):
 
-* **Staff** (owner or moderator): ``/stats``, ``/userinfo``, ``/settings`` — read-only.
+* **Staff** (owner or moderator): ``/stats``, ``/userinfo`` — read-only.
 * **Owner only**: ``/users``, ``/ban``, ``/unban``, ``/setting_set``, ``/broadcast``.
+
+``/settings`` now opens the inline Settings panel (``bot/handlers/admin_panel.py``,
+Sprint 9.6); the old text-list command was retired. ``/setting_set`` remains as the
+scriptable fallback.
 
 Unauthorized users are **silently ignored** (item #18): there is no catch-all reply,
 so a non-staff user's admin command matches no handler and the bot says nothing —
@@ -122,21 +126,6 @@ async def handle_unban(
         await message.answer(f"No user with telegram id <code>{telegram_id}</code>.")
         return
     await message.answer(f"✅ Unbanned <code>{telegram_id}</code>.")
-
-
-@router.message(Command("settings"), StaffFilter)
-async def handle_settings(
-    message: Message,
-    session: AsyncSession,
-    settings_service_factory: SettingsServiceFactory,
-) -> None:
-    views = await settings_service_factory(session).list_all()
-    if not views:
-        await message.answer("No settings are configured.")
-        return
-    lines = ["⚙️ <b>Settings</b>"]
-    lines += [f"<code>{escape(v.key)}</code> = {escape(v.value)} ({v.value_type})" for v in views]
-    await message.answer("\n".join(lines))
 
 
 @router.message(Command("setting_set"), OwnerFilter)

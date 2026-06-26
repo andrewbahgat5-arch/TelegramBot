@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers import admin as admin_handler
+from bot.handlers import admin_panel as admin_panel_handler
 from bot.handlers import ads as ads_handler
 from bot.handlers import download as download_handler
 from bot.handlers import help as help_handler
@@ -50,6 +51,7 @@ from infrastructure.database.repositories.audience_segment import (
 from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
 from infrastructure.database.repositories.download import DownloadRepository
+from infrastructure.database.repositories.error_log import ErrorLogRepository
 from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
@@ -68,6 +70,7 @@ from infrastructure.telegram.alerter import TelegramAlerter, make_alert_sink
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.ad_service import AdService
+from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
@@ -95,6 +98,7 @@ def build_dispatcher(
     broadcast_service_factory: Callable[[AsyncSession], BroadcastService],
     ad_service_factory: Callable[[AsyncSession], AdService],
     audience_service_factory: Callable[[AsyncSession], AudienceService],
+    admin_service_factory: Callable[[AsyncSession], AdminService],
     queue_service: QueueService,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
@@ -112,6 +116,7 @@ def build_dispatcher(
     dp["broadcast_service_factory"] = broadcast_service_factory
     dp["ad_service_factory"] = ad_service_factory
     dp["audience_service_factory"] = audience_service_factory
+    dp["admin_service_factory"] = admin_service_factory
     dp["queue_service"] = queue_service
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
@@ -128,6 +133,7 @@ def build_dispatcher(
     dp.include_router(start_handler.router)
     dp.include_router(help_handler.router)
     dp.include_router(admin_handler.router)
+    dp.include_router(admin_panel_handler.router)
     dp.include_router(ads_handler.router)
     dp.include_router(download_handler.router)
     dp.include_router(history_handler.router)
@@ -236,6 +242,9 @@ async def main() -> None:
             segment_repo=AudienceSegmentRepository(session),
         )
 
+    def make_admin_service(session: AsyncSession) -> AdminService:
+        return AdminService(job_repo=JobRepository(session), error_repo=ErrorLogRepository(session))
+
     def make_ad_service(session: AsyncSession) -> AdService:
         return AdService(
             ad_repo=AdRepository(session),
@@ -258,6 +267,7 @@ async def main() -> None:
         broadcast_service_factory=make_broadcast_service,
         ad_service_factory=make_ad_service,
         audience_service_factory=make_audience_service,
+        admin_service_factory=make_admin_service,
         queue_service=queue_service,
         notification_service=notification_service,
         callback_signer=callback_signer,

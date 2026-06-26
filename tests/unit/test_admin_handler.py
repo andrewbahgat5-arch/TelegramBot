@@ -15,7 +15,6 @@ from bot.handlers.admin import (
     handle_ban,
     handle_broadcast,
     handle_setting_set,
-    handle_settings,
     handle_stats,
     handle_unban,
     handle_userinfo,
@@ -159,17 +158,7 @@ async def test_unban_clears_flag() -> None:
     assert "Unbanned" in _answer_text(message)
 
 
-# --- /settings + /setting_set --------------------------------------------
-async def test_settings_lists_keys() -> None:
-    message = _message()
-    service = _settings_service(
-        {"free_daily_limit": ("10", "int"), "ads_enabled": ("true", "bool")}
-    )
-    await handle_settings(message, _session(), lambda s: service)
-    text = _answer_text(message)
-    assert "free_daily_limit" in text and "ads_enabled" in text
-
-
+# --- /setting_set (scriptable fallback; /settings now opens the inline panel) ----
 async def test_setting_set_updates_valid_value() -> None:
     message = _message()
     store_data = {"free_daily_limit": ("10", "int")}
