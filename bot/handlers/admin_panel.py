@@ -22,8 +22,9 @@ moderators in the keyboard layer):
 from __future__ import annotations
 
 import datetime
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from html import escape
+from typing import Any
 
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -36,6 +37,8 @@ from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.keyboards.admin_panel import (
+    build_ad_detail,
+    build_ad_list,
     build_confirm,
     build_input_prompt,
     build_main_menu,
@@ -50,7 +53,9 @@ from bot.panel.states import PanelStates
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
+from services.ad_service import AdService
 from services.admin_service import AdminService
+from services.broadcast_service import BroadcastService, InvalidBroadcastError
 from services.queue_service import QueueService
 from services.settings_service import (
     InvalidSettingValueError,
@@ -65,6 +70,8 @@ _log = get_logger("bot.handlers.admin_panel")
 UserServiceFactory = Callable[[AsyncSession], UserService]
 SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
 AdminServiceFactory = Callable[[AsyncSession], AdminService]
+AdServiceFactory = Callable[[AsyncSession], AdService]
+BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 
 OwnerFilter = RoleFilter(UserRole.OWNER)
 
@@ -101,7 +108,7 @@ async def panel_navigate(
     state: FSMContext,
     user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
-    ad_service_factory: Callable[[AsyncSession], object],
+    ad_service_factory: AdServiceFactory,
     admin_service_factory: AdminServiceFactory,
     queue_service: QueueService,
     callback_signer: CallbackSigner,
@@ -143,6 +150,8 @@ async def panel_write(
     user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
     admin_service_factory: AdminServiceFactory,
+    ad_service_factory: AdServiceFactory,
+    broadcast_service_factory: BroadcastServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
     await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
@@ -162,7 +171,17 @@ async def panel_write(
             callback_signer,
         )
         return
-    # ads / broadcast / wizards land in 9.6.9 onward.
+    if panel.section == "a":  # Advertisements management (9.6.9)
+        await _ads_write(
+            callback,
+            panel,
+            ad_service_factory(session),
+            broadcast_service_factory(session),
+            user,
+            callback_signer,
+        )
+        return
+    # create/edit wizards land in 9.6.10.
     await callback.answer("This action isn't available yet.", show_alert=False)
 
 
@@ -516,7 +535,7 @@ async def _render(
     signer: CallbackSigner,
     user_factory: UserServiceFactory,
     settings_factory: SettingsServiceFactory,
-    ad_factory: Callable[[AsyncSession], object],
+    ad_factory: AdServiceFactory,
     admin_factory: AdminServiceFactory,
     queue: QueueService,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
@@ -551,12 +570,18 @@ async def _render(
             "u", role, signer
         )
     if section == "a":
-        text = (
-            await _ads_text(ad_factory(session))
-            if action == "ls"
-            else "📢 <b>Advertisements</b>\nManage campaigns."
-        )
-        return text, build_section_menu("a", role, signer)
+        ads = ad_factory(session)
+        if action == "inf" and panel.arg is not None:
+            view = await _ad_detail_view(ads, panel.arg, role, signer)
+            if view is not None:
+                return view
+            return f"No ad with id <code>{panel.arg}</code>.", build_section_menu("a", role, signer)
+        if action == "ls":
+            ad_rows = await ads.list_ads()
+            return _ads_list_text(ad_rows), build_ad_list(ad_rows, signer)
+        if action == "stt":
+            return await _overall_stats_text(ads), build_section_menu("a", role, signer)
+        return "📢 <b>Advertisements</b>\nManage campaigns.", build_section_menu("a", role, signer)
     if section == "b":
         return "📣 <b>Broadcast</b>\nChoose an audience to message.", build_section_menu(
             "b", role, signer
@@ -621,17 +646,119 @@ def _user_row(snap: UserSnapshot) -> str:
     return f"{marker} <code>{snap.telegram_id}</code> · {username} · {snap.role.value}"
 
 
-async def _ads_text(ad_service: object) -> str:
-    ads = await ad_service.list_ads()  # type: ignore[attr-defined]  # AdService (Any-typed factory)
-    if not ads:
-        return "📢 <b>Advertisements</b>\n\nNo ads yet."
-    lines = ["📢 <b>Advertisements</b>", ""]
-    for ad in ads:
-        state = "✅" if ad.is_active else "⏸"
-        lines.append(
-            f"{state} <b>#{ad.id}</b> {escape(ad.title)} · 👁 {ad.impressions} · 🖱 {ad.clicks}"
-        )
-    return "\n".join(lines)
+# Destructive / high-impact ad actions route through a confirm screen first.
+_AD_CONFIRM = {
+    "de": ("dec", "delete ad"),
+    "bc": ("bcc", "broadcast to ALL users ad"),
+}
+
+
+async def _ads_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    ads: AdService,
+    broadcasts: BroadcastService,
+    actor: UserSnapshot,
+    signer: CallbackSigner,
+) -> None:
+    """Enable / Disable / Delete / Broadcast a selected ad; destructive steps confirm first."""
+    ad_id, action = panel.arg, panel.action
+    if action in ("cr", "ed"):  # create/edit wizards land in 9.6.10
+        await callback.answer("Ad create/edit wizard is coming soon.", show_alert=False)
+        return
+    if ad_id is None:
+        await callback.answer("Open 📋 List and tap an ad first.", show_alert=False)
+        return
+    if action in _AD_CONFIRM:  # render the confirm screen
+        if await ads.get(ad_id) is None:
+            await callback.answer("Ad not found.", show_alert=True)
+            return
+        confirmed, verb = _AD_CONFIRM[action]
+        prompt = f"⚠️ <b>Confirm</b>\n\nReally {verb} #{ad_id}?"
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                prompt,
+                build_confirm(
+                    signer, confirm=("a", confirmed, ad_id, None), cancel=("a", "inf", ad_id)
+                ),
+            )
+        await callback.answer()
+        return
+    if action == "dec":  # confirmed delete
+        deleted = await ads.delete(ad_id)
+        toast = f"🗑 Deleted ad #{ad_id}" if deleted else "Ad not found."
+        rows = await ads.list_ads()
+        if isinstance(callback.message, Message):
+            await _safe_edit(callback.message, _ads_list_text(rows), build_ad_list(rows, signer))
+        await callback.answer(toast)
+        return
+    if action == "bcc":  # confirmed broadcast to all
+        try:
+            broadcast = await broadcasts.create_from_ad(
+                created_by_user_id=actor.id, advertisement_id=ad_id
+            )
+        except InvalidBroadcastError as exc:
+            await callback.answer(f"Cannot broadcast: {exc}", show_alert=True)
+            return
+        await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer)
+        await callback.answer(f"📢 Queued to {broadcast.expected_total} users ✅")
+        return
+    if action in ("en", "di"):  # enable / disable directly
+        ad = await ads.set_active(ad_id, action == "en")
+        if ad is None:
+            await callback.answer("Ad not found.", show_alert=True)
+            return
+        await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer)
+        await callback.answer("Enabled ✅" if action == "en" else "Disabled ⏸")
+        return
+    await callback.answer()
+
+
+async def _rerender_ad_detail(
+    callback: CallbackQuery, ads: AdService, ad_id: int, role: UserRole, signer: CallbackSigner
+) -> None:
+    view = await _ad_detail_view(ads, ad_id, role, signer)
+    if view is not None and isinstance(callback.message, Message):
+        text, markup = view
+        await _safe_edit(callback.message, text, markup)
+
+
+async def _ad_detail_view(
+    ads: AdService, ad_id: int, role: UserRole, signer: CallbackSigner
+) -> tuple[str, InlineKeyboardMarkup] | None:
+    ad = await ads.get(ad_id)
+    if ad is None:
+        return None
+    return _ad_detail_text(ad), build_ad_detail(ad, role, signer)
+
+
+def _ad_detail_text(ad: Any) -> str:
+    state = "✅ active" if ad.is_active else "⏸ disabled"
+    ctr = f"{ad.clicks / ad.impressions * 100:.1f}%" if ad.impressions else "—"
+    return (
+        f"📢 <b>{escape(ad.title)}</b> (#{ad.id})\n"
+        f"Type: {ad.type} · {state}\n"
+        f"Target: {ad.target_role or 'all'} · priority {ad.priority}\n"
+        f"Every {ad.show_every_n_downloads} downloads\n"
+        f"👁 {ad.impressions} · 🖱 {ad.clicks} · CTR {ctr}"
+    )
+
+
+def _ads_list_text(rows: Sequence[Any]) -> str:
+    if not rows:
+        return "📢 <b>Advertisements</b>\n\nNo ads yet. Create one (wizard, 9.6.10)."
+    return f"📢 <b>Advertisements</b> ({len(rows)})\nTap an ad to manage it."
+
+
+async def _overall_stats_text(ads: AdService) -> str:
+    stats = await ads.overall_stats()
+    ctr = f"{stats.clicks / stats.impressions * 100:.1f}%" if stats.impressions else "—"
+    return (
+        "📊 <b>Ad totals</b>\n"
+        f"Ads: {stats.total_ads} ({stats.active_ads} active)\n"
+        f"👁 {stats.impressions} · 🖱 {stats.clicks} · CTR {ctr}"
+    )
 
 
 async def _settings_text(settings: SettingsService) -> str:

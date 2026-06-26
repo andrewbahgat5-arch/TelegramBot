@@ -116,9 +116,59 @@ class _FakeAdmin:
         return 1
 
 
+class _FakeAd:
+    def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
+        self.id = ad_id
+        self.title = "Promo"
+        self.type = "text"
+        self.is_active = is_active
+        self.impressions = 100
+        self.clicks = 10
+        self.priority = 1000
+        self.show_every_n_downloads = 1
+        self.target_role = None
+
+
 class _FakeAds:
+    def __init__(self) -> None:
+        self.ad = _FakeAd()
+        self.calls: list[tuple[Any, ...]] = []
+
     async def list_ads(self) -> list[Any]:
-        return []
+        return [self.ad]
+
+    async def get(self, ad_id: int) -> Any:
+        return self.ad if ad_id == self.ad.id else None
+
+    async def set_active(self, ad_id: int, active: bool) -> Any:
+        self.calls.append(("set_active", ad_id, active))
+        if ad_id != self.ad.id:
+            return None
+        self.ad.is_active = active
+        return self.ad
+
+    async def delete(self, ad_id: int) -> bool:
+        self.calls.append(("delete", ad_id))
+        return ad_id == self.ad.id
+
+    async def overall_stats(self) -> Any:
+        return SimpleNamespace(total_ads=1, active_ads=1, impressions=100, clicks=10)
+
+
+class _FakeBroadcasts:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int]] = []
+
+    async def create_from_ad(
+        self,
+        *,
+        created_by_user_id: int,
+        advertisement_id: int,
+        target_language: str | None = None,
+        target_role: str | None = None,
+    ) -> Any:
+        self.calls.append((created_by_user_id, advertisement_id))
+        return SimpleNamespace(id=1, expected_total=42)
 
 
 def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
@@ -265,6 +315,8 @@ async def _write(
         lambda s: _FakeUsersRW(),
         lambda s: settings,
         lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
         _signer(),
     )
 
@@ -371,6 +423,8 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         lambda s: users,
         lambda s: _FakeSettingsRW(),
         lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
         _signer(),
     )
 
@@ -457,23 +511,121 @@ async def test_user_detail_renders_via_navigation() -> None:
     assert "555" in callback.message.edit_text.await_args.args[0]
 
 
-# --- write stub (ads / broadcast still pending) ---------------------------
+# --- write stub (broadcast section still pending) -------------------------
 async def test_write_stub_acks_for_pending_section() -> None:
     callback: Any = AsyncMock(spec=CallbackQuery)
     callback.answer = AsyncMock()
+    await _bwrite(callback, ParsedPanel("b", "cr"))  # broadcast create lands in 9.6.10
+    callback.answer.assert_awaited_once()
+    assert _call(callback.answer).args  # a toast message was supplied
+
+
+# --- ads management (9.6.9) -----------------------------------------------
+async def _bwrite(callback: Any, panel: ParsedPanel) -> None:
     await panel_write(
         callback,
-        ParsedPanel("a", "cr"),
+        panel,
         _session(),
         _user(),
         _state(),
         lambda s: _FakeUsersRW(),
         lambda s: _FakeSettingsRW(),
         lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
         _signer(),
     )
-    callback.answer.assert_awaited_once()
-    assert _call(callback.answer).args  # a toast message was supplied
+
+
+async def _awrite(
+    callback: Any, panel: ParsedPanel, ads: _FakeAds, broadcasts: _FakeBroadcasts | None = None
+) -> None:
+    await panel_write(
+        callback,
+        panel,
+        _session(),
+        _user(),
+        _state(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: ads,
+        lambda s: broadcasts or _FakeBroadcasts(),
+        _signer(),
+    )
+
+
+async def test_ad_disable_acts_directly() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "di")
+    ads = _FakeAds()
+    await _awrite(callback, ParsedPanel("a", "di", 1), ads)
+    assert ("set_active", 1, False) in ads.calls
+    assert "Disabled" in _call(callback.answer).args[0]
+
+
+async def test_ad_delete_requires_confirm() -> None:
+    signer = _signer()
+    ads = _FakeAds()
+    await _awrite(_callback(signer, "a", "de"), ParsedPanel("a", "de", 1), ads)
+    assert all(c[0] != "delete" for c in ads.calls)  # not deleted yet
+    callback = _callback(signer, "a", "dec")
+    await _awrite(callback, ParsedPanel("a", "dec", 1), ads)
+    assert ("delete", 1) in ads.calls
+    assert "Deleted" in _call(callback.answer).args[0]
+
+
+async def test_ad_broadcast_requires_confirm() -> None:
+    signer = _signer()
+    ads, casts = _FakeAds(), _FakeBroadcasts()
+    await _awrite(_callback(signer, "a", "bc"), ParsedPanel("a", "bc", 1), ads, casts)
+    assert casts.calls == []  # confirm screen only
+    callback = _callback(signer, "a", "bcc")
+    await _awrite(callback, ParsedPanel("a", "bcc", 1), ads, casts)
+    assert casts.calls == [(1, 1)]  # (created_by user.id, ad_id)
+    assert "42" in _call(callback.answer).args[0]
+
+
+async def test_ad_action_without_target_hints() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "di")
+    await _awrite(callback, ParsedPanel("a", "di", None), _FakeAds())
+    assert "List" in _call(callback.answer).args[0]
+
+
+async def test_ad_create_is_pending() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "cr")
+    await _awrite(callback, ParsedPanel("a", "cr"), _FakeAds())
+    assert "coming soon" in _call(callback.answer).args[0]
+
+
+async def test_ads_list_renders_tappable_rows() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "ls")
+    await _navigate(callback, ParsedPanel("a", "ls"), _user(), signer)
+    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    opened = {
+        p.arg
+        for row in markup.inline_keyboard
+        for b in row
+        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "inf"
+    }
+    assert 1 in opened
+
+
+async def test_ad_detail_renders_via_navigation() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "inf")
+    await _navigate(callback, ParsedPanel("a", "inf", 1), _user(), signer)
+    assert "Promo" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_ads_overall_stats_renders() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "stt")
+    await _navigate(callback, ParsedPanel("a", "stt"), _user(), signer)
+    assert "Ad totals" in callback.message.edit_text.await_args.args[0]
 
 
 # --- guided User Info lookup (9.6.8) --------------------------------------

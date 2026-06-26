@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import datetime
+from types import SimpleNamespace
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.keyboards.admin_panel import (
+    build_ad_detail,
+    build_ad_list,
     build_confirm,
     build_main_menu,
     build_section_menu,
@@ -221,3 +224,31 @@ def test_user_detail_no_actions_against_owner_target() -> None:
     markup = build_user_detail(_snap(role=UserRole.OWNER), UserRole.OWNER, signer)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert actions == {"ls", "hm"}  # an owner can't be banned/demoted via the panel
+
+
+# --- ad list + detail -----------------------------------------------------
+def _ad(ad_id: int = 1, *, is_active: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(id=ad_id, title="Promo", is_active=is_active)
+
+
+def test_ad_list_rows_open_details() -> None:
+    signer = _signer()
+    markup = build_ad_list([_ad(11), _ad(22)], signer)
+    opened = {p.arg for b in _flat(markup) if (p := _parse(signer, b)).action == "inf"}
+    assert opened == {11, 22}
+
+
+def test_ad_detail_owner_sees_actions() -> None:
+    signer = _signer()
+    actions = {
+        _parse(signer, b).action for b in _flat(build_ad_detail(_ad(), UserRole.OWNER, signer))
+    }
+    assert {"di", "bc", "de"} <= actions  # active ad → Disable + Broadcast + Delete
+
+
+def test_ad_detail_moderator_sees_no_actions() -> None:
+    signer = _signer()
+    actions = {
+        _parse(signer, b).action for b in _flat(build_ad_detail(_ad(), UserRole.MODERATOR, signer))
+    }
+    assert actions == {"ls", "hm"}  # only the nav row

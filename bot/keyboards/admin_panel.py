@@ -26,6 +26,9 @@ stays within Telegram's 64-byte limit.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks.factory import CallbackSigner
@@ -193,6 +196,39 @@ def _user_button_label(snap: UserSnapshot) -> str:
     marker = "🚫" if snap.is_banned else ("⭐" if snap.is_premium else "👤")
     name = snap.first_name or snap.username or str(snap.telegram_id)
     return f"{marker} {snap.telegram_id} · {name}"[:60]
+
+
+def build_ad_list(ads: Sequence[Any], signer: CallbackSigner) -> InlineKeyboardMarkup:
+    """Tappable ad rows (one per row) → each opens that ad's detail screen."""
+    rows = [[_btn(signer, _ad_button_label(ad), "a", "inf", ad.id)] for ad in ads]
+    rows.append(nav_row(signer, back=("a", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _ad_button_label(ad: Any) -> str:
+    state = "✅" if ad.is_active else "⏸"
+    return f"{state} #{ad.id} {ad.title}"[:60]
+
+
+def build_ad_detail(ad: Any, role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    """An ad's detail screen with owner-only actions reflecting its current state.
+
+    Enable/Disable toggle directly; Delete and Broadcast (to all users) route through a
+    confirm screen (destructive / high-impact, Owner #4).
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if role is UserRole.OWNER:
+        aid = ad.id
+        actions = [
+            _btn(signer, "⏸ Disable", "a", "di", aid)
+            if ad.is_active
+            else _btn(signer, "✅ Enable", "a", "en", aid),
+            _btn(signer, "📢 Broadcast", "a", "bc", aid),
+            _btn(signer, "🗑 Delete", "a", "de", aid),
+        ]
+        rows = _chunk(actions)
+    rows.append(nav_row(signer, back=("a", "ls")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_user_detail(
