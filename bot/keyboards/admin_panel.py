@@ -37,6 +37,7 @@ from bot.panel.registry import (
     SettingField,
     is_write_action,
 )
+from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 
 _ROW_WIDTH = 2
@@ -143,18 +144,61 @@ def build_confirm(
     signer: CallbackSigner,
     *,
     confirm: tuple[str, str, int | None],
-    cancel: tuple[str, str],
+    cancel: tuple[str, str, int | None],
 ) -> InlineKeyboardMarkup:
     """The ✅ Confirm / ❌ Cancel screen for a destructive action.
 
-    ``confirm`` is (section, action, arg) carrying the write to perform; ``cancel`` is
-    (section, action) routing back to a menu.
+    Both ``confirm`` and ``cancel`` are (section, action, arg): ``confirm`` carries the
+    write to perform; ``cancel`` routes back to a menu or detail screen.
     """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 _btn(signer, "✅ Confirm", confirm[0], confirm[1], confirm[2]),
-                _btn(signer, "❌ Cancel", cancel[0], cancel[1]),
+                _btn(signer, "❌ Cancel", cancel[0], cancel[1], cancel[2]),
             ]
         ]
     )
+
+
+def build_user_list(users: list[UserSnapshot], signer: CallbackSigner) -> InlineKeyboardMarkup:
+    """Tappable user rows (one per row) → each opens that user's detail screen."""
+    rows = [
+        [_btn(signer, _user_button_label(snap), "u", "inf", snap.telegram_id)] for snap in users
+    ]
+    rows.append(nav_row(signer, back=("u", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _user_button_label(snap: UserSnapshot) -> str:
+    marker = "🚫" if snap.is_banned else ("⭐" if snap.is_premium else "👤")
+    name = snap.first_name or snap.username or str(snap.telegram_id)
+    return f"{marker} {snap.telegram_id} · {name}"[:60]
+
+
+def build_user_detail(
+    snap: UserSnapshot, role: UserRole, signer: CallbackSigner
+) -> InlineKeyboardMarkup:
+    """A user's detail screen. Contextual write actions (owner-only) reflect current state.
+
+    Owner targets expose no action buttons (an owner can't be banned or demoted via the
+    panel). Destructive actions (Ban / Remove Premium / Make-or-Remove Admin) route through
+    a confirm screen; additive ones (Unban / Upgrade Premium) act directly.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if role is UserRole.OWNER and snap.role is not UserRole.OWNER:
+        tid = snap.telegram_id
+        actions = [
+            _btn(signer, "✅ Unban", "u", "ubn", tid)
+            if snap.is_banned
+            else _btn(signer, "🚫 Ban", "u", "ban", tid),
+            _btn(signer, "⬇️ Remove Premium", "u", "rp", tid)
+            if snap.is_premium
+            else _btn(signer, "⭐ Upgrade Premium", "u", "up", tid),
+            _btn(signer, "👤 Remove Admin", "u", "rma", tid)
+            if snap.role is UserRole.MODERATOR
+            else _btn(signer, "🛡 Make Admin", "u", "mka", tid),
+        ]
+        rows = _chunk(actions)
+    rows.append(nav_row(signer, back=("u", "ls")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
@@ -11,14 +13,34 @@ from bot.keyboards.admin_panel import (
     build_section_menu,
     build_setting_stepper,
     build_settings_menu,
+    build_user_detail,
+    build_user_list,
     nav_row,
 )
 from bot.panel.registry import SECTIONS, SETTING_FIELDS, is_write_action, setting_field
+from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
+
+_TODAY = datetime.date(2026, 6, 26)
 
 
 def _signer() -> CallbackSigner:
     return CallbackSigner("a-test-secret")
+
+
+def _snap(
+    tid: int = 555, *, role: UserRole = UserRole.USER, banned: bool = False, premium: bool = False
+) -> UserSnapshot:
+    return UserSnapshot(
+        id=tid,
+        telegram_id=tid,
+        role=role,
+        is_banned=banned,
+        is_premium=premium,
+        daily_download_count=0,
+        daily_download_count_reset_date=_TODAY,
+        total_downloads=0,
+    )
 
 
 def _flat(markup: InlineKeyboardMarkup) -> list[InlineKeyboardButton]:
@@ -140,10 +162,10 @@ def test_stepper_back_returns_to_settings_menu() -> None:
 # --- confirm + nav --------------------------------------------------------
 def test_confirm_has_confirm_and_cancel() -> None:
     signer = _signer()
-    markup = build_confirm(signer, confirm=("a", "dec", 7), cancel=("a", "op"))
+    markup = build_confirm(signer, confirm=("u", "banc", 7), cancel=("u", "inf", 7))
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
-    assert by_action["dec"].arg == 7  # confirm carries the target id
-    assert "op" in by_action  # cancel routes back
+    assert by_action["banc"].arg == 7  # confirm carries the target id
+    assert by_action["inf"].arg == 7  # cancel routes back to that user's detail
 
 
 def test_nav_row_includes_cancel_when_requested() -> None:
@@ -151,3 +173,36 @@ def test_nav_row_includes_cancel_when_requested() -> None:
     row = nav_row(signer, back=("s", "op"), cancel=("s", "cx"))
     actions = {_parse(signer, b).action for b in row}
     assert actions == {"op", "cx", "hm"}
+
+
+# --- user list + detail ---------------------------------------------------
+def test_user_list_rows_open_details() -> None:
+    signer = _signer()
+    markup = build_user_list([_snap(111), _snap(222)], signer)
+    opened = {p.arg for b in _flat(markup) if (p := _parse(signer, b)).action == "inf"}
+    assert opened == {111, 222}  # each row carries its telegram id
+    _all_signed_and_within_limit(signer, markup)
+
+
+def test_user_detail_owner_sees_contextual_actions() -> None:
+    signer = _signer()
+    markup = build_user_detail(_snap(banned=True, premium=True), UserRole.OWNER, signer)
+    actions = {_parse(signer, b).action for b in _flat(markup)}
+    assert "ubn" in actions  # banned -> offer Unban (not Ban)
+    assert "rp" in actions  # premium -> offer Remove Premium
+    assert "mka" in actions  # plain user -> offer Make Admin
+    assert "ban" not in actions and "up" not in actions
+
+
+def test_user_detail_moderator_sees_no_actions() -> None:
+    signer = _signer()
+    markup = build_user_detail(_snap(), UserRole.MODERATOR, signer)
+    actions = {_parse(signer, b).action for b in _flat(markup)}
+    assert actions == {"ls", "hm"}  # only the nav row (Back to list + Home)
+
+
+def test_user_detail_no_actions_against_owner_target() -> None:
+    signer = _signer()
+    markup = build_user_detail(_snap(role=UserRole.OWNER), UserRole.OWNER, signer)
+    actions = {_parse(signer, b).action for b in _flat(markup)}
+    assert actions == {"ls", "hm"}  # an owner can't be banned/demoted via the panel

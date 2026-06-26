@@ -137,6 +137,30 @@ class UserService:
             event="user_unbanned",
         )
 
+    async def set_premium(
+        self,
+        telegram_id: int,
+        *,
+        is_premium: bool,
+        expires_at: datetime.datetime | None = None,
+    ) -> UserSnapshot | None:
+        """Toggle a user's premium flag (and ``premium_expires_at``). Returns the snapshot.
+
+        A V1 data write only: it sets the existing ``users`` columns. Premium *enforcement*
+        (limits / cooldowns / queue priority) stays V2, but the audience/ads layer keys off
+        ``is_premium`` immediately (the PLAN dimension), so a toggle changes which campaigns
+        a user matches. Clearing premium also clears ``premium_expires_at``.
+        """
+        return await self._mutate(
+            telegram_id,
+            lambda row: _apply(
+                row,
+                is_premium=is_premium,
+                premium_expires_at=expires_at if is_premium else None,
+            ),
+            event="user_premium_changed",
+        )
+
     async def _mutate(self, telegram_id: int, apply: Any, *, event: str) -> UserSnapshot | None:
         row = await self._repo.get_by_telegram_id(telegram_id)
         if row is None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -164,12 +165,19 @@ async def test_navigate_statistics_renders_stats() -> None:
     assert "Statistics" in callback.message.edit_text.await_args.args[0]
 
 
-async def test_navigate_users_list_shows_rows() -> None:
+async def test_navigate_users_list_shows_tappable_rows() -> None:
     signer = _signer()
     callback = _callback(signer, "u", "ls")
     await _navigate(callback, ParsedPanel("u", "ls"), _user(), signer)
-    text = callback.message.edit_text.await_args.args[0]
-    assert "Users" in text and "555" in text
+    assert "Users" in callback.message.edit_text.await_args.args[0]
+    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    opened = {
+        p.arg
+        for row in markup.inline_keyboard
+        for b in row
+        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "inf"
+    }
+    assert 555 in opened  # the banned fake user is a tappable row
 
 
 async def test_navigate_moderation_shows_only_banned() -> None:
@@ -217,7 +225,15 @@ class _FakeSettingsRW:
 
 
 async def _write(callback: Any, panel: ParsedPanel, settings: _FakeSettingsRW) -> None:
-    await panel_write(callback, panel, _session(), _user(), lambda s: settings, _signer())
+    await panel_write(
+        callback,
+        panel,
+        _session(),
+        _user(),
+        lambda s: _FakeUsersRW(),
+        lambda s: settings,
+        _signer(),
+    )
 
 
 async def test_stepper_opens_at_current_value() -> None:
@@ -271,15 +287,150 @@ async def test_settings_info_screen_renders() -> None:
     assert "Cache" in callback.message.edit_text.await_args.args[0]
 
 
-# --- write stub (non-settings sections still pending) ---------------------
-async def test_write_stub_acks_with_toast() -> None:
+# --- users management write flow (9.6.6) ----------------------------------
+class _FakeUsersRW:
+    def __init__(self) -> None:
+        self.calls: list[tuple[Any, ...]] = []
+        self.target = UserSnapshot(
+            id=555,
+            telegram_id=555,
+            role=UserRole.USER,
+            is_banned=False,
+            is_premium=False,
+            daily_download_count=0,
+            daily_download_count_reset_date=datetime.date(2026, 6, 26),
+            total_downloads=0,
+        )
+
+    async def find(self, telegram_id: int) -> UserSnapshot | None:
+        return self.target if telegram_id == self.target.telegram_id else None
+
+    async def ban(self, telegram_id: int, reason: str | None = None) -> UserSnapshot | None:
+        self.calls.append(("ban", telegram_id))
+        self.target = replace(self.target, is_banned=True)
+        return self.target
+
+    async def unban(self, telegram_id: int) -> UserSnapshot | None:
+        self.calls.append(("unban", telegram_id))
+        self.target = replace(self.target, is_banned=False)
+        return self.target
+
+    async def set_premium(
+        self, telegram_id: int, *, is_premium: bool, expires_at: Any = None
+    ) -> UserSnapshot | None:
+        self.calls.append(("premium", telegram_id, is_premium))
+        self.target = replace(self.target, is_premium=is_premium)
+        return self.target
+
+    async def set_role(self, telegram_id: int, role: UserRole) -> UserSnapshot | None:
+        self.calls.append(("role", telegram_id, role))
+        self.target = replace(self.target, role=role)
+        return self.target
+
+
+async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> None:
+    await panel_write(
+        callback,
+        panel,
+        _session(),
+        _user(),
+        lambda s: users,
+        lambda s: _FakeSettingsRW(),
+        _signer(),
+    )
+
+
+async def test_ban_opens_confirm_without_mutating() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "ban")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "ban", 555), users)
+    assert users.calls == []  # nothing happened yet
+    assert "Confirm" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_confirmed_ban_mutates_and_rerenders_detail() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "banc")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "banc", 555), users)
+    assert users.calls == [("ban", 555)]
+    assert "Banned" in _call(callback.answer).args[0]
+    assert "555" in callback.message.edit_text.await_args.args[0]  # detail re-rendered
+
+
+async def test_unban_acts_directly() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "ubn")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "ubn", 555), users)
+    assert users.calls == [("unban", 555)]
+
+
+async def test_upgrade_premium_acts_directly() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "up")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "up", 555), users)
+    assert users.calls == [("premium", 555, True)]
+
+
+async def test_remove_premium_requires_confirm() -> None:
+    signer = _signer()
+    users = _FakeUsersRW()
+    # Opening the action only renders the confirm screen.
+    await _uwrite(_callback(signer, "u", "rp"), ParsedPanel("u", "rp", 555), users)
+    assert users.calls == []
+    # Confirming performs the write.
+    await _uwrite(_callback(signer, "u", "rpc"), ParsedPanel("u", "rpc", 555), users)
+    assert users.calls == [("premium", 555, False)]
+
+
+async def test_make_admin_confirm_sets_role() -> None:
+    signer = _signer()
+    users = _FakeUsersRW()
+    await _uwrite(_callback(signer, "u", "mkac"), ParsedPanel("u", "mkac", 555), users)
+    assert users.calls == [("role", 555, UserRole.MODERATOR)]
+
+
+async def test_user_action_without_target_hints_to_list() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "ban")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "ban", None), users)
+    assert users.calls == []
+    assert "List" in _call(callback.answer).args[0]
+
+
+async def test_user_detail_renders_via_navigation() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "inf")
+    users = _FakeUsersRW()
+    await panel_navigate(
+        callback,
+        ParsedPanel("u", "inf", 555),
+        _session(),
+        _user(),
+        lambda s: users,
+        lambda s: _FakeSettings(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeAdmin(),
+        _FakeQueue(),
+        signer,
+    )
+    assert "555" in callback.message.edit_text.await_args.args[0]
+
+
+# --- write stub (ads / broadcast still pending) ---------------------------
+async def test_write_stub_acks_for_pending_section() -> None:
     callback: Any = AsyncMock(spec=CallbackQuery)
     callback.answer = AsyncMock()
     await panel_write(
         callback,
-        ParsedPanel("u", "ban", 5),
+        ParsedPanel("a", "cr"),
         _session(),
         _user(),
+        lambda s: _FakeUsersRW(),
         lambda s: _FakeSettingsRW(),
         _signer(),
     )

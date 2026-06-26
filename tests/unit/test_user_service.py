@@ -119,12 +119,27 @@ async def test_set_role_updates_role() -> None:
     assert repo.by_tid[1001].role == "moderator"
 
 
-@pytest.mark.parametrize("op", ["ban", "unban", "set_role"])
+async def test_set_premium_grants_and_clears() -> None:
+    svc, repo, _ = _service()
+    await svc.get_or_create_user(telegram_id=1001)
+    expires = datetime.datetime(2026, 12, 31, tzinfo=datetime.UTC)
+    snap = await svc.set_premium(1001, is_premium=True, expires_at=expires)
+    assert snap is not None and snap.is_premium is True
+    assert repo.by_tid[1001].is_premium and repo.by_tid[1001].premium_expires_at == expires
+    # Clearing premium also clears the expiry (no stale window).
+    snap = await svc.set_premium(1001, is_premium=False)
+    assert snap is not None and snap.is_premium is False
+    assert repo.by_tid[1001].premium_expires_at is None
+
+
+@pytest.mark.parametrize("op", ["ban", "unban", "set_role", "set_premium"])
 async def test_mutations_on_missing_user_return_none(op: str) -> None:
     svc, _, _ = _service()
     if op == "ban":
         assert await svc.ban(404) is None
     elif op == "unban":
         assert await svc.unban(404) is None
+    elif op == "set_premium":
+        assert await svc.set_premium(404, is_premium=True) is None
     else:
         assert await svc.set_role(404, UserRole.USER) is None

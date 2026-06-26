@@ -34,10 +34,13 @@ from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.keyboards.admin_panel import (
+    build_confirm,
     build_main_menu,
     build_section_menu,
     build_setting_stepper,
     build_settings_menu,
+    build_user_detail,
+    build_user_list,
 )
 from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
 from core.logging import get_logger
@@ -126,6 +129,7 @@ async def panel_write(
     panel: ParsedPanel,
     session: AsyncSession,
     user: UserSnapshot,
+    user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
@@ -134,7 +138,10 @@ async def panel_write(
             callback, panel, settings_service_factory(session), user, callback_signer
         )
         return
-    # users / ads / broadcast / wizards land in 9.6.6 onward.
+    if panel.section == "u":  # Users management (9.6.6)
+        await _users_write(callback, panel, user_service_factory(session), user, callback_signer)
+        return
+    # ads / broadcast / wizards land in 9.6.7 onward.
     await callback.answer("This action isn't available yet.", show_alert=False)
 
 
@@ -204,6 +211,116 @@ def _stepper_text(field: SettingField, value: int) -> str:
     )
 
 
+# Destructive user actions: open a confirm screen first. Maps the open action →
+# (confirmed action, human verb for the prompt). Additive actions (ubn/up) act directly.
+_USER_CONFIRM = {
+    "ban": ("banc", "ban"),
+    "rp": ("rpc", "remove premium from"),
+    "mka": ("mkac", "make an admin"),
+    "rma": ("rmac", "remove admin from"),
+}
+
+
+async def _users_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    users: UserService,
+    actor: UserSnapshot,
+    signer: CallbackSigner,
+) -> None:
+    """Ban / Unban / Premium / Admin on a selected user, destructive steps behind a confirm."""
+    tid, action = panel.arg, panel.action
+    if tid is None:  # a top-level submenu button without a target
+        await callback.answer("Open 📋 List and tap a user first.", show_alert=False)
+        return
+    if action in _USER_CONFIRM:  # render the confirm screen
+        snap = await users.find(tid)
+        if snap is None:
+            await callback.answer("User not found.", show_alert=True)
+            return
+        confirmed, verb = _USER_CONFIRM[action]
+        prompt = f"⚠️ <b>Confirm</b>\n\nReally {verb} <code>{tid}</code>?"
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                prompt,
+                build_confirm(signer, confirm=("u", confirmed, tid), cancel=("u", "inf", tid)),
+            )
+        await callback.answer()
+        return
+    result = await _apply_user_action(users, action, tid)
+    if result is None:
+        await callback.answer("User not found.", show_alert=True)
+        return
+    snap, toast = result
+    if isinstance(callback.message, Message):
+        await _safe_edit(
+            callback.message, _user_detail_text(snap), build_user_detail(snap, actor.role, signer)
+        )
+    await callback.answer(toast)
+
+
+async def _apply_user_action(
+    users: UserService, action: str, tid: int
+) -> tuple[UserSnapshot, str] | None:
+    """Perform a (possibly already-confirmed) user write. Returns (snapshot, toast) or None."""
+    if action == "ubn":
+        snap = await users.unban(tid)
+        return (snap, "✅ Unbanned") if snap else None
+    if action == "up":
+        snap = await users.set_premium(tid, is_premium=True)
+        return (snap, "⭐ Premium granted") if snap else None
+    if action == "banc":
+        snap = await users.ban(tid)
+        return (snap, "🚫 Banned") if snap else None
+    if action == "rpc":
+        snap = await users.set_premium(tid, is_premium=False)
+        return (snap, "Premium removed") if snap else None
+    if action == "mkac":
+        snap = await users.set_role(tid, UserRole.MODERATOR)
+        return (snap, "🛡 Promoted to admin") if snap else None
+    if action == "rmac":
+        snap = await users.set_role(tid, UserRole.USER)
+        return (snap, "Admin removed") if snap else None
+    return None
+
+
+async def _user_detail(
+    users: UserService, tid: int | None, role: UserRole, signer: CallbackSigner
+) -> tuple[str, InlineKeyboardMarkup]:
+    if tid is None:
+        return "👥 <b>Users</b>\nOpen 📋 List and tap a user to manage them.", build_section_menu(
+            "u", role, signer
+        )
+    snap = await users.find(tid)
+    if snap is None:
+        return f"No user with id <code>{tid}</code>.", build_section_menu("u", role, signer)
+    return _user_detail_text(snap), build_user_detail(snap, role, signer)
+
+
+def _user_detail_text(snap: UserSnapshot) -> str:
+    flags = []
+    if snap.is_banned:
+        flags.append("🚫 banned" + (f" — {escape(snap.ban_reason)}" if snap.ban_reason else ""))
+    if snap.is_premium:
+        flags.append("⭐ premium")
+    status = ", ".join(flags) if flags else "active"
+    name = escape(snap.first_name) if snap.first_name else "—"
+    username = f"@{escape(snap.username)}" if snap.username else "—"
+    return (
+        f"👤 <b>{name}</b> (<code>{snap.telegram_id}</code>)\n"
+        f"Username: {username}\n"
+        f"Role: {snap.role.value} · {status}\n"
+        f"Downloads: {snap.total_downloads} (today {snap.daily_download_count})"
+    )
+
+
+def _users_list_text(rows: list[UserSnapshot]) -> str:
+    if not rows:
+        return "👥 <b>Users</b>\n\nNo users yet."
+    return f"👥 <b>Users</b> (first {len(rows)})\nTap a user to manage them."
+
+
 # --- forged / unauthorized fallback ---------------------------------------
 @router.callback_query(F.data.startswith("P|"))
 async def panel_ignore(callback: CallbackQuery) -> None:
@@ -236,12 +353,15 @@ async def _render(
             "t", role, signer
         )
     if section == "u":
-        text = (
-            await _users_text(user_factory(session), banned_only=False)
-            if action == "ls"
-            else "👥 <b>Users</b>\nList, look up, or manage a user."
+        users = user_factory(session)
+        if action == "inf":
+            return await _user_detail(users, panel.arg, role, signer)
+        if action == "ls":
+            rows = await users.list_users(limit=_LIST_LIMIT)
+            return _users_list_text(rows), build_user_list(rows, signer)
+        return "👥 <b>Users</b>\nTap 📋 List to browse and manage users.", build_section_menu(
+            "u", role, signer
         )
-        return text, build_section_menu("u", role, signer)
     if section == "a":
         text = (
             await _ads_text(ad_factory(session))
