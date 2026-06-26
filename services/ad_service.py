@@ -27,6 +27,7 @@ from typing import Any
 
 from core import metrics
 from core.logging import get_logger
+from core.timeparse import parse_iso_datetime
 from domain.enums import (
     UNLIMITED_ROLES,
     AdDeliveryMode,
@@ -35,7 +36,12 @@ from domain.enums import (
     AudienceMode,
 )
 from domain.exceptions import AppError
-from domain.protocols.advertising import AdButtonSpec, AdClickSignerProtocol, AdSenderProtocol
+from domain.protocols.advertising import (
+    AdButtonSpec,
+    AdClickSignerProtocol,
+    AdEventRecorderProtocol,
+    AdSenderProtocol,
+)
 from domain.protocols.repositories import AdButtonRepositoryProtocol, AdRepositoryProtocol
 from services.audience_service import AudienceContext, AudienceService
 from services.settings_service import SettingNotFoundError, SettingsService
@@ -62,7 +68,10 @@ _FIELD_TO_COLUMN: dict[str, str] = {
     "parse_mode": "parse_mode",
     "storage_chat_id": "storage_chat_id",
     "storage_message_id": "storage_message_id",
+    "scheduled_at": "scheduled_at",
 }
+
+_CLEAR_TOKENS = frozenset({"none", "never", ""})
 _EDITABLE_FIELDS = frozenset(_FIELD_TO_COLUMN)
 
 
@@ -132,6 +141,7 @@ class AdService:
         signer: AdClickSignerProtocol,
         button_repo: AdButtonRepositoryProtocol[Any],
         audience: AudienceService,
+        event_recorder: AdEventRecorderProtocol | None = None,
     ) -> None:
         self._ads = ad_repo
         self._settings = settings
@@ -139,6 +149,7 @@ class AdService:
         self._signer = signer
         self._buttons = button_repo
         self._audience = audience
+        self._events = event_recorder
 
     # --- delivery (flow 16.7 + Sprint 9.5 placement/audience) ------------
     async def maybe_show(
@@ -171,14 +182,25 @@ class AdService:
             user_row_id=user_row_id or 0,
             untargeted_exempt=premium or role in UNLIMITED_ROLES,
         )
+        now = datetime.datetime.now(datetime.UTC)
         candidates = await self._ads.list_active_for_placement(place)
         for ad in candidates:  # highest priority first; fall through on a non-match/miss
+            scheduled_at = getattr(ad, "scheduled_at", None)
+            if scheduled_at is not None and scheduled_at > now:  # not yet due (9.5.10)
+                continue
             if not await self._audience.matches(ad, ctx):
                 continue
             frequency = ad.show_every_n_downloads or 1
             if total_downloads % frequency != 0:  # post-increment modulo (D-010)
                 continue
-            return await self._deliver(ad, chat_id, reply_to_message_id=reply_to_message_id)
+            delivered = await self._deliver(ad, chat_id, reply_to_message_id=reply_to_message_id)
+            if delivered and self._events is not None:
+                # Off the hot path (D-052): schedules a background ad_events write; the
+                # advertisements.impressions counter (in _deliver) stays the source of truth.
+                self._events.record_impression(
+                    advertisement_id=ad.id, user_id=user_row_id, placement=place
+                )
+            return delivered
         return False
 
     async def _ads_enabled(self) -> bool:
@@ -247,7 +269,9 @@ class AdService:
         _log.info("ad_shown", ad_id=ad.id, chat_id=chat_id)
         return True
 
-    async def record_click(self, ad_id: int, button_id: int | None = None) -> str | None:
+    async def record_click(
+        self, ad_id: int, button_id: int | None = None, *, user_row_id: int | None = None
+    ) -> str | None:
         """Record an ad/button click; return the destination URL or None (16.7 W6)."""
         ad = await self._ads.get_by_id(ad_id)
         if ad is None:
@@ -255,6 +279,13 @@ class AdService:
         await self._ads.increment_clicks(ad_id)
         if button_id is not None:
             await self._buttons.increment_clicks(button_id)
+        # Off the hot path (D-052): the per-event ad_events row is fire-and-forget;
+        # the advertisements/ad_buttons click counters above stay authoritative.
+        if self._events is not None:
+            self._events.record_click(
+                advertisement_id=ad_id, user_id=user_row_id, button_id=button_id
+            )
+        if button_id is not None:
             button = await self._buttons.get_by_id(button_id)
             _log.info("ad_click", ad_id=ad_id, button_id=button_id)
             if button is not None and button.url:
@@ -327,6 +358,7 @@ class AdService:
         store_msg = storage_message_id or _coerce_opt_int(
             fields.get("storage_message_id"), "storage_message_id"
         )
+        scheduled_at = _parse_schedule(fields.get("scheduled_at"))
 
         if delivery_mode == AdDeliveryMode.COPY.value:
             if store_chat is None or store_msg is None:
@@ -354,6 +386,7 @@ class AdService:
             storage_message_id=store_msg,
             parse_mode=parse_mode,
             audience_mode=audience_mode,
+            scheduled_at=scheduled_at,
         )
 
     async def list_ads(self) -> Sequence[Any]:
@@ -477,6 +510,8 @@ class AdService:
             changes["storage_message_id"] = _coerce_opt_int(
                 fields["storage_message_id"], "storage_message_id"
             )
+        if "scheduled_at" in fields:
+            changes["scheduled_at"] = _parse_schedule(fields["scheduled_at"])
 
         final_mode = changes.get("delivery_mode", ad.delivery_mode)
         if final_mode != AdDeliveryMode.COPY.value:
@@ -561,6 +596,21 @@ def _coerce_int(
     if minimum is not None and parsed < minimum:
         raise InvalidAdError(f"{field} must be >= {minimum}.")
     return parsed
+
+
+def _parse_schedule(value: str | None) -> datetime.datetime | None:
+    """Parse a ``scheduled_at`` field to a UTC datetime; ``none``/empty clears it (9.5.10)."""
+    if value is None:
+        return None
+    if value.strip().lower() in _CLEAR_TOKENS:
+        return None
+    try:
+        return parse_iso_datetime(value)
+    except ValueError as exc:
+        raise InvalidAdError(
+            f"scheduled_at must be an ISO-8601 timestamp (e.g. 2026-07-01T12:00:00Z), "
+            f"got {value!r}."
+        ) from exc
 
 
 def _coerce_opt_int(value: str | None, field: str) -> int | None:

@@ -94,6 +94,11 @@ class Settings(BaseSettings):
         alias="API_BIND_HOST",
     )
     api_bind_port: int = Field(8080, alias="API_BIND_PORT")
+    # Admin HTTP API key (Task 8.3, §20.3; the §13.2 row added 2026-06-25, D-051).
+    # Secret; never logged. Empty → the /v1/admin/* surface is disabled: api/main.py
+    # does not mount the admin router, so those paths return 404 (the surface does not
+    # exist). Set it to enable the admin API; requests then need a matching key or 401.
+    admin_api_key: SecretStr = Field(SecretStr(""), alias="ADMIN_API_KEY")
 
     # --- Alerting ---
     telegram_alerts_chat_id: int | None = Field(None, alias="TELEGRAM_ALERTS_CHAT_ID")
@@ -133,6 +138,11 @@ class Settings(BaseSettings):
     def sentry_enabled(self) -> bool:
         """Sentry is active only when a DSN is configured (Section 15.5)."""
         return bool(self.sentry_dsn.get_secret_value())
+
+    @property
+    def admin_api_enabled(self) -> bool:
+        """The HTTP admin API is mounted only when a key is configured (Task 8.3)."""
+        return bool(self.admin_api_key.get_secret_value())
 
     @property
     def use_webhook(self) -> bool:

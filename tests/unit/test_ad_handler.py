@@ -269,7 +269,7 @@ async def test_ad_click_records_and_delivers_link() -> None:
     repo.by_id[1] = FakeAdRow(id=1, title="A", button_text="Shop", button_url="https://x.test")
     signer = CallbackSigner(_SECRET)
     callback = _callback(signer.pack_ad_click(1))
-    await handle_ad_click(callback, _session(), lambda s: _service(repo), signer)
+    await handle_ad_click(callback, _session(), _owner(), lambda s: _service(repo), signer)
     assert repo.by_id[1].clicks == 1
     callback.answer.assert_awaited()
     assert "x.test" in _answer_text(callback.message)
@@ -279,7 +279,9 @@ async def test_ad_click_forged_payload_is_ignored() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", button_url="https://x.test")
     callback = _callback("a|1|deadbeef00")  # bad signature
-    await handle_ad_click(callback, _session(), lambda s: _service(repo), CallbackSigner(_SECRET))
+    await handle_ad_click(
+        callback, _session(), _owner(), lambda s: _service(repo), CallbackSigner(_SECRET)
+    )
     assert repo.by_id[1].clicks == 0
     callback.message.answer.assert_not_awaited()
 
@@ -439,6 +441,29 @@ async def test_ad_broadcast_queues_with_ad_link() -> None:
     assert "broadcast" in _answer_text(message).lower()
 
 
+async def test_ad_broadcast_with_at_schedules() -> None:
+    repo = FakeAdRepo()
+    repo.by_id[9] = FakeAdRow(id=9, title="Promo", content_text="hi")
+    broadcasts = FakeBroadcastRepo()
+    users = FakeUserRepo()
+    users.by_tid[1] = FakeUser(id=1, telegram_id=1, role="user", language="en")
+    service = BroadcastService(broadcast_repo=broadcasts, user_repo=users)
+    message = _message()
+    await handle_ad_broadcast(
+        message,
+        CommandObject(args="9 --at 2026-07-01T12:00:00Z"),
+        _session(),
+        _owner(),
+        lambda s: _service(repo),
+        lambda s: service,
+    )
+    assert broadcasts.rows[0].advertisement_id == 9
+    assert broadcasts.rows[0].scheduled_at == datetime.datetime(
+        2026, 7, 1, 12, 0, tzinfo=datetime.UTC
+    )
+    assert "scheduled" in _answer_text(message)
+
+
 async def test_ad_click_per_button_records_button() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi")
@@ -449,7 +474,7 @@ async def test_ad_click_per_button_records_button() -> None:
     signer = CallbackSigner(_SECRET)
     callback = _callback(signer.pack_ad_click(1, button.id))
     await handle_ad_click(
-        callback, _session(), lambda s: _ad_service(repo, buttons=buttons), signer
+        callback, _session(), _owner(), lambda s: _ad_service(repo, buttons=buttons), signer
     )
     assert buttons.by_id[button.id].clicks == 1
     assert "dest" in _answer_text(callback.message)

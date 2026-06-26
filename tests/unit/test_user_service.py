@@ -98,16 +98,17 @@ async def test_ban_sets_audit_and_invalidates_cache() -> None:
     assert RedisKeys.user(1001) not in raw_cache.store
 
 
-async def test_unban_preserves_audit_fields() -> None:
+async def test_unban_clears_ban_fields() -> None:
     svc, repo, _ = _service()
     await svc.get_or_create_user(telegram_id=1001)
     await svc.ban(1001, reason="spam")
     snap = await svc.unban(1001)
     assert snap is not None and snap.is_banned is False
+    assert snap.ban_reason is None  # the snapshot reflects the cleared reason
     row = repo.by_tid[1001]
-    # Audit trail is retained (Section 9.1 AuthMiddleware / D — preserve audit fields).
-    assert row.banned_at is not None
-    assert row.ban_reason == "spam"
+    # Unban clears the ban metadata so a non-banned user never shows a stale ban (D-054).
+    assert row.banned_at is None
+    assert row.ban_reason is None
 
 
 async def test_set_role_updates_role() -> None:

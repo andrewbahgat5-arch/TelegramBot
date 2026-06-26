@@ -2,7 +2,7 @@
 
 > **Document Status:** LIVE · Append-only test-results SSOT
 > **Companion Documents:** `MASTER_PLAN.md` (Section 25), `PROJECT_PROGRESS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-06-24
+> **Last Updated:** 2026-06-25
 >
 > Append a new entry on every test-suite run. Never edit past entries; corrections get a new entry that references the prior one.
 
@@ -20,8 +20,8 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-25 | PASS (~398) | + Sprint 10: metrics, readiness, api app, alerting, cleanup maintenance | Sprint 1–10 |
-| Integration | 2026-06-25 | PASS (~75) | + Sprint 10: worker heartbeat, orphan sweeps | Sprint 2–10 |
+| Unit | 2026-06-25 | PASS (~449) | + Task 9.5.10: timeparse, scheduling (ad gate + broadcast due-poller), `--at` handlers | Sprint 1–10 |
+| Integration | 2026-06-25 | PASS (~80) | + Task 9.5.10: broadcast due-poller filter (`get_next_pending(now)`) | Sprint 2–10 |
 | Security | — | — | — | (Sprint 11) |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
@@ -66,6 +66,54 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-25 — Unit + Integration — Task 9.5.10 (ad/broadcast scheduling, deferred-backlog)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer); DB migrated to head `202606250002` |
+| Suite | all (unit + integration) |
+| Triggered by | Deferred-backlog Task 9.5.10 — `scheduled_at` + due-poller |
+| Total tests | 531 | Passed | 531 | Failed | 0 | Skipped | 0 |
+| Coverage by path | timeparse (`test_timeparse.py`, 5): trailing-Z/naive/offset/date-only parsing + malformed raises. scheduling (`test_scheduling.py`, 9): AdService gate (future not shown / past+unscheduled shown), ad `scheduled_at` field on create (parse + reject bad) and edit (clear), BroadcastService threads `scheduled_at` for plain + ad broadcasts. due-poller (`test_broadcast_worker.py`, +2): future-scheduled broadcast not handled, past-scheduled handled. handlers: `/broadcast --at` schedules + invalid `--at` rejected (`test_admin_handler.py`, +2); `/ad_broadcast --at` schedules (`test_ad_handler.py`, +1). integration (`test_admin_repositories.py`, +1): `get_next_pending(now)` skips not-yet-due, returns immediate, then returns the scheduled one once its time passes. |
+| Notes | +23 tests over Task 9.5.9's 508. New migration `202606250002_scheduling` (two nullable columns + partial index); downgrade↔upgrade round-trip verified. New `core/timeparse.py`. No new env var / settings key. Gates: ruff + format clean; mypy --strict 226 files; import-linter 7 contracts; bandit 0. |
+
+**Failures:** None.
+
+---
+
+### 2026-06-25 — Unit + Integration — Task 9.5.9 (ad_events analytics, deferred-backlog)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer); DB migrated to head `202606250001` |
+| Suite | all (unit + integration) |
+| Triggered by | Deferred-backlog Task 9.5.9 — `ad_events` per-event analytics |
+| Total tests | 508 | Passed | 508 | Failed | 0 | Skipped | 0 |
+| Coverage by path | recorder (`test_ad_event_recorder.py`, 4): fire-and-forget defers the write (nothing written until the loop runs), impression/click field mapping, write-failure swallowed, no-running-loop swallowed. AdService recording (`test_ad_event_recording.py`, 5): delivered ad records impression (user+placement) while the counter stays authoritative; suppressed/premium-exempt record nothing; click records a click event; unknown ad records nothing. Integration (`test_ad_events.py`, 2): live partitioned INSERT routes into the current-month partition + `count_for_ad` by type; row fields persist. Schema (`test_schema.py`): `ad_events` present, partitioned, with both indexes. ad-click handler tests updated to pass the `user` snapshot. |
+| Notes | +11 tests over Task 8.3's 497. New migration `202606250001_ad_events` (partitioned, no FKs); downgrade↔upgrade round-trip verified on the live DB. No new env var, no new settings key. Gates: ruff + format clean; mypy --strict 223 files; import-linter 7 contracts; bandit 0. |
+
+**Failures:** None.
+
+---
+
+### 2026-06-25 — Unit + Integration — Task 8.3 (HTTP admin API, deferred-backlog)
+
+| Field | Value |
+|---|---|
+| Git SHA | (uncommitted working tree in worktree `happy-bose-71ed46`) |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer) |
+| Suite | all (unit + integration) |
+| Triggered by | Deferred-backlog Task 8.3 — `/v1/admin/*` HTTP API |
+| Total tests | 497 | Passed | 497 | Failed | 0 | Skipped | 0 |
+| Coverage by path | admin API (`test_admin_api.py`, 18): 404 when `ADMIN_API_KEY` unset (router not mounted), 401 on missing/wrong key, public endpoints need no key, and every §20.2 endpoint over ASGI — `/stats` totals+queue, `/users` list + `?telegram_id=` search, user detail + 404, ban (with reason + audit) / unban / 404, `/jobs` + status filter, `/queue`, `/errors` + type filter, `/settings` list, settings `PUT` ok / unknown-key 404 / invalid-value 400. AdminService (`test_admin_service.py`, 2): UUID→str view mapping + filter pass-through. Config (`test_config.py`, +2): `admin_api_enabled` toggle + key redaction. Integration (`test_admin_repositories.py`, +2): `JobRepository.list_recent` + `ErrorLogRepository.list_recent` newest-first ordering + status/type filters on the live DB. |
+| Notes | +24 tests over Sprint 10's 473. New env var `ADMIN_API_KEY` (D-051, added to §13.2). No schema change, no migration (head stays `202606240001`). Gates: ruff + format clean; mypy --strict 216 files; import-linter 7 contracts (`api/routes/admin.py` imports services/domain/core only); bandit 0 (constant-time `hmac.compare_digest` key check). |
+
+**Failures:** None.
+
+---
 
 ### 2026-06-25 — Unit + Integration — Sprint 10 exit (Observability and Backup, 10.1–10.8)
 

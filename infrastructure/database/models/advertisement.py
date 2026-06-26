@@ -48,6 +48,9 @@ class Advertisement(Base):
     created_by: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
+    # Scheduling (Sprint 9.5.10): NULL = eligible immediately. Set → not selected for any
+    # placement until now ≥ this (a "starts showing at" gate, checked at selection time).
+    scheduled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

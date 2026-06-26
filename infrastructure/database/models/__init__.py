@@ -5,6 +5,7 @@ from __future__ import annotations
 from infrastructure.database.models.active_download import ActiveDownload
 from infrastructure.database.models.ad_audience_rule import AdAudienceRule
 from infrastructure.database.models.ad_button import AdButton
+from infrastructure.database.models.ad_event import AdEvent
 from infrastructure.database.models.advertisement import Advertisement
 from infrastructure.database.models.audience_segment import AudienceSegment, AudienceSegmentMember
 from infrastructure.database.models.base import Base
@@ -23,6 +24,7 @@ __all__ = [
     "ActiveDownload",
     "AdAudienceRule",
     "AdButton",
+    "AdEvent",
     "Advertisement",
     "AudienceSegment",
     "AudienceSegmentMember",

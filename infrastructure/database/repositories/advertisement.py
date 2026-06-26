@@ -80,6 +80,7 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         storage_message_id: int | None = None,
         parse_mode: str | None = None,
         audience_mode: str = "all",
+        scheduled_at: datetime.datetime | None = None,
     ) -> Advertisement:
         ad = Advertisement(
             title=title,
@@ -98,6 +99,7 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
             storage_message_id=storage_message_id,
             parse_mode=parse_mode,
             audience_mode=audience_mode,
+            scheduled_at=scheduled_at,
         )
         return await self.add(ad)
 

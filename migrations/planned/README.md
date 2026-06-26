@@ -23,7 +23,9 @@ When the owning sprint is approved and implementation begins:
 
 ## Contents
 
-- `ads_v2_schema.py` — **Only the deferred `ad_events` analytics table (task 9.5.9).**
-  The Ads v2 core schema was promoted to `migrations/versions/202606240001_ads_v2_schema.py`
-  on 2026-06-25 and applied. See MASTER_PLAN §23 "Sprint 9.5 — Ads v2", D-042–D-045,
-  §13.6, §19.3.
+_None._ All Ads v2 schema has been promoted to `migrations/versions/`:
+
+- The Ads v2 **core** schema → `migrations/versions/202606240001_ads_v2_schema.py` (2026-06-25).
+- The deferred **`ad_events`** analytics table (task 9.5.9) → `migrations/versions/202606250001_ad_events.py`
+  (2026-06-25), `down_revision = 202606240001`. See MASTER_PLAN §23 "Sprint 9.5 — Ads v2",
+  D-045/D-052, §19.3.

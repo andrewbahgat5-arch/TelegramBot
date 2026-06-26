@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Iterable
 from typing import Any
 
@@ -68,6 +69,7 @@ async def _queue(broadcasts: FakeBroadcastRepo, **kw: Any) -> Any:
         target_language=kw.get("language"),
         target_role=kw.get("role"),
         expected_total=kw.get("expected_total", 0),
+        scheduled_at=kw.get("scheduled_at"),
     )
 
 
@@ -83,6 +85,34 @@ async def test_run_once_fans_out_to_all_in_chunks() -> None:
     assert sorted(chat for chat, _ in sender.sent) == [101, 102, 103]  # banned excluded
     assert row.status == "completed" and row.completed_at is not None
     assert row.total_sent == 3 and row.total_failed == 0
+
+
+async def test_due_poller_skips_future_scheduled_broadcast() -> None:
+    sender = _Sender()
+    worker, broadcasts, users = _build(sender=sender)
+    _seed_audience(users)
+    future = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1)
+    row = await _queue(broadcasts, scheduled_at=future)
+
+    handled = await worker.run_once()
+
+    assert handled is False  # not yet due → left for a later poll
+    assert sender.sent == []
+    assert row.status == "pending"
+
+
+async def test_due_poller_processes_past_scheduled_broadcast() -> None:
+    sender = _Sender()
+    worker, broadcasts, users = _build(sender=sender)
+    _seed_audience(users)
+    past = datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=1)
+    row = await _queue(broadcasts, scheduled_at=past)
+
+    handled = await worker.run_once()
+
+    assert handled is True  # due → delivered
+    assert sorted(chat for chat, _ in sender.sent) == [101, 102, 103]
+    assert row.status == "completed"
 
 
 async def test_run_once_counts_failures_without_aborting() -> None:

@@ -52,14 +52,14 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, D-049, D-050; `BOT_API_BASE_URL` env var) |
-| Current sprint | Sprint 10 — **`[~]` Under Review** (10.1–10.8 code/ops-complete; awaiting Owner verification of the restore-drill report + runbook). Sprint 9 + 9.5 also still `[~]` Under Review (Owner directed Sprint 10 to proceed before signing them off). |
-| Sprints completed | 8 / 13 signed off (S0–S8; 8.3 HTTP API deferred). S9, S9.5, S10 under review. |
-| Tasks completed | 83 / 105 (S0–S6 = 65; S7: 4/4; S8: 2/3 — 8.3 deferred; S9: 4/4; S10: 8/8 — all under review) + Owner-feedback hardening rounds #14–#31 |
+| Current sprint | **Deferred-backlog session (2026-06-25) COMPLETE:** all three parked tasks done — 8.3 HTTP admin API ✓, 9.5.9 ad_events analytics ✓, **9.5.10 ad scheduling ✓** (all `[~]` Under Review). Sprint 9 + 9.5 + 10 still `[~]` Under Review. No roadmap items (F-1/F-2/F-3) started. |
+| Sprints completed | 8 / 13 signed off (S0–S8; 8.3 HTTP API now implemented, `[~]` Under Review). S9 under review; **S9.5 now 10/10 implemented** (`[~]` Under Review); S10 under review. |
+| Tasks completed | 86 / 105 (S0–S6 = 65; S7: 4/4; S8: **3/3**; S9: 4/4; S9.5: **10/10** — 9.5.9 + 9.5.10 now done; S10: 8/8 — S8.3/S9/S9.5/S10 under review) + Owner-feedback hardening rounds #14–#31 |
 | Open blockers | 0 |
-| Open decisions awaiting Owner | 9 OQs + **deferred task 8.3** (admin HTTP API — FastAPI/uvicorn now approved & added for health/metrics per D-049, but the admin surface + `ADMIN_API_KEY` §13.2 vs §20.3 reconciliation stay deferred) + ratify documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). Sprint 9/9.5/10 sign-offs pending. |
-| Last code change | 2026-06-25 — Sprint 10 Observability & Backup (10.1–10.8): `core/metrics.py`, `core/alerting.py`, `api/` FastAPI process (health/ready/metrics), `infrastructure/redis/heartbeat.py`, `infrastructure/database/maintenance.py` + CleanupWorker full duties, Sentry tagging, metric instrumentation; deps fastapi/uvicorn/prometheus-client added (D-049/D-050). Uncommitted in worktree `happy-bose-71ed46`. |
-| Last documentation change | 2026-06-25 — Sprint 10: MASTER_PLAN §6.1/§6.2 (deps) + §5 (D-049, D-050); `deploy/README.md` runbook; `deploy/restore-drill-report.md`; PERFORMANCE_REPORT DR section; PgBouncer compose fix. |
-| Next recommended action | **Owner verification of Sprint 10** (read `deploy/restore-drill-report.md`, approve `deploy/README.md`; optionally force a CRITICAL log + test Sentry exception in a DSN-configured env), then sign off Sprint 10 — alongside the still-pending Sprint 9 + 9.5 human-verification. Then authorize Sprint 11. |
+| Open decisions awaiting Owner | 9 OQs + ratify documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). Task 8.3 `ADMIN_API_KEY` reconciliation RESOLVED (D-051); **8.3 Owner-signed-off 2026-06-26**. Sprint 9 / 9.5 / 10 sign-offs pending. |
+| Last code change | 2026-06-26 — **Owner-feedback #35:** `UserService.unban` now clears `is_banned`/`banned_at`/`ban_reason` (D-054) so an unbanned user shows no stale reason; backfilled 2 existing rows. Hardened `test_concurrent_dequeue_no_duplicates` (flush + no-live-worker note — the 997/1000 failure was a live worker draining the shared queue, not a bug). Uncommitted in worktree `happy-bose-71ed46`. |
+| Last documentation change | 2026-06-26 — MASTER_PLAN §5 (D-054); `TEST_PLAN.md` (PowerShell quoting + worker-off notes); this file (8.3 sign-off). |
+| Next recommended action | Owner verifies **9.5.9 + 9.5.10** (per `TEST_PLAN.md`), then human-verification + sign-off of Sprint 9 + 9.5 + 10. **Sprint 11** (testing framework, security, load/stress) to start in a new session. |
 
 ---
 
@@ -75,13 +75,13 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | 5 | URL Analyzer + Provider Abstraction | `[x]` Completed | 100% | 11 / 11 | Owner sign-off 2026-06-23 (`a1f16ad`) |
 | 6 | Job Pipeline (single-user) | `[x]` Completed | 100% | 10 / 10 | Owner sign-off 2026-06-24 (live-tested) |
 | 7 | Fan-Out and Resend | `[x]` Completed | 100% | 4 / 4 | Owner sign-off 2026-06-24 (`7b18b7f`) |
-| 8 | Admin and Ops | `[x]` Completed | 100% | 2 / 3 | Owner sign-off 2026-06-24 (`df530a8`); 8.3 HTTP API deferred |
+| 8 | Admin and Ops | `[x]` Completed | 100% | 3 / 3 | 8.1/8.2 Owner sign-off 2026-06-24 (`df530a8`); **8.3 HTTP API Owner sign-off 2026-06-26** (live-tested via curl + D-054 unban fix) |
 | 9 | Smart Advertisements | `[~]` Under Review | 100% | 4 / 4 | code complete; awaiting Owner sign-off |
-| 9.5 | Ads v2 (Advertisements expansion) | `[~]` Under Review | 80% | 8 / 10 | 9.5.1–9.5.8 built + tested; 9.5.9/9.5.10 deferred by design |
+| 9.5 | Ads v2 (Advertisements expansion) | `[~]` Under Review | 100% | 10 / 10 | 9.5.1–9.5.10 built + tested (9.5.9 ad_events + 9.5.10 scheduling done 2026-06-25); awaiting Owner sign-off |
 | 10 | Observability and Backup | `[~]` Under Review | 100% | 8 / 8 | code/ops complete; awaiting Owner sign-off |
 | 11 | Testing Framework, Security, Load and Stress | `[ ]` Not Started | 0% | 0 / 14 | depends on S10 |
 | 12 | Launch Readiness | `[ ]` Not Started | 0% | 0 / 7 | depends on S11 |
-| **Total** |  |  | **79%** | **83 / 105** |  |
+| **Total** |  |  | **82%** | **86 / 105** |  |
 
 Sprint definitions (goal, scope, exit criteria, human verification, risks, testing) live in `MASTER_PLAN.md` Section 23. This file holds only the live tracking.
 
@@ -443,8 +443,8 @@ Sprint 7 (Fan-Out and Resend) is code-complete and `[~]` Under Review. Multi-rec
 
 | Field | Value |
 |---|---|
-| **Status** | `[x]` Completed (Owner sign-off 2026-06-24, committed `df530a8`, incl. feedback rounds #14–#27). **8.3 HTTP API deferred** by Owner decision — see below. |
-| **Completion** | 67% (2 / 3 — 8.3 HTTP API deferred pending FastAPI dependency approval) |
+| **Status** | `[x]` Completed (8.1/8.2 Owner sign-off 2026-06-24, committed `df530a8`, incl. feedback rounds #14–#27). **8.3 HTTP API Owner sign-off 2026-06-26** (live-tested via curl; D-054 unban fix applied). |
+| **Completion** | 100% (3 / 3 — 8.3 implemented 2026-06-25; Owner sign-off pending) |
 | **Goal** | Owner and Moderator administer the bot from within Telegram. |
 | **Stop Point** | Owner runs every admin command and sends a broadcast. |
 
@@ -452,7 +452,7 @@ Sprint 7 (Fan-Out and Resend) is code-complete and `[~]` Under Review. Multi-rec
 
 - [x] **8.1** `services/broadcast_service.py` + `workers/broadcast_worker.py`. `BroadcastService.create` snapshots the matching, non-banned audience size into `broadcasts.expected_total` and inserts a `pending` row (16.8 step 1). `BroadcastWorker` **polls** the durable `broadcasts` table for the oldest `pending` row, marks it `in_progress`, and fans it out in id-cursor chunks of `broadcast_chunk_size`: per chunk it reads a page, sends each message (no session held during network I/O), then commits the `total_sent`/`total_failed` deltas in their own transaction (so progress survives a crash). One recipient's failure is logged + counted, never aborting; on completion → `completed` + `completed_at`. New repo SQL: `UserRepository.{count_all,count_banned,sum_total_downloads,count_for_broadcast,page_for_broadcast}` and `BroadcastRepository.{create_pending,get_next_pending,set_status,add_counts}`.
 - [x] **8.2** `bot/handlers/admin.py` — `/stats` (user totals + queue depth, staff), `/userinfo <id>` (staff), `/ban <id> [reason]` / `/unban <id>` (owner), `/settings` (staff) / `/setting_set <key> <value>` (owner, validates value against the key's `value_type`, rejects unknown keys — the §13.4 set is LOCKED), `/broadcast <text> [--lang xx] [--role xx]` (owner). Authorization is declarative via `RoleFilter` (`StaffFilter` = owner|moderator; `OwnerFilter` = owner) per the §9.1 "authz never in handlers" rule; a trailing catch-all replies "not permitted" when a role-gated handler declines. Service additions: `UserService.{get_stats,find}`, `SettingsService.{list_all,set_validated}` (+`InvalidSettingValueError`).
-- [ ] **8.3** `/v1/admin/*` HTTP API — **DEFERRED** (Owner decision 2026-06-24). Needs FastAPI + uvicorn (Hard Rule 3: Owner approval + exact pins + decision-log) and an `ADMIN_API_KEY` env var **absent from the LOCKED §13.2 set** (§20.3 names it but §13.2 omits it — a doc conflict to resolve). The sprint goal ("administer from within Telegram") is fully met by 8.1+8.2; the HTTP API is an additional ops surface, moved to its own follow-up once the FastAPI dependency is approved.
+- [x] **8.3** `/v1/admin/*` HTTP API — **IMPLEMENTED 2026-06-25** (deferred-backlog session; `[~]` Under Review pending Owner sign-off). All 11 §20.2 endpoints on the existing Sprint-10 FastAPI process: `GET /v1/admin/{stats,users,users/{id},jobs,queue,errors,settings}`, `POST /v1/admin/users/{id}/{ban,unban}`, `PUT /v1/admin/settings/{key}`. Gated by the new `ADMIN_API_KEY` env var (added to the LOCKED §13.2 set, **D-051**, resolving the §13.2-vs-§20.3 conflict — Owner-approved); `X-API-Key` header, constant-time compare. **Key unset → router not mounted (paths 404, "silently ignored"); key set → missing/wrong key 401.** Routes carry no business logic (§1.5.1) — they delegate to `UserService`, `SettingsService`, `QueueService`, and the new lightweight `AdminService` (jobs listing + error-log browse). `api/routes/admin.py` imports services/domain/core only (import-linter clean); `api/main.py` wires concretes. Files: `api/routes/admin.py`, `services/admin_service.py`, `core/config.py` (+`admin_api_enabled`), `infrastructure/database/repositories/{job,error_log}.py` (`list_recent`), `services/settings_service.py` (`get_view`), `api/app.py`/`api/main.py`, `.env.example`. **Validation checklist item now met:** "Admin API requires API key; without it, 401" ✓. Tests: `tests/unit/test_admin_api.py` (18: auth/404-gating/all endpoints), `test_admin_service.py` (2), `test_config.py` (+2), `tests/integration/test_admin_repositories.py` (+2 `list_recent`).
 
 **Validation Results (all gates green; verified against live postgres:15 + redis:7):**
 - `ruff check .` / `ruff format --check .` — clean.
@@ -462,10 +462,10 @@ Sprint 7 (Fan-Out and Resend) is code-complete and `[~]` Under Review. Multi-rec
 - `bandit -r . -c pyproject.toml` — 0 findings.
 - `pip-audit` — no new dependencies.
 
-**Validation Checklist status:** 6 / 7 met — `/stats` totals ✓, `/ban`+`/unban` audit fields ✓, `/setting_set` type validation + bad-input rejection ✓, `/broadcast` queues + worker processes + counters reflect actuality ✓, `--lang`/`--role` audience targeting ✓, non-owner blocked from owner-only commands ✓. **Deferred with 8.3:** "Admin API requires API key; without it, 401."
+**Validation Checklist status:** 7 / 7 met — `/stats` totals ✓, `/ban`+`/unban` audit fields ✓, `/setting_set` type validation + bad-input rejection ✓, `/broadcast` queues + worker processes + counters reflect actuality ✓, `--lang`/`--role` audience targeting ✓, non-owner blocked from owner-only commands ✓, **"Admin API requires API key; without it, 401" ✓ (8.3, 2026-06-25)**.
 
 **Known Issues / deviations (surfaced for Owner):**
-- **8.3 deferred** (above) — needs Owner-approved FastAPI/uvicorn deps + the `ADMIN_API_KEY` §13.2/§20.3 reconciliation.
+- **8.3 implemented 2026-06-25** (above), `[~]` Under Review. The `ADMIN_API_KEY` §13.2/§20.3 conflict was resolved by adding the env var to §13.2 (D-051, Owner-approved). FastAPI/uvicorn were already approved for Sprint 10 (D-049). With a single shared key there is no per-request HTTP identity, so the §20.2 "(owner only)" markers collapse to "valid-key-only" in V1 (documented in §20.3).
 - **BroadcastWorker polls the `broadcasts` table instead of the shared queue (deviation from §16.8 wording).** §16.8 says "enqueue a job with `worker_kind='broadcast'`", but V1's `RedisQueue` does not dispatch by `worker_kind` (the download worker `BZPOPMIN`-pops any member and treats it as a job UUID), and §11.4 defines no broadcast queue key. Polling the durable `pending` rows is the only correct V1 mechanism and matches the `BroadcastWorker` component card (no `QueueService` dependency). Ratify, or add a kind-aware queue later.
 - **Pre-send confirmation prompt deferred.** The §23 risk table suggests a "confirmation prompt before sending"; `/broadcast` currently queues immediately and echoes the audience count. A Confirm/Cancel inline step would need a new `bcast:draft` Redis key (a §11.4 addition). Not a hard validation-checklist item.
 - **Sprint 7 carry-over — `history_page_size` — RESOLVED 2026-06-24.** Sprint 7 hardcoded the history page size to 5; §13.4 defines a seeded `history_page_size` settings key (default 10) that `HistoryService` should read instead. Fixed: `HistoryService` now reads the page size via `SettingsService` (read-through cached, like `RateLimitService` reads its limits), falling back to 10 if the key is unseeded (`SettingNotFoundError`); the over-read-by-one next-page detection is unchanged. `make_history_service` (bot/main.py) injects the `SettingsService`. No §13.4 key or schema change. Operators can now tune it via `/setting_set` per the HistoryHandlers component card.
@@ -507,8 +507,8 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` Under Review (9.5.1–9.5.8 built + tested; awaiting Owner human-verification) |
-| **Completion** | 80% (8 / 10) — 9.5.9 + 9.5.10 deferred by design |
+| **Status** | `[~]` Under Review (9.5.1–9.5.10 built + tested; awaiting Owner human-verification) |
+| **Completion** | 100% (10 / 10) — 9.5.9 (ad_events) + 9.5.10 (scheduling) added 2026-06-25 (deferred-backlog) |
 | **Goal** | Flexible, audience-targeted ads: broadcast ads, placement-based persistent ads, rich Telegram content, media reuse (file_id + copyMessage), audience segmentation, management commands. |
 | **Stop Point** | Owner creates a targeted/rich ad, previews it, broadcasts it, confirms placement + audience behavior + per-button counts. |
 
@@ -525,10 +525,11 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 - [x] **9.5.7** `/ad_broadcast` — `BroadcastService.create_from_ad` + `BroadcastWorker` copyMessage branch; delivery counts via `total_sent`/`total_failed`.
 - [x] **9.5.8** Command surface (`/ad_enable`, `/ad_disable`, `/ad_preview`, `/ad_broadcast`, `/ad_audience`, `/ad_segment_*`, `/ad_button_*`); COMMANDS.md updated.
 
-**Deferred (by design):**
+**Completed (deferred-backlog 2026-06-25):**
 
-- [ ] **9.5.9** *(Optional/last)* `ad_events` analytics table — non-wired skeleton retained in `migrations/planned/ads_v2_schema.py`.
-- [ ] **9.5.10** *(Later sprint)* scheduling scaffold (`scheduled_at` + due-poller).
+- [x] **9.5.9** `ad_events` analytics table — **IMPLEMENTED 2026-06-25** (`[~]` Under Review). Promoted the skeleton to `migrations/versions/202606250001_ad_events.py` (`down_revision=202606240001`); partitioned monthly by `created_at` like `error_logs`, no FKs, rolling 13-month window seeded, indexes `ix_ad_events_ad` + `ix_ad_events_type_created`. `AdEvent` model + `AdEventRepository` (`record` / `count_for_ad`). New `AdEventType` enum. **Recording wired OFF the delivery hot path (D-052):** `AdEventRecorderProtocol` port (sync, non-blocking) + a fire-and-forget `AdEventRecorder` adapter (own session, background `asyncio` task, best-effort) injected into `AdService` — impression recorded in `maybe_show`, click in `record_click` (now carries `user_row_id`, threaded from the bot ad-click handler). The `advertisements`/`ad_buttons` counters stay authoritative. Partitions keep rolling via the new `RUNTIME_PARTITIONED_TABLES` (the baseline-migration `PARTITIONED_TABLES` stays frozen); `ad_events` has no retention key, so it is not auto-dropped. Migration round-trip (downgrade↔upgrade) verified on the live DB. Tests: `test_ad_event_recorder.py` (4), `test_ad_event_recording.py` (5), `test_ad_events.py` integration (2), `test_schema.py` (ad_events table/partition/indexes).
+
+- [x] **9.5.10** scheduling scaffold — **IMPLEMENTED 2026-06-25** (`[~]` Under Review). Migration `202606250002_scheduling`: nullable `scheduled_at` on `broadcasts` + `advertisements` + partial index `ix_broadcasts_scheduled`. **Broadcasts** = a **due-poller**: `BroadcastRepository.get_next_pending(now)` returns the oldest pending row whose `scheduled_at` is NULL or `<= now`, so the existing `BroadcastWorker` poll loop is the poller (no new worker). **Ads** = a "starts showing at" gate in `AdService.maybe_show` (future-scheduled ads are skipped until due). `BroadcastService.create`/`create_from_ad` accept `scheduled_at`; `AdService.create`/`edit` accept a `scheduled_at` field (`none` clears). Commands: `--at <ISO>` on `/broadcast` + `/ad_broadcast`, `scheduled_at=<ISO>` on `/ad_create` + `/ad_edit`. Shared parser `core/timeparse.py` (`parse_iso_datetime`). NULL = prior immediate/always-eligible behavior. Migration round-trip verified. D-053. Tests: `test_timeparse.py` (5), `test_scheduling.py` (9), `test_broadcast_worker.py` (+2 due-poller), `test_admin_handler.py` (+2 `--at`), `test_ad_handler.py` (+1 `--at`), `test_admin_repositories.py` (+1 due filter, integration).
 
 **Validation Results (2026-06-25):** 441 tests pass (live pg:15 + redis:7). New suites: `test_audience_service.py` (targeting truth table), `test_ad_service_v2.py` (multi-button/copy-mode/placement/audience/preview), `test_ad_repository.py` (+buttons/rules/segments/broadcast-link), ad-broadcast worker test, new ad-handler command tests. ruff/format clean; mypy --strict 196 files; import-linter 7 contracts; bandit 0. Migration round-trips (downgrade↔upgrade) verified.
 **Known Issues:** Album ads require `delivery=copy` (a media group can't carry an inline keyboard directly). Copy-mode needs a stored source message (delete it → dead ad). `workers/main.py` imports `bot.callbacks.factory.CallbackSigner` (composition-root wiring; import-linter-permitted).
@@ -685,6 +686,50 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-26 — Owner verification of the backlog: 8.3 signed off, unban fix (#35), queue-test clarified
+
+| Field | Value |
+|---|---|
+| **Session type** | Owner verification + fixes. Owner ran the gate suite + the full 8.3 curl suite; verifying 9.5.9/9.5.10 later. |
+| **8.3 verified + signed off** | Owner exercised every `/v1/admin/*` endpoint: auth 404 (key unset) / 401 (missing/wrong) / 200 (valid); `/stats`, `/users` (+`?telegram_id=`), `/users/{id}`, `/jobs`, `/queue`, `/errors`, `/settings` all returned correct data; `POST .../ban` + `.../unban`, `PUT /settings/{key}` → 200/200/400(bad value)/404(unknown key). **Sprint 8 (incl. 8.3) Owner-signed-off 2026-06-26.** |
+| **#35 — unban kept ban_reason (FIXED, D-054)** | Owner saw an unbanned user still showing `ban_reason`. `UserService.unban` now clears `is_banned`/`banned_at`/`ban_reason` (was: preserve as audit). Updated `test_unban_clears_ban_fields`. Backfilled 2 already-unbanned rows in the dev DB (`UPDATE users SET ban_reason=NULL, banned_at=NULL WHERE is_banned=false AND …`). Ban history is V3 audit-log scope (§19.3). |
+| **Queue test "failure" explained (not a bug)** | `test_concurrent_dequeue_no_duplicates` showed 997/1000 because a live `workers.main` (DownloadWorker) was ZPOPMIN-draining the same shared `queue:jobs` key during the run. The dequeue Lua is atomic and correct; the suite is 531/531 with no worker running. Hardened the test (flush keys first + a "stop the worker before integration tests" note). Same class as the dev-DB-drift gotcha. |
+| **Windows note (not a bug)** | The `/ban` curl failed only due to PowerShell quoting of the JSON body with a space (`api test`). `Invoke-RestMethod … -Body '{"reason":"api test"}'` worked (ban set, then unban 200). `TEST_PLAN.md` updated with the Windows-safe form. |
+| **Validation** | **531 tests pass** (clean run, no worker). ruff/format clean; mypy --strict 226 files; bandit 0. No new migration. |
+| **Notes for the next agent** | Backlog (8.3 + 9.5.9 + 9.5.10) is code-complete; 8.3 signed off; 9.5/9.5.9/9.5.10 + S9 + S10 await Owner sign-off after the Owner's pending 9.5.9/9.5.10 check. **Sprint 11 starts in a NEW session** (see the kickoff prompt the Owner was given). Cache note: the Redis user cache (TTL 30 s) may briefly serve a stale `ban_reason` for a just-unbanned user via the bot's cache-first path; the admin API `find()` bypasses cache and is immediate. |
+
+### Session Handoff — 2026-06-25 — Deferred-backlog Task 9.5.10 (ad scheduling) implemented — backlog COMPLETE (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Deferred-backlog (Owner directed: 8.3, 9.5.9, 9.5.10). **All three done.** This entry: 9.5.10. |
+| **What was built** | Migration `202606250002_scheduling` (`down_revision=202606250001`): nullable `scheduled_at` on `broadcasts` + `advertisements` + partial index `ix_broadcasts_scheduled`. **Broadcast due-poller:** `BroadcastRepository.get_next_pending(now)` filters NULL-or-due; the existing `BroadcastWorker` loop passes `now=_now()` (no new worker). **Ad gate:** `AdService.maybe_show` skips ads with `scheduled_at > now`. `BroadcastService.create`/`create_from_ad` + `AdService.create`/`edit` accept `scheduled_at` (ad field `none` clears). Commands `--at <ISO>` (`/broadcast`, `/ad_broadcast`) + `scheduled_at=<ISO>` (`/ad_create`, `/ad_edit`). New `core/timeparse.py`. Models + repos + protocols + fakes threaded `scheduled_at`. |
+| **Validation** | **531 tests pass** (508 → +23; live pg:15 + redis:7). ruff + format clean; mypy --strict 226 files; import-linter 7 contracts; bandit 0. Migration applied (head `202606250002`); downgrade↔upgrade round-trip verified. |
+| **Owner action** | Optional: `/broadcast hi --at <near-future ISO>` → confirm it sends only after the time passes; `/ad_create … scheduled_at=<future>` → confirm the ad doesn't appear until due. Then sign off 9.5.10 (and S9 + S9.5 + S10). |
+| **Notes for the next agent** | The whole deferred backlog is now cleared (8.3 + 9.5.9 + 9.5.10). Broadcast scheduling reuses the BroadcastWorker poll loop (idle interval = worst-case scheduling latency). Ad scheduling is a selection-time gate (no poller). Next: **Sprint 11** (testing framework, security, load/stress) — only after Owner sign-off of S9 + S9.5 + S10. Roadmap F-1/F-2/F-3 remain not-started (do not begin without Owner ask). |
+
+### Session Handoff — 2026-06-25 — Deferred-backlog Task 9.5.9 (ad_events analytics) implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Deferred-backlog (Owner directed: 8.3, 9.5.9, 9.5.10, checkpointing between each). **This entry: 9.5.9 done.** 8.3 done earlier this session. 9.5.10 next. |
+| **What was built** | Promoted `migrations/planned/ads_v2_schema.py` → `migrations/versions/202606250001_ad_events.py` (`down_revision=202606240001`): partitioned `ad_events` (monthly RANGE by `created_at`, no FKs) + `ix_ad_events_ad` / `ix_ad_events_type_created` + rolling 13-month seed; the planned skeleton was removed. `infrastructure/database/models/ad_event.py` (`AdEvent`), `repositories/ad_event.py` (`AdEventRepository.record` / `count_for_ad`), `domain/enums/ad_event.py` (`AdEventType`). **Off-hot-path recording (D-052):** `AdEventRecorderProtocol` (domain port, sync/non-blocking) + `infrastructure/database/ad_event_recorder.py` (`AdEventRecorder` — own session, fire-and-forget `asyncio` task, best-effort). Wired into `AdService` (impression in `maybe_show`, click in `record_click`+`user_row_id`); composition roots `bot/main.py` + `workers/main.py` build the recorder as a process singleton; the bot ad-click handler now passes `user.id`. Partition rollover/retention use the new `RUNTIME_PARTITIONED_TABLES` (baseline `PARTITIONED_TABLES` frozen). |
+| **Validation** | **508 tests pass** (497 → +11; live pg:15 + redis:7). ruff + format clean; mypy --strict 223 files; import-linter 7 contracts; bandit 0. Migration applied to dev DB (head `202606250001`); downgrade↔upgrade round-trip verified (ad_events dropped then re-created with 13 partitions). |
+| **Owner action** | Optional: enable ads, trigger a delivery + a button tap, then `SELECT event_type, count(*) FROM ad_events GROUP BY 1;` to see impression/click rows accruing alongside the `advertisements` counters. Then sign off 9.5.9. |
+| **Notes for the next agent** | Recording is best-effort and **must not** move onto the request session (it owns its own). `ad_events` has no retention settings key, so its partitions are not auto-dropped (V1 analytics; add a key later if needed). Next: **9.5.10** — `scheduled_at` + due-poller so ads/broadcasts can be scheduled. Then stop for Owner review. Do NOT start roadmap F-1/F-2/F-3. |
+
+### Session Handoff — 2026-06-25 — Deferred-backlog Task 8.3 (HTTP admin API) implemented (Under Review)
+
+| Field | Value |
+|---|---|
+| **Session type** | Deferred-backlog (Owner directed: implement the three parked tasks — 8.3, 9.5.9, 9.5.10 — checkpointing between each). **This entry: 8.3 done.** |
+| **Decision gate resolved** | Owner approved (a) adding `ADMIN_API_KEY` to the LOCKED §13.2 set and (b) the **full §20.2 surface** (all 11 endpoints), plus the auth-failure behavior: **404 when the key is unset (router not mounted), 401 when set-but-wrong.** Recorded as **D-051**; §13.2 row + §20.3 reconciliation note added. The §13.2-vs-§20.3 conflict is now resolved. |
+| **What was built** | `api/routes/admin.py` — `create_admin_router(...)` returning the `/v1/admin` `APIRouter`: `GET /stats /users /users/{id} /jobs /queue /errors /settings`, `POST /users/{id}/ban /users/{id}/unban`, `PUT /settings/{key}`. `X-API-Key` header via `APIKeyHeader` + constant-time `hmac.compare_digest`; router-level auth dependency; per-request session dependency (commit/rollback). Routes delegate only — `UserService` (stats/users/ban/unban), `SettingsService` (list/`set_validated`/new `get_view`), `QueueService` (depth/active), new `services/admin_service.py` `AdminService` (jobs listing + error browse via narrow `JobReadRepository`/`ErrorReadRepository` protocols). New repo reads `JobRepository.list_recent` + `ErrorLogRepository.list_recent`. `core/config.py` gained `admin_api_key: SecretStr` + `admin_api_enabled`. `api/app.py` accepts an optional `admin_router`; `api/main.py` mounts it only when the key is set. |
+| **Validation** | **497 tests pass** (473 → +24; live pg:15 + redis:7). ruff + format clean; mypy --strict **216** files; import-linter **7 contracts** (`api/routes/admin.py` imports services/domain/core only; infra confined to `api/main.py`); bandit **0**. No schema change, no migration (head stays `202606240001`). New env var only. |
+| **Owner action** | Optional: set `ADMIN_API_KEY`, run the api process, and `curl -H "X-API-Key: <key>" http://localhost:8080/v1/admin/stats` (200) vs no/wrong key (401) vs key-unset (404). Then sign off Task 8.3. |
+| **Architecture notes** | `api/routes/admin.py` deliberately omits `from __future__ import annotations`: its endpoints live in a closure and inject deps via `Annotated[..., Depends(...)]`; stringized annotations would be resolved against module globals only (missing the closure locals) and FastAPI would mis-read them as query params (observed as 422). Eager annotations bind the markers correctly; self-referential pydantic return types are quoted. With a single shared key there is no per-request identity, so §20.2's "(owner only)" markers are "valid-key-only" in V1 (§20.3). |
+| **Notes for the next agent** | Backlog continues: **9.5.9** — promote `migrations/planned/ads_v2_schema.py` (`ad_events`) into `migrations/versions/` with `down_revision = 202606240001`, finish the partition pre-create TODO, wire event recording **off** the ad hot path. **9.5.10** — `scheduled_at` column + due-poller for ads/broadcasts. Stop for Owner review after each. Do NOT start roadmap F-1/F-2/F-3. |
 
 ### Session Handoff — 2026-06-25 — Sprint 10 Observability and Backup implemented (Under Review)
 

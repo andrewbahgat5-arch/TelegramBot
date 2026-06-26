@@ -235,6 +235,43 @@ async def test_broadcast_empty_text_is_rejected() -> None:
     assert "Cannot broadcast" in _answer_text(message)
 
 
+async def test_broadcast_with_at_schedules() -> None:
+    users = FakeUserRepo()
+    users.by_tid[1] = FakeUser(id=1, telegram_id=1, language="en")
+    broadcasts = FakeBroadcastRepo()
+    service = BroadcastService(broadcast_repo=broadcasts, user_repo=users)
+    message = _message()
+
+    await handle_broadcast(
+        message,
+        CommandObject(args="hello --lang en --at 2026-07-01T12:00:00Z"),
+        _session(),
+        _owner(),
+        lambda s: service,
+    )
+
+    assert "scheduled" in _answer_text(message)
+    assert broadcasts.rows[0].message_text == "hello"
+    assert broadcasts.rows[0].scheduled_at == datetime.datetime(
+        2026, 7, 1, 12, 0, tzinfo=datetime.UTC
+    )
+
+
+async def test_broadcast_with_invalid_at_is_rejected() -> None:
+    broadcasts = FakeBroadcastRepo()
+    service = BroadcastService(broadcast_repo=broadcasts, user_repo=FakeUserRepo())
+    message = _message()
+    await handle_broadcast(
+        message,
+        CommandObject(args="hello --at not-a-time"),
+        _session(),
+        _owner(),
+        lambda s: service,
+    )
+    assert "Invalid" in _answer_text(message)
+    assert broadcasts.rows == []  # nothing queued
+
+
 # --- /users ---------------------------------------------------------------
 async def test_users_lists_registered_users() -> None:
     users = FakeUserRepo()

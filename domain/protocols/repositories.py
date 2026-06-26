@@ -225,12 +225,19 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         target_role: str | None,
         expected_total: int,
         advertisement_id: int | None = None,
+        scheduled_at: datetime.datetime | None = None,
     ) -> T:
-        """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8)."""
+        """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8).
+
+        ``scheduled_at`` (9.5.10) defers delivery until due; NULL = immediate.
+        """
         ...
 
-    async def get_next_pending(self) -> T | None:
-        """Oldest ``pending`` broadcast for the worker to process (16.8)."""
+    async def get_next_pending(self, *, now: datetime.datetime | None = None) -> T | None:
+        """Oldest **due** ``pending`` broadcast for the worker (16.8; 9.5.10 due-poller).
+
+        Due = ``scheduled_at`` NULL or ``<= now`` (``now`` defaults to current time).
+        """
         ...
 
     async def set_status(
@@ -277,8 +284,13 @@ class AdRepositoryProtocol(Repository[T], Protocol[T]):
         storage_message_id: int | None = None,
         parse_mode: str | None = None,
         audience_mode: str = "all",
+        scheduled_at: datetime.datetime | None = None,
     ) -> T:
-        """Insert an ``advertisements`` row (10.10 + Sprint 9.5). ORM stays in infra."""
+        """Insert an ``advertisements`` row (10.10 + Sprint 9.5). ORM stays in infra.
+
+        ``scheduled_at`` (9.5.10) gates placement selection until its start time; NULL =
+        eligible immediately.
+        """
         ...
 
     async def apply_update(self, ad: T, changes: dict[str, Any]) -> T:

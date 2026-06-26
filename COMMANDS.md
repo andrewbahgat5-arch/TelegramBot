@@ -56,15 +56,15 @@ These appear on bot messages — no typing needed:
 | `/ban` | `/ban <telegram_id> [reason]` | Bans a user (optional reason). |
 | `/unban` | `/unban <telegram_id>` | Lifts a ban. |
 | `/setting_set` | `/setting_set <key> <value>` | Updates an **existing** setting (the key set is locked; value is type-validated). |
-| `/broadcast` | `/broadcast <text> [--lang <code>] [--role <role>]` | Queues a message to users. No flags → normal users only (staff excluded). `--lang ar`, `--role premium`, etc. |
+| `/broadcast` | `/broadcast <text> [--lang <code>] [--role <role>] [--at <ISO-8601>]` | Queues a message to users. No flags → normal users only (staff excluded). `--lang ar`, `--role premium`, etc. `--at 2026-07-01T12:00:00Z` schedules it (UTC; the worker sends it once due). |
 
 ### Advertisement commands (Owner only)
 
 | Command | Usage | What it does |
 |---|---|---|
-| `/ad_create` | `/ad_create title=… [type=text\|photo\|video\|animation] [text=…] [file_id=…] [button_text=… button_url=…] [target=user\|premium\|none] [every=N] [priority=P]` | Creates an ad. For media ads, attach the media or reply to a media message instead of `file_id=`. |
+| `/ad_create` | `/ad_create title=… [type=text\|photo\|video\|animation] [text=…] [file_id=…] [button_text=… button_url=…] [target=user\|premium\|none] [every=N] [priority=P] [scheduled_at=<ISO-8601>]` | Creates an ad. For media ads, attach the media or reply to a media message instead of `file_id=`. `scheduled_at` (UTC) gates when the ad starts showing at its placement. |
 | `/ad_list` | `/ad_list` | Lists all ads (id, title, type, active, priority, frequency, target, impressions, clicks). |
-| `/ad_edit` | `/ad_edit <id> field=value …` | Edits an ad's fields (same field names as `/ad_create`). |
+| `/ad_edit` | `/ad_edit <id> field=value …` | Edits an ad's fields (same field names as `/ad_create`, including `scheduled_at=<ISO>` or `scheduled_at=none` to clear). |
 | `/ad_toggle` | `/ad_toggle <id>` | Enables/disables an ad (flips its active state). |
 | `/ad_delete` | `/ad_delete <id>` | Deletes an ad. |
 | `/ad_stats` | `/ad_stats [id]` | Overall ad totals + CTR, or one ad's impressions/clicks/CTR. |
@@ -75,7 +75,7 @@ These appear on bot messages — no typing needed:
 | `/ad_button_add` | `/ad_button_add <id> <text> \| <url> [\| row]` | Add an inline button (ads support multiple). |
 | `/ad_button_clear` | `/ad_button_clear <id>` | Remove all of an ad's buttons. |
 | `/ad_audience` | `/ad_audience <id> <all\|include\|exclude> [!]dim:value …` | Set audience targeting (see below). |
-| `/ad_broadcast` | `/ad_broadcast <id> [--lang xx] [--role xx]` | Send a stored ad to an audience (reuses broadcast fan-out). |
+| `/ad_broadcast` | `/ad_broadcast <id> [--lang xx] [--role xx] [--at <ISO-8601>]` | Send a stored ad to an audience (reuses broadcast fan-out). `--at` schedules it (UTC). |
 | `/ad_segment_create` | `/ad_segment_create <name> [description]` | Create a reusable audience segment. |
 | `/ad_segment_add` | `/ad_segment_add <segment> <telegram_id>` | Add a user to a segment. |
 | `/ad_segment_remove` | `/ad_segment_remove <segment> <telegram_id>` | Remove a user from a segment. |

@@ -12,7 +12,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from infrastructure.database.partitioning import (
-    PARTITIONED_TABLES,
+    RUNTIME_PARTITIONED_TABLES,
     drop_partitions_older_than,
     ensure_partitions_for_next_n_months,
 )
@@ -40,7 +40,7 @@ class DbMaintenance:
         today = datetime.now(UTC).date()
         dropped: list[str] = []
         async with self._engine.begin() as conn:
-            for table in PARTITIONED_TABLES:
+            for table in RUNTIME_PARTITIONED_TABLES:
                 days = retention_days.get(table)
                 if not days or days <= 0:
                     continue

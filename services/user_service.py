@@ -125,9 +125,16 @@ class UserService:
         )
 
     async def unban(self, telegram_id: int) -> UserSnapshot | None:
-        """Lift a ban. The audit fields (``banned_at``, ``ban_reason``) are preserved."""
+        """Lift a ban and clear the ban fields (``banned_at``, ``ban_reason``) → NULL.
+
+        An unbanned user has no active ban, so the reason/timestamp are cleared rather
+        than retained (Owner directive 2026-06-26, D-054): a non-banned user must never
+        show a stale ban reason. Durable ban history lives in the audit log (V3).
+        """
         return await self._mutate(
-            telegram_id, lambda row: _apply(row, is_banned=False), event="user_unbanned"
+            telegram_id,
+            lambda row: _apply(row, is_banned=False, banned_at=None, ban_reason=None),
+            event="user_unbanned",
         )
 
     async def _mutate(self, telegram_id: int, apply: Any, *, event: str) -> UserSnapshot | None:

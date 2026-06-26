@@ -75,6 +75,11 @@ class SettingsService:
         rows: Sequence[Any] = await self._store.list_all()
         return [SettingView(r.key, r.value, r.value_type) for r in rows]
 
+    async def get_view(self, key: str) -> SettingView | None:
+        """One settings row as a display view (admin ``PUT`` echo), or None if absent."""
+        row = await self._store.get_by_key(key)
+        return None if row is None else SettingView(row.key, row.value, row.value_type)
+
     async def set_validated(self, key: str, value: str, *, updated_by: int | None = None) -> Any:
         """Validate ``value`` against the **existing** key's ``value_type``, then persist.
 

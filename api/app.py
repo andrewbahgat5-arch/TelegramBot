@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from fastapi import FastAPI, Response
+from fastapi import APIRouter, FastAPI, Response
 
 from api.readiness import ReadinessChecker
 from core import metrics
@@ -23,8 +23,15 @@ def create_app(
     *,
     checker: ReadinessChecker,
     refresh_metrics: RefreshMetrics,
+    admin_router: APIRouter | None = None,
 ) -> FastAPI:
-    """Build the FastAPI app for the api process."""
+    """Build the FastAPI app for the api process.
+
+    The three public endpoints (health/ready/metrics) are always served. The
+    ``/v1/admin/*`` surface (Task 8.3) is mounted only when ``admin_router`` is
+    provided — the composition root passes it when ``ADMIN_API_KEY`` is configured,
+    and ``None`` otherwise, so the admin paths simply 404 when the key is unset.
+    """
     app = FastAPI(title="Telegram Download Bot API", version="1", docs_url=None, redoc_url=None)
 
     @app.get("/v1/health")
@@ -52,5 +59,8 @@ def create_app(
         await refresh_metrics()
         body, content_type = metrics.render()
         return Response(content=body, media_type=content_type)
+
+    if admin_router is not None:
+        app.include_router(admin_router)
 
     return app

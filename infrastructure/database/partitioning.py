@@ -18,6 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 PARTITIONED_TABLES: tuple[str, ...] = ("downloads", "jobs", "error_logs")
 
+# ``ad_events`` (Sprint 9.5.9) is monthly-partitioned too, but it is created by a LATER
+# migration (202606250001), so it must NOT be in ``PARTITIONED_TABLES`` — the baseline
+# migration (202606230001) seeds that set's partitions before ``ad_events`` exists. The
+# runtime rollover/retention paths use this fuller set so ``ad_events`` partitions keep
+# rolling. (``ad_events`` has no retention key, so it is not auto-dropped — see D-052.)
+RUNTIME_PARTITIONED_TABLES: tuple[str, ...] = (*PARTITIONED_TABLES, "ad_events")
+
 # Matches the ``y{YYYY}m{MM}`` suffix of a partition name (possibly schema-qualified).
 _PARTITION_SUFFIX_RE = re.compile(r"_y(\d{4})m(\d{2})$")
 
@@ -93,7 +100,7 @@ async def ensure_partitions_for_next_n_months(
     """
     current = (now or datetime.now(UTC)).date()
     ensured: list[str] = []
-    for table in PARTITIONED_TABLES:
+    for table in RUNTIME_PARTITIONED_TABLES:
         for year, month in iter_months(_first_of_month(current), n + 1):
             await conn.execute(text(create_partition_sql(table, year, month)))
             ensured.append(partition_name(table, year, month))

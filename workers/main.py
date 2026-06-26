@@ -25,6 +25,7 @@ from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
+from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.maintenance import DbMaintenance
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
@@ -135,6 +136,7 @@ def make_download_service_factory(
     ad_sender: TelegramAdSender,
     ad_signer: CallbackSigner,
     notification_service: NotificationService,
+    ad_event_recorder: AdEventRecorder,
 ) -> Callable[[AsyncSession], DownloadService]:
     """Return a ``session -> DownloadService`` builder (per-job unit of work)."""
 
@@ -153,6 +155,7 @@ def make_download_service_factory(
                 rule_repo=AdAudienceRuleRepository(session),
                 member_repo=AudienceSegmentMemberRepository(session),
             ),
+            event_recorder=ad_event_recorder,
         )
         return DownloadService(
             job_repo=JobRepository(session),
@@ -210,6 +213,9 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     message_sender = TelegramMessageSender(bot)
     notification_service = NotificationService(message_sender)
     transcoder = FFmpegClient(settings.ffmpeg_path)
+    # Process singleton: writes ad_events on its own sessions, off the delivery hot path
+    # (D-052). It must NOT share a per-job session, hence the session factory here.
+    ad_event_recorder = AdEventRecorder(session_factory)
 
     build_download_service = make_download_service_factory(
         settings=settings,
@@ -221,6 +227,7 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         ad_sender=ad_sender,
         ad_signer=ad_signer,
         notification_service=notification_service,
+        ad_event_recorder=ad_event_recorder,
     )
 
     def build_ad_service(session: AsyncSession) -> AdService:
@@ -237,6 +244,7 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
                 rule_repo=AdAudienceRuleRepository(session),
                 member_repo=AudienceSegmentMemberRepository(session),
             ),
+            event_recorder=ad_event_recorder,
         )
 
     interval = await _read_health_interval(session_factory)

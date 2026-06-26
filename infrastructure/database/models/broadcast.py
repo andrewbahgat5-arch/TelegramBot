@@ -29,6 +29,9 @@ class Broadcast(Base):
     total_sent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_failed: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    # Scheduling (Sprint 9.5.10): NULL = send as soon as the worker polls (immediate,
+    # Sprint 8 behavior). Set → the BroadcastWorker's due-poller skips it until now ≥ this.
+    scheduled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

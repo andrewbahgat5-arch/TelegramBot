@@ -5,6 +5,7 @@ from __future__ import annotations
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
 from infrastructure.database.repositories.ad_button import AdButtonRepository
+from infrastructure.database.repositories.ad_event import AdEventRepository
 from infrastructure.database.repositories.advertisement import AdRepository
 from infrastructure.database.repositories.audience_segment import (
     AudienceSegmentMemberRepository,
@@ -25,6 +26,7 @@ __all__ = [
     "ActiveDownloadRepository",
     "AdAudienceRuleRepository",
     "AdButtonRepository",
+    "AdEventRepository",
     "AdRepository",
     "AudienceSegmentMemberRepository",
     "AudienceSegmentRepository",

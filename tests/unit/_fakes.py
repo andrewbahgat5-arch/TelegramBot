@@ -899,6 +899,7 @@ class FakeBroadcastRow:
     status: str = "pending"
     completed_at: datetime.datetime | None = None
     advertisement_id: int | None = None
+    scheduled_at: datetime.datetime | None = None
 
 
 class FakeBroadcastRepo:
@@ -929,6 +930,7 @@ class FakeBroadcastRepo:
         target_role: str | None,
         expected_total: int,
         advertisement_id: int | None = None,
+        scheduled_at: datetime.datetime | None = None,
     ) -> FakeBroadcastRow:
         row = FakeBroadcastRow(
             id=self._next_id,
@@ -938,15 +940,23 @@ class FakeBroadcastRepo:
             target_role=target_role,
             expected_total=expected_total,
             advertisement_id=advertisement_id,
+            scheduled_at=scheduled_at,
             status="pending",
         )
         self._next_id += 1
         self.rows.append(row)
         return row
 
-    async def get_next_pending(self) -> FakeBroadcastRow | None:
-        pending = sorted((b for b in self.rows if b.status == "pending"), key=lambda b: b.id)
-        return pending[0] if pending else None
+    async def get_next_pending(
+        self, *, now: datetime.datetime | None = None
+    ) -> FakeBroadcastRow | None:
+        cutoff = now if now is not None else datetime.datetime.now(datetime.UTC)
+        due = [
+            b
+            for b in self.rows
+            if b.status == "pending" and (b.scheduled_at is None or b.scheduled_at <= cutoff)
+        ]
+        return min(due, key=lambda b: b.id) if due else None
 
     async def set_status(
         self, broadcast_id: int, status: str, *, completed_at: datetime.datetime | None = None
@@ -989,6 +999,7 @@ class FakeAdRow:
     storage_message_id: int | None = None
     parse_mode: str | None = None
     audience_mode: str = "all"
+    scheduled_at: datetime.datetime | None = None
 
 
 class FakeAdRepo:
@@ -1048,6 +1059,7 @@ class FakeAdRepo:
         storage_message_id: int | None = None,
         parse_mode: str | None = None,
         audience_mode: str = "all",
+        scheduled_at: datetime.datetime | None = None,
     ) -> FakeAdRow:
         row = FakeAdRow(
             id=self._next_id,
@@ -1067,6 +1079,7 @@ class FakeAdRepo:
             storage_message_id=storage_message_id,
             parse_mode=parse_mode,
             audience_mode=audience_mode,
+            scheduled_at=scheduled_at,
         )
         self._next_id += 1
         self.by_id[row.id] = row

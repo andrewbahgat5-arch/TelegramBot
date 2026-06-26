@@ -7,11 +7,17 @@ import asyncio
 import pytest
 
 from core.constants import PRIORITY_HIGH, PRIORITY_LOW, PRIORITY_NORMAL
+from core.redis_keys import RedisKeys
 from infrastructure.redis.client import RedisClients
 from infrastructure.redis.queue import RedisQueue
 from services.queue_service import QueueService
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _reset_queue(redis_clients: RedisClients) -> None:
+    """Clear the shared queue keys so leftovers from prior activity can't skew counts."""
+    await redis_clients.queue.delete(RedisKeys.QUEUE_JOBS, RedisKeys.QUEUE_ACTIVE)
 
 
 async def test_priority_ordering(redis_clients: RedisClients) -> None:
@@ -48,6 +54,12 @@ async def test_depth_active_and_ack(redis_clients: RedisClients) -> None:
 
 
 async def test_concurrent_dequeue_no_duplicates(redis_clients: RedisClients) -> None:
+    # NOTE: the integration suite must run with NO live worker connected to this
+    # REDIS_QUEUE_DB — a running DownloadWorker ZPOPMINs the same `queue:jobs` key and
+    # would steal members mid-test (a deficit like 997/1000). Stop `python -m workers.main`
+    # before running integration tests. We reset the keys first so prior leftovers can't
+    # inflate the count either.
+    await _reset_queue(redis_clients)
     svc = QueueService(RedisQueue(redis_clients.queue))
     total = 1000
     for i in range(total):

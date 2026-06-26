@@ -21,9 +21,10 @@ EXPECTED_TABLES = {
     "settings",
     "error_logs",
     "user_preferences",
+    "ad_events",
 }
 
-PARTITIONED_TABLES = {"downloads", "jobs", "error_logs"}
+PARTITIONED_TABLES = {"downloads", "jobs", "error_logs", "ad_events"}
 
 # (table, column, ON DELETE confdeltype) per Section 10.14. a=no action,
 # r=restrict, c=cascade, n=set null.
@@ -74,6 +75,8 @@ EXPECTED_INDEXES = {
     "ix_errors_type",
     "ix_errors_created_at",
     "ix_errors_correlation_id",
+    "ix_ad_events_ad",
+    "ix_ad_events_type_created",
 }
 
 
@@ -104,7 +107,7 @@ async def test_rolling_partition_window_seeded(db_session: AsyncSession) -> None
             "WHERE table_schema='public' AND table_name ~ '_y20[0-9]{2}m[0-9]{2}$'"
         )
     )
-    # 3 partitioned tables x 13-month window.
+    # 4 partitioned tables (downloads/jobs/error_logs/ad_events) x 13-month window.
     assert result.scalar_one() >= 39
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import func, select, update
 
@@ -46,6 +47,21 @@ class JobRepository(SqlAlchemyRepository[Job]):
             select(func.count()).select_from(Job).where(*conditions)
         )
         return int(result.scalar_one())
+
+    async def list_recent(
+        self, *, limit: int = 50, offset: int = 0, status: str | None = None
+    ) -> Sequence[Job]:
+        """Most-recent jobs first for the admin ``/v1/admin/jobs`` surface (Task 8.3).
+
+        Optionally filtered by ``status``. Ordered by ``created_at`` DESC (the partition
+        key), with ``id`` as a stable tiebreak.
+        """
+        stmt = select(Job)
+        if status is not None:
+            stmt = stmt.where(Job.status == status)
+        stmt = stmt.order_by(Job.created_at.desc(), Job.id).limit(limit).offset(offset)
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
 
     async def create(
         self,

@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner
 from bot.filters.role_filter import RoleFilter
 from core.logging import get_logger
+from core.timeparse import parse_iso_datetime
 from domain.entities.user import UserSnapshot
 from domain.enums import AudienceDimension, AudienceEffect, AudienceMode, UserRole
 from services.ad_service import AdService, AdStats, InvalidAdError
@@ -389,21 +390,33 @@ async def handle_ad_broadcast(
     if await ad_service_factory(session).get(ad_id) is None:
         await message.answer(f"No ad with id <code>{ad_id}</code>.")
         return
-    language, role = _parse_target_flags(rest)
+    language, role, at_raw = _parse_target_flags(rest)
+    scheduled_at = None
+    if at_raw is not None:
+        try:
+            scheduled_at = parse_iso_datetime(at_raw)
+        except ValueError:
+            await message.answer(
+                "Invalid <code>--at</code> time. Use ISO-8601, e.g. "
+                "<code>--at 2026-07-01T12:00:00Z</code>."
+            )
+            return
     try:
         broadcast = await broadcast_service_factory(session).create_from_ad(
             created_by_user_id=user.id,
             advertisement_id=ad_id,
             target_language=language,
             target_role=role,
+            scheduled_at=scheduled_at,
         )
     except InvalidBroadcastError as exc:
         await message.answer(f"Cannot broadcast: {escape(str(exc))}")
         return
     target = _describe_target(language, role)
+    when = f" — scheduled {scheduled_at:%Y-%m-%d %H:%M} UTC" if scheduled_at else ""
     await message.answer(
         f"📢 Ad #{ad_id} broadcast #{broadcast.id} queued to "
-        f"<b>{broadcast.expected_total}</b> users{target}."
+        f"<b>{broadcast.expected_total}</b> users{target}{when}."
     )
 
 
@@ -510,6 +523,7 @@ async def _segment_membership(
 async def handle_ad_click(
     callback: CallbackQuery,
     session: AsyncSession,
+    user: UserSnapshot,
     ad_service_factory: AdServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
@@ -518,7 +532,9 @@ async def handle_ad_click(
         await callback.answer()  # forged/garbled → ignore silently (Section 14.2)
         return
     await callback.answer()
-    url = await ad_service_factory(session).record_click(parsed.arg, parsed.button_id)
+    url = await ad_service_factory(session).record_click(
+        parsed.arg, parsed.button_id, user_row_id=user.id
+    )
     if url and isinstance(callback.message, Message):
         await callback.message.answer(f'🔗 <a href="{escape(url)}">Open the link</a>')
 
@@ -613,10 +629,11 @@ def _parse_audience_args(raw: str | None) -> tuple[str, list[tuple[str, str, str
     return mode, rules
 
 
-def _parse_target_flags(raw: str | None) -> tuple[str | None, str | None]:
-    """Parse ``[--lang xx] [--role xx]`` → (language, role)."""
+def _parse_target_flags(raw: str | None) -> tuple[str | None, str | None, str | None]:
+    """Parse ``[--lang xx] [--role xx] [--at <iso>]`` → (language, role, at)."""
     language: str | None = None
     role: str | None = None
+    at_raw: str | None = None
     tokens = (raw or "").split()
     index = 0
     while index < len(tokens):
@@ -626,9 +643,12 @@ def _parse_target_flags(raw: str | None) -> tuple[str | None, str | None]:
         elif tokens[index] == "--role" and index + 1 < len(tokens):
             role = tokens[index + 1]
             index += 2
+        elif tokens[index] == "--at" and index + 1 < len(tokens):
+            at_raw = tokens[index + 1]
+            index += 2
         else:
             index += 1
-    return language, role
+    return language, role, at_raw
 
 
 def _parse_name_and_id(raw: str | None) -> tuple[str | None, int | None]:

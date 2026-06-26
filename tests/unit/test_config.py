@@ -46,6 +46,21 @@ def test_secret_value_not_in_str() -> None:
     assert "change-me-local" not in str(settings)
 
 
+def test_admin_api_disabled_when_key_empty() -> None:
+    settings = _settings()
+    assert settings.admin_api_enabled is False
+    assert settings.admin_api_key.get_secret_value() == ""
+
+
+def test_admin_api_enabled_with_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ADMIN_API_KEY", "super-secret-admin-key")
+    settings = _settings()
+    assert settings.admin_api_enabled is True
+    assert settings.admin_api_key.get_secret_value() == "super-secret-admin-key"
+    # The key is a secret: it never appears in the safe representation (Section 14.3).
+    assert "super-secret-admin-key" not in repr(settings)
+
+
 def test_sentry_disabled_when_dsn_empty() -> None:
     assert _settings().sentry_enabled is False
 

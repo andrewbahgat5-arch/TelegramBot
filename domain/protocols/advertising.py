@@ -81,6 +81,24 @@ class AdClickSignerProtocol(Protocol):
         ...
 
 
+class AdEventRecorderProtocol(Protocol):
+    """Records per-event ad analytics **off** the delivery hot path (Sprint 9.5.9, D-052).
+
+    Both methods are **synchronous and non-blocking** by contract: they hand the event
+    off (e.g. schedule a background write) and return immediately, so an ``ad_events``
+    INSERT never adds latency to ad delivery. Recording is best-effort — the
+    ``advertisements`` / ``ad_buttons`` counters remain the source of truth (D-045).
+    """
+
+    def record_impression(
+        self, *, advertisement_id: int, user_id: int | None, placement: str | None
+    ) -> None: ...
+
+    def record_click(
+        self, *, advertisement_id: int, user_id: int | None, button_id: int | None
+    ) -> None: ...
+
+
 class AdShowProtocol(Protocol):
     async def maybe_show(
         self,

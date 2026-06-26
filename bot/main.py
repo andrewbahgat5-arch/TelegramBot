@@ -37,6 +37,7 @@ from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
+from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
@@ -145,6 +146,8 @@ async def main() -> None:
     engine = create_engine(settings)
     session_factory = create_session_factory(engine)
     redis_clients = create_redis_clients(settings)
+    # Process singleton: writes ad_events off the hot path on its own sessions (D-052).
+    ad_event_recorder = AdEventRecorder(session_factory)
 
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
@@ -241,6 +244,7 @@ async def main() -> None:
             signer=callback_signer,
             button_repo=AdButtonRepository(session),
             audience=make_audience_service(session),
+            event_recorder=ad_event_recorder,
         )
 
     dp = build_dispatcher(

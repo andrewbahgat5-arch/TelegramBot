@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from core.logging import get_logger
+from core.timeparse import parse_iso_datetime
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
@@ -170,20 +171,33 @@ async def handle_broadcast(
     user: UserSnapshot,
     broadcast_service_factory: BroadcastServiceFactory,
 ) -> None:
-    text, language, role = _parse_broadcast_args(command.args)
+    text, language, role, at_raw = _parse_broadcast_args(command.args)
+    scheduled_at = None
+    if at_raw is not None:
+        try:
+            scheduled_at = parse_iso_datetime(at_raw)
+        except ValueError:
+            await message.answer(
+                "Invalid <code>--at</code> time. Use ISO-8601, e.g. "
+                "<code>--at 2026-07-01T12:00:00Z</code>."
+            )
+            return
     try:
         broadcast = await broadcast_service_factory(session).create(
             created_by_user_id=user.id,
             message_text=text,
             target_language=language,
             target_role=role,
+            scheduled_at=scheduled_at,
         )
     except InvalidBroadcastError as exc:
         await message.answer(f"Cannot broadcast: {escape(str(exc))}")
         return
     target = _describe_target(language, role)
+    when = f" — scheduled {scheduled_at:%Y-%m-%d %H:%M} UTC" if scheduled_at else ""
     await message.answer(
-        f"📢 Broadcast #{broadcast.id} queued to <b>{broadcast.expected_total}</b> users{target}."
+        f"📢 Broadcast #{broadcast.id} queued to "
+        f"<b>{broadcast.expected_total}</b> users{target}{when}."
     )
 
 
@@ -244,31 +258,35 @@ def _parse_key_value(raw: str | None) -> tuple[str | None, str | None]:
     return parts[0], parts[1].strip()
 
 
-def _parse_broadcast_args(raw: str | None) -> tuple[str, str | None, str | None]:
-    """Split ``<text> [--lang xx] [--role xx]`` into (text, language, role).
+def _parse_broadcast_args(raw: str | None) -> tuple[str, str | None, str | None, str | None]:
+    """Split ``<text> [--lang xx] [--role xx] [--at <iso>]`` into (text, lang, role, at).
 
     Flags may appear anywhere; the remaining tokens form the message text. An empty
     or flags-only message yields an empty text, which ``BroadcastService`` rejects.
+    ``--at`` carries an ISO-8601 timestamp (validated by the caller).
     """
     if not raw:
-        return "", None, None
+        return "", None, None, None
     tokens = raw.split()
     language: str | None = None
     role: str | None = None
+    at_raw: str | None = None
     text_tokens: list[str] = []
     index = 0
     while index < len(tokens):
         word = tokens[index]
-        if word in ("--lang", "--role") and index + 1 < len(tokens):
+        if word in ("--lang", "--role", "--at") and index + 1 < len(tokens):
             if word == "--lang":
                 language = tokens[index + 1]
-            else:
+            elif word == "--role":
                 role = tokens[index + 1]
+            else:
+                at_raw = tokens[index + 1]
             index += 2
             continue
         text_tokens.append(word)
         index += 1
-    return " ".join(text_tokens), language, role
+    return " ".join(text_tokens), language, role, at_raw
 
 
 def _describe_target(language: str | None, role: str | None) -> str:

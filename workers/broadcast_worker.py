@@ -69,7 +69,9 @@ class BroadcastWorker:
         """Process at most one pending broadcast. Returns True if one was handled."""
         async with self._session_factory() as session:
             repo = self._build_broadcast_repo(session)
-            broadcast = await repo.get_next_pending()
+            # Due-poller (9.5.10): only picks up broadcasts whose scheduled_at is NULL or
+            # already due. Scheduled-but-not-yet-due rows are left for a later poll.
+            broadcast = await repo.get_next_pending(now=_now())
             if broadcast is None:
                 return False
             broadcast_id: int = broadcast.id
