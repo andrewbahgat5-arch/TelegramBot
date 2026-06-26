@@ -26,13 +26,19 @@ class _Row:
 
 
 class _FakeJobRepo:
-    def __init__(self, rows: list[_Row]) -> None:
+    def __init__(self, rows: list[_Row], *, active: int = 0) -> None:
         self.rows = rows
+        self.active = active
         self.calls: list[dict[str, Any]] = []
 
     async def list_recent(self, **kw: Any) -> list[_Row]:
         self.calls.append(kw)
         return self.rows
+
+    async def count_active_for_user(
+        self, user_id: int, *, within_seconds: int | None = None
+    ) -> int:
+        return self.active
 
 
 class _FakeErrorRepo:
@@ -43,6 +49,27 @@ class _FakeErrorRepo:
     async def list_recent(self, **kw: Any) -> list[_Row]:
         self.calls.append(kw)
         return self.rows
+
+
+class _FakeDownloadRepo:
+    def __init__(self, count: int = 0) -> None:
+        self.count = count
+
+    async def count_for_user(self, user_id: int) -> int:
+        return self.count
+
+
+def _admin(
+    *,
+    job_repo: Any = None,
+    error_repo: Any = None,
+    download_repo: Any = None,
+) -> AdminService:
+    return AdminService(
+        job_repo=job_repo or _FakeJobRepo([]),
+        error_repo=error_repo or _FakeErrorRepo([]),
+        download_repo=download_repo or _FakeDownloadRepo(),
+    )
 
 
 def _job_row() -> _Row:
@@ -64,7 +91,7 @@ def _job_row() -> _Row:
 
 async def test_list_jobs_maps_uuid_to_str_and_passes_filters() -> None:
     repo = _FakeJobRepo([_job_row()])
-    service = AdminService(job_repo=repo, error_repo=_FakeErrorRepo([]))
+    service = _admin(job_repo=repo)
 
     views = await service.list_jobs(limit=5, offset=2, status="completed")
 
@@ -89,7 +116,7 @@ async def test_browse_errors_stringifies_optional_uuids() -> None:
         )
     ]
     repo = _FakeErrorRepo(rows)
-    service = AdminService(job_repo=_FakeJobRepo([]), error_repo=repo)
+    service = _admin(error_repo=repo)
 
     views = await service.browse_errors(limit=10, error_type="provider_error")
 
@@ -98,3 +125,9 @@ async def test_browse_errors_stringifies_optional_uuids() -> None:
     assert view.job_id == str(job_id)
     assert view.user_id is None and view.correlation_id is None
     assert repo.calls == [{"limit": 10, "offset": 0, "error_type": "provider_error"}]
+
+
+async def test_count_user_downloads_and_active_jobs() -> None:
+    service = _admin(job_repo=_FakeJobRepo([], active=2), download_repo=_FakeDownloadRepo(count=37))
+    assert await service.count_user_downloads(7) == 37
+    assert await service.count_user_active_jobs(7) == 2

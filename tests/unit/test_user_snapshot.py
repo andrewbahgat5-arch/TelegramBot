@@ -22,6 +22,7 @@ def _row() -> FakeUser:
         first_name="Thomas",
         language="en",
         last_activity_at=datetime.datetime(2026, 6, 23, 12, 0, tzinfo=datetime.UTC),
+        created_at=datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.UTC),
     )
 
 
@@ -31,6 +32,7 @@ def test_from_row_maps_role_to_enum() -> None:
     assert snap.id == 7
     assert snap.telegram_id == 123456789
     assert snap.is_premium is True
+    assert snap.created_at == datetime.datetime(2026, 1, 1, 9, 0, tzinfo=datetime.UTC)
 
 
 def test_cache_round_trip_is_lossless() -> None:

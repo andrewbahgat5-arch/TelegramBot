@@ -98,6 +98,7 @@ class FakeUser:
     language: str | None = None
     last_activity_at: datetime.datetime | None = None
     updated_at: datetime.datetime | None = None
+    created_at: datetime.datetime | None = None
 
 
 class FakeUserRepo:

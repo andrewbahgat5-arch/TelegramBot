@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from infrastructure.database.models import Download
 from infrastructure.database.repositories.base import SqlAlchemyRepository
@@ -12,6 +12,13 @@ from infrastructure.database.repositories.base import SqlAlchemyRepository
 
 class DownloadRepository(SqlAlchemyRepository[Download]):
     model = Download
+
+    async def count_for_user(self, user_id: int) -> int:
+        """Total lifetime history rows for a user (admin User Info, Sprint 9.6)."""
+        result = await self.session.execute(
+            select(func.count()).select_from(Download).where(Download.user_id == user_id)
+        )
+        return int(result.scalar_one())
 
     async def list_for_user(
         self, user_id: int, *, limit: int = 10, offset: int = 0

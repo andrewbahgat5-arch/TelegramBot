@@ -23,6 +23,7 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
 from infrastructure.database.engine import create_engine
+from infrastructure.database.repositories.download import DownloadRepository
 from infrastructure.database.repositories.error_log import ErrorLogRepository
 from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.setting import SettingsRepository
@@ -80,7 +81,11 @@ async def main() -> None:  # pragma: no cover - process entry; logic covered by 
         )
 
     def make_admin_service(session: AsyncSession) -> AdminService:
-        return AdminService(job_repo=JobRepository(session), error_repo=ErrorLogRepository(session))
+        return AdminService(
+            job_repo=JobRepository(session),
+            error_repo=ErrorLogRepository(session),
+            download_repo=DownloadRepository(session),
+        )
 
     admin_router = None
     if settings.admin_api_enabled:

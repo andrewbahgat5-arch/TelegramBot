@@ -243,7 +243,11 @@ async def main() -> None:
         )
 
     def make_admin_service(session: AsyncSession) -> AdminService:
-        return AdminService(job_repo=JobRepository(session), error_repo=ErrorLogRepository(session))
+        return AdminService(
+            job_repo=JobRepository(session),
+            error_repo=ErrorLogRepository(session),
+            download_repo=DownloadRepository(session),
+        )
 
     def make_ad_service(session: AsyncSession) -> AdService:
         return AdService(

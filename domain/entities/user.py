@@ -40,6 +40,7 @@ class UserSnapshot:
     premium_expires_at: datetime.datetime | None = None
     ban_reason: str | None = None
     last_activity_at: datetime.datetime | None = None
+    created_at: datetime.datetime | None = None  # join date (admin User Info, Sprint 9.6)
 
     @classmethod
     def from_row(cls, row: Any) -> UserSnapshot:
@@ -59,6 +60,7 @@ class UserSnapshot:
             premium_expires_at=row.premium_expires_at,
             ban_reason=row.ban_reason,
             last_activity_at=row.last_activity_at,
+            created_at=getattr(row, "created_at", None),
         )
 
     def to_cache_dict(self) -> dict[str, Any]:
@@ -78,6 +80,7 @@ class UserSnapshot:
             "premium_expires_at": _iso_or_none(self.premium_expires_at),
             "ban_reason": self.ban_reason,
             "last_activity_at": _iso_or_none(self.last_activity_at),
+            "created_at": _iso_or_none(self.created_at),
         }
 
     @classmethod
@@ -100,6 +103,7 @@ class UserSnapshot:
             premium_expires_at=_dt_or_none(data["premium_expires_at"]),
             ban_reason=data["ban_reason"],
             last_activity_at=_dt_or_none(data["last_activity_at"]),
+            created_at=_dt_or_none(data.get("created_at")),
         )
 
 

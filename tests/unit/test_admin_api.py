@@ -109,6 +109,16 @@ class _FakeJobReadRepo:
         rows = [r for r in self._rows if status is None or r.status == status]
         return rows[offset : offset + limit]
 
+    async def count_active_for_user(
+        self, user_id: int, *, within_seconds: int | None = None
+    ) -> int:
+        return 0
+
+
+class _FakeDownloadReadRepo:
+    async def count_for_user(self, user_id: int) -> int:
+        return 0
+
 
 class _FakeErrorRow:
     def __init__(self, **kw: Any) -> None:
@@ -202,7 +212,9 @@ def _build_app(
         return SettingsService(store, FakeCache(), cache_ttl=60)
 
     def make_admin_service(_session: Any) -> AdminService:
-        return AdminService(job_repo=job_repo, error_repo=error_repo)
+        return AdminService(
+            job_repo=job_repo, error_repo=error_repo, download_repo=_FakeDownloadReadRepo()
+        )
 
     router = None
     if mounted:

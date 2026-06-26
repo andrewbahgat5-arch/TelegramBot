@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.handlers.admin_panel import (
     on_setting_value,
+    on_user_lookup,
     open_panel,
     open_settings,
     panel_navigate,
@@ -93,6 +94,9 @@ class _FakeSettings:
     async def get_view(self, key: str) -> SettingView | None:
         return SettingView(key="maintenance_mode", value="false", value_type="bool")
 
+    async def get(self, key: str) -> Any:
+        return 10  # a daily-limit value for the User Info view
+
 
 class _FakeAdmin:
     async def list_jobs(
@@ -104,6 +108,12 @@ class _FakeAdmin:
         self, *, limit: int = 50, offset: int = 0, error_type: str | None = None
     ) -> list[Any]:
         return []
+
+    async def count_user_downloads(self, user_id: int) -> int:
+        return 7
+
+    async def count_user_active_jobs(self, user_id: int) -> int:
+        return 1
 
 
 class _FakeAds:
@@ -123,14 +133,18 @@ def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
 
 
 async def _navigate(
-    callback: Any, panel: ParsedPanel, user: UserSnapshot, signer: CallbackSigner
+    callback: Any,
+    panel: ParsedPanel,
+    user: UserSnapshot,
+    signer: CallbackSigner,
+    state: Any = None,
 ) -> None:
     await panel_navigate(
         callback,
         panel,
         _session(),
         user,
-        _state(),
+        state or _state(),
         lambda s: _FakeUsers(),
         lambda s: _FakeSettings(),
         lambda s: _FakeAds(),
@@ -235,6 +249,9 @@ class _FakeSettingsRW:
         self.value = value
         return int(value)
 
+    async def get(self, key: str) -> Any:
+        return 10
+
 
 async def _write(
     callback: Any, panel: ParsedPanel, settings: _FakeSettingsRW, state: Any = None
@@ -247,6 +264,7 @@ async def _write(
         state or _state(),
         lambda s: _FakeUsersRW(),
         lambda s: settings,
+        lambda s: _FakeAdmin(),
         _signer(),
     )
 
@@ -352,6 +370,7 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         _state(),
         lambda s: users,
         lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
         _signer(),
     )
 
@@ -450,10 +469,83 @@ async def test_write_stub_acks_for_pending_section() -> None:
         _state(),
         lambda s: _FakeUsersRW(),
         lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
         _signer(),
     )
     callback.answer.assert_awaited_once()
     assert _call(callback.answer).args  # a toast message was supplied
+
+
+# --- guided User Info lookup (9.6.8) --------------------------------------
+async def test_user_info_arms_lookup_wizard() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "inf")
+    state = _state()
+    await _navigate(callback, ParsedPanel("u", "inf", None), _user(), signer, state)
+    state.set_state.assert_awaited_once()
+    assert "Telegram ID" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_user_lookup_resolves_to_extended_detail() -> None:
+    bot = AsyncMock()
+    state = _state({"chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "555"
+    await on_user_lookup(
+        message,
+        state,
+        bot,
+        _session(),
+        _user(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeSettings(),
+        _signer(),
+    )
+    state.clear.assert_awaited_once()
+    text = bot.edit_message_text.await_args.args[0]
+    assert "User ID" in text and "555" in text and "History entries: 7" in text
+
+
+async def test_user_lookup_non_numeric_keeps_state() -> None:
+    bot = AsyncMock()
+    state = _state({"chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "abc"
+    message.reply = AsyncMock()
+    await on_user_lookup(
+        message,
+        state,
+        bot,
+        _session(),
+        _user(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeSettings(),
+        _signer(),
+    )
+    message.reply.assert_awaited_once()
+    state.clear.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
+
+
+async def test_user_lookup_unknown_id_reports_not_found() -> None:
+    bot = AsyncMock()
+    state = _state({"chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "404"  # _FakeUsersRW only knows 555
+    await on_user_lookup(
+        message,
+        state,
+        bot,
+        _session(),
+        _user(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeSettings(),
+        _signer(),
+    )
+    assert "No user" in bot.edit_message_text.await_args.args[0]
 
 
 # --- guided "Enter Value" for settings (9.6.7) ----------------------------

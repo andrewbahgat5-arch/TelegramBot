@@ -30,6 +30,10 @@ class JobReadRepository(Protocol):
         self, *, limit: int = 50, offset: int = 0, status: str | None = None
     ) -> Sequence[Any]: ...
 
+    async def count_active_for_user(
+        self, user_id: int, *, within_seconds: int | None = None
+    ) -> int: ...
+
 
 class ErrorReadRepository(Protocol):
     """The slice of the error-log repository the admin browse needs."""
@@ -37,6 +41,12 @@ class ErrorReadRepository(Protocol):
     async def list_recent(
         self, *, limit: int = 50, offset: int = 0, error_type: str | None = None
     ) -> Sequence[Any]: ...
+
+
+class DownloadReadRepository(Protocol):
+    """The slice of the downloads repository the admin User Info view needs."""
+
+    async def count_for_user(self, user_id: int) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,9 +81,16 @@ class ErrorLogView:
 
 
 class AdminService:
-    def __init__(self, *, job_repo: JobReadRepository, error_repo: ErrorReadRepository) -> None:
+    def __init__(
+        self,
+        *,
+        job_repo: JobReadRepository,
+        error_repo: ErrorReadRepository,
+        download_repo: DownloadReadRepository,
+    ) -> None:
         self._jobs = job_repo
         self._errors = error_repo
+        self._downloads = download_repo
 
     async def list_jobs(
         self, *, limit: int = 50, offset: int = 0, status: str | None = None
@@ -88,6 +105,14 @@ class AdminService:
         """A page of recent error logs (newest first), optionally filtered by type."""
         rows = await self._errors.list_recent(limit=limit, offset=offset, error_type=error_type)
         return [_error_view(row) for row in rows]
+
+    async def count_user_downloads(self, user_id: int) -> int:
+        """Lifetime download-history count for one user (admin User Info, Sprint 9.6)."""
+        return await self._downloads.count_for_user(user_id)
+
+    async def count_user_active_jobs(self, user_id: int) -> int:
+        """In-flight job count for one user (admin User Info, Sprint 9.6)."""
+        return await self._jobs.count_active_for_user(user_id)
 
 
 def _job_view(row: Any) -> JobView:

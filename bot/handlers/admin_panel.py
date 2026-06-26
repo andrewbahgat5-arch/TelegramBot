@@ -21,6 +21,7 @@ moderators in the keyboard layer):
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Callable
 from html import escape
 
@@ -106,6 +107,10 @@ async def panel_navigate(
     callback_signer: CallbackSigner,
 ) -> None:
     await state.clear()  # navigating away cancels any pending guided input
+    # "User Info" with no target → start the guided id-lookup wizard (9.6.8).
+    if panel.section == "u" and panel.action == "inf" and panel.arg is None:
+        await _arm_user_lookup(callback, state, callback_signer)
+        return
     # Owner-only sections are hidden from moderators; guard the callback too.
     if panel.section in _OWNER_ONLY_SECTIONS and user.role is not UserRole.OWNER:
         await callback.answer()
@@ -137,6 +142,7 @@ async def panel_write(
     state: FSMContext,
     user_service_factory: UserServiceFactory,
     settings_service_factory: SettingsServiceFactory,
+    admin_service_factory: AdminServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
     await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
@@ -146,7 +152,15 @@ async def panel_write(
         )
         return
     if panel.section == "u":  # Users management (9.6.6)
-        await _users_write(callback, panel, user_service_factory(session), user, callback_signer)
+        await _users_write(
+            callback,
+            panel,
+            user_service_factory(session),
+            admin_service_factory(session),
+            settings_service_factory(session),
+            user,
+            callback_signer,
+        )
         return
     # ads / broadcast / wizards land in 9.6.9 onward.
     await callback.answer("This action isn't available yet.", show_alert=False)
@@ -256,6 +270,8 @@ async def _users_write(
     callback: CallbackQuery,
     panel: ParsedPanel,
     users: UserService,
+    admin: AdminService,
+    settings: SettingsService,
     actor: UserSnapshot,
     signer: CallbackSigner,
 ) -> None:
@@ -285,11 +301,11 @@ async def _users_write(
     if result is None:
         await callback.answer("User not found.", show_alert=True)
         return
-    snap, toast = result
-    if isinstance(callback.message, Message):
-        await _safe_edit(
-            callback.message, _user_detail_text(snap), build_user_detail(snap, actor.role, signer)
-        )
+    _, toast = result
+    view = await _user_detail_view(users, admin, settings, tid, actor.role, signer)
+    if view is not None and isinstance(callback.message, Message):
+        text, markup = view
+        await _safe_edit(callback.message, text, markup)
     await callback.answer(toast)
 
 
@@ -318,40 +334,88 @@ async def _apply_user_action(
     return None
 
 
-async def _user_detail(
-    users: UserService, tid: int | None, role: UserRole, signer: CallbackSigner
-) -> tuple[str, InlineKeyboardMarkup]:
-    if tid is None:
-        return "👥 <b>Users</b>\nOpen 📋 List and tap a user to manage them.", build_section_menu(
-            "u", role, signer
-        )
+async def _user_detail_view(
+    users: UserService,
+    admin: AdminService,
+    settings: SettingsService,
+    tid: int,
+    role: UserRole,
+    signer: CallbackSigner,
+) -> tuple[str, InlineKeyboardMarkup] | None:
+    """Build the extended User Info screen, or None if no such user."""
     snap = await users.find(tid)
     if snap is None:
-        return f"No user with id <code>{tid}</code>.", build_section_menu("u", role, signer)
-    return _user_detail_text(snap), build_user_detail(snap, role, signer)
+        return None
+    history_count = await admin.count_user_downloads(snap.id)
+    active_jobs = await admin.count_user_active_jobs(snap.id)
+    daily_limit = await settings.get(
+        "premium_daily_limit" if snap.is_premium else "free_daily_limit"
+    )
+    text = _user_detail_text(
+        snap, history_count=history_count, active_jobs=active_jobs, daily_limit=daily_limit
+    )
+    return text, build_user_detail(snap, role, signer)
 
 
-def _user_detail_text(snap: UserSnapshot) -> str:
-    flags = []
-    if snap.is_banned:
-        flags.append("🚫 banned" + (f" — {escape(snap.ban_reason)}" if snap.ban_reason else ""))
-    if snap.is_premium:
-        flags.append("⭐ premium")
-    status = ", ".join(flags) if flags else "active"
+def _user_detail_text(
+    snap: UserSnapshot, *, history_count: int, active_jobs: int, daily_limit: object
+) -> str:
     name = escape(snap.first_name) if snap.first_name else "—"
     username = f"@{escape(snap.username)}" if snap.username else "—"
+    if snap.is_banned:
+        status = "🚫 banned" + (f" — {escape(snap.ban_reason)}" if snap.ban_reason else "")
+    else:
+        status = "✅ active"
+    premium = "⭐ yes" if snap.is_premium else "no"
+    if snap.is_premium and snap.premium_expires_at is not None:
+        premium += f" (until {snap.premium_expires_at:%Y-%m-%d})"
+    active = "yes" if active_jobs > 0 else "none"
     return (
-        f"👤 <b>{name}</b> (<code>{snap.telegram_id}</code>)\n"
+        f"👤 <b>{name}</b>\n"
+        f"User ID: <code>{snap.telegram_id}</code>\n"
         f"Username: {username}\n"
-        f"Role: {snap.role.value} · {status}\n"
-        f"Downloads: {snap.total_downloads} (today {snap.daily_download_count})"
+        f"Language: {snap.language or '—'}\n"
+        f"Role: {snap.role.value}\n"
+        f"Status: {status}\n"
+        f"Premium: {premium}\n"
+        f"Joined: {_fmt_dt(snap.created_at)}\n"
+        f"Last activity: {_fmt_dt(snap.last_activity_at)}\n"
+        f"Total downloads: {snap.total_downloads}\n"
+        f"Today: {snap.daily_download_count} / limit {daily_limit}\n"
+        f"History entries: {history_count}\n"
+        f"Active job: {active}"
     )
+
+
+def _fmt_dt(value: datetime.datetime | None) -> str:
+    return value.strftime("%Y-%m-%d %H:%M") if value is not None else "—"
 
 
 def _users_list_text(rows: list[UserSnapshot]) -> str:
     if not rows:
         return "👥 <b>Users</b>\n\nNo users yet."
     return f"👥 <b>Users</b> (first {len(rows)})\nTap a user to manage them."
+
+
+def _user_lookup_text() -> str:
+    return "🔍 <b>User Info</b>\n\nSend the user's Telegram ID in chat."
+
+
+async def _arm_user_lookup(
+    callback: CallbackQuery, state: FSMContext, signer: CallbackSigner
+) -> None:
+    """Prompt for a Telegram id and arm the user_lookup wizard."""
+    if isinstance(callback.message, Message):
+        await state.set_state(PanelStates.user_lookup)
+        await state.update_data(
+            chat_id=callback.message.chat.id, message_id=callback.message.message_id
+        )
+        await _safe_edit(
+            callback.message,
+            _user_lookup_text(),
+            build_input_prompt(signer, back=("u", "op", None), cancel=("u", "op", None)),
+        )
+    await callback.answer()
 
 
 # --- forged / unauthorized fallback ---------------------------------------
@@ -402,6 +466,48 @@ async def on_setting_value(
     )
 
 
+# --- guided input: a typed Telegram id for User Info (9.6.8) --------------
+@router.message(PanelStates.user_lookup, StaffFilter)
+async def on_user_lookup(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: UserSnapshot,
+    user_service_factory: UserServiceFactory,
+    admin_service_factory: AdminServiceFactory,
+    settings_service_factory: SettingsServiceFactory,
+    callback_signer: CallbackSigner,
+) -> None:
+    """Capture the typed Telegram id and edit the panel to that user's extended detail."""
+    data = await state.get_data()
+    chat_id, message_id = data.get("chat_id"), data.get("message_id")
+    if chat_id is None or message_id is None:
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    try:
+        tid = int(raw)
+    except ValueError:
+        await message.reply("Please send a numeric Telegram ID, or tap ❌ Cancel.")
+        return  # keep the state for the next attempt
+    await state.clear()
+    view = await _user_detail_view(
+        user_service_factory(session),
+        admin_service_factory(session),
+        settings_service_factory(session),
+        tid,
+        user.role,
+        callback_signer,
+    )
+    if view is None:
+        text: str = f"No user with id <code>{tid}</code>."
+        markup = build_section_menu("u", user.role, callback_signer)
+    else:
+        text, markup = view
+    await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+
+
 # --- rendering ------------------------------------------------------------
 async def _render(
     panel: ParsedPanel,
@@ -429,8 +535,15 @@ async def _render(
         )
     if section == "u":
         users = user_factory(session)
-        if action == "inf":
-            return await _user_detail(users, panel.arg, role, signer)
+        if action == "inf" and panel.arg is not None:
+            view = await _user_detail_view(
+                users, admin_factory(session), settings_factory(session), panel.arg, role, signer
+            )
+            if view is not None:
+                return view
+            return f"No user with id <code>{panel.arg}</code>.", build_section_menu(
+                "u", role, signer
+            )
         if action == "ls":
             rows = await users.list_users(limit=_LIST_LIMIT)
             return _users_list_text(rows), build_user_list(rows, signer)
