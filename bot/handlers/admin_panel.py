@@ -33,14 +33,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
-from bot.keyboards.admin_panel import build_main_menu, build_section_menu, build_settings_menu
-from bot.panel.registry import SECTIONS, SETTING_FIELDS
+from bot.keyboards.admin_panel import (
+    build_main_menu,
+    build_section_menu,
+    build_setting_stepper,
+    build_settings_menu,
+)
+from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.admin_service import AdminService
 from services.queue_service import QueueService
-from services.settings_service import SettingsService
+from services.settings_service import (
+    InvalidSettingValueError,
+    SettingNotFoundError,
+    SettingsService,
+)
 from services.user_service import UserService
 
 router = Router(name="admin_panel")
@@ -110,11 +119,89 @@ async def panel_navigate(
     await callback.answer()
 
 
-# --- write actions (stubbed until later 9.6 tasks) ------------------------
+# --- write actions --------------------------------------------------------
 @router.callback_query(PanelFilter(mutating=True), OwnerFilter)
-async def panel_write(callback: CallbackQuery, panel: ParsedPanel) -> None:
-    # Settings edits land in 9.6.5; users/ads/broadcast/wizards in 9.6.6 onward.
+async def panel_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    session: AsyncSession,
+    user: UserSnapshot,
+    settings_service_factory: SettingsServiceFactory,
+    callback_signer: CallbackSigner,
+) -> None:
+    if panel.section == "s":  # Settings stepper (9.6.5)
+        await _settings_write(
+            callback, panel, settings_service_factory(session), user, callback_signer
+        )
+        return
+    # users / ads / broadcast / wizards land in 9.6.6 onward.
     await callback.answer("This action isn't available yet.", show_alert=False)
+
+
+async def _settings_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    settings: SettingsService,
+    user: UserSnapshot,
+    signer: CallbackSigner,
+) -> None:
+    """Open / step / save a numeric setting via the stepper (LOCKED §13.4 keys only)."""
+    field = setting_field(panel.arg) if panel.arg is not None else None
+    if field is None:
+        await callback.answer()
+        return
+    if panel.action == "sv":  # persist the candidate value
+        value = _clamp(field, panel.value if panel.value is not None else field.min_value)
+        try:
+            await settings.set_validated(field.key, str(value), updated_by=user.id)
+        except (SettingNotFoundError, InvalidSettingValueError) as exc:
+            await callback.answer(f"Couldn't save: {exc}", show_alert=True)
+            return
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                await _settings_text(settings),
+                build_settings_menu(user.role, signer),
+            )
+        await callback.answer(f"Saved · {field.label} = {value} ✅")
+        return
+    # "e" opens the stepper at the live value; "-"/"+" carry the candidate already
+    # clamped by the keyboard builder.
+    if panel.action == "e":
+        value = await _current_int(settings, field)
+    else:  # "-" or "+"
+        value = panel.value if panel.value is not None else await _current_int(settings, field)
+    value = _clamp(field, value)
+    if isinstance(callback.message, Message):
+        await _safe_edit(
+            callback.message,
+            _stepper_text(field, value),
+            build_setting_stepper(field, value, signer),
+        )
+    await callback.answer()
+
+
+def _clamp(field: SettingField, value: int) -> int:
+    return max(field.min_value, min(field.max_value, value))
+
+
+async def _current_int(settings: SettingsService, field: SettingField) -> int:
+    view = await settings.get_view(field.key)
+    if view is None:
+        return field.min_value
+    try:
+        return int(view.value)
+    except ValueError:
+        return field.min_value
+
+
+def _stepper_text(field: SettingField, value: int) -> str:
+    return (
+        f"⚙️ <b>{escape(field.label)}</b>\n\n"
+        f"Current value: <b>{value}</b>\n"
+        f"Allowed: {field.min_value} to {field.max_value} (step {field.step})\n\n"
+        "Adjust with the buttons, then 💾 Save."
+    )
 
 
 # --- forged / unauthorized fallback ---------------------------------------
@@ -141,6 +228,8 @@ async def _render(
     if section == "mn":
         return _MAIN_TEXT, build_main_menu(role, signer)
     if section == "s":
+        if action == "inf":
+            return _settings_info_text(panel.arg), build_settings_menu(role, signer)
         return await _settings_text(settings_factory(session)), build_settings_menu(role, signer)
     if section == "t":
         return await _stats_text(user_factory(session), queue), build_section_menu(
@@ -243,6 +332,24 @@ async def _settings_text(settings: SettingsService) -> str:
     for field in SETTING_FIELDS:
         lines.append(f"• {field.label}: <b>{escape(current.get(field.key, '—'))}</b>")
     return "\n".join(lines)
+
+
+def _settings_info_text(index: int | None) -> str:
+    """Read-only info for the Cache / Languages submenu items (no LOCKED key to edit)."""
+    if index == 0:
+        return (
+            "🗃 <b>Cache</b>\n\n"
+            "Recently fetched files and metadata are cached in Redis to skip re-downloads. "
+            "There is no tunable cache key in the panel — TTLs are configured via the "
+            "<code>CACHE_*</code> environment settings."
+        )
+    if index == 1:
+        return (
+            "🌐 <b>Languages</b>\n\n"
+            "The UI language follows each user's Telegram client. There is no editable "
+            "language setting key; translations ship with the bot."
+        )
+    return "📋 <b>Info</b>\n\nNothing to show."
 
 
 async def _jobs_text(

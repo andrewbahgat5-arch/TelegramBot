@@ -18,7 +18,7 @@ from bot.handlers.admin_panel import (
 )
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
-from services.settings_service import SettingView
+from services.settings_service import InvalidSettingValueError, SettingView
 from services.user_service import UserStats
 
 
@@ -195,10 +195,93 @@ async def test_owner_sees_broadcast_section() -> None:
     assert "Broadcast" in callback.message.edit_text.await_args.args[0]
 
 
-# --- write stub -----------------------------------------------------------
+# --- settings stepper write flow (9.6.5) ----------------------------------
+class _FakeSettingsRW:
+    def __init__(self, value: str = "3") -> None:
+        self.value = value
+        self.saved: list[tuple[str, str, int | None]] = []
+        self.raise_on_save = False
+
+    async def get_view(self, key: str) -> SettingView:
+        return SettingView(key=key, value=self.value, value_type="int")
+
+    async def list_all(self) -> list[SettingView]:
+        return [SettingView(key="worker_count", value=self.value, value_type="int")]
+
+    async def set_validated(self, key: str, value: str, *, updated_by: int | None = None) -> int:
+        if self.raise_on_save:
+            raise InvalidSettingValueError("bad value")
+        self.saved.append((key, value, updated_by))
+        self.value = value
+        return int(value)
+
+
+async def _write(callback: Any, panel: ParsedPanel, settings: _FakeSettingsRW) -> None:
+    await panel_write(callback, panel, _session(), _user(), lambda s: settings, _signer())
+
+
+async def test_stepper_opens_at_current_value() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "e")
+    await _write(callback, ParsedPanel("s", "e", 0), _FakeSettingsRW(value="3"))
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Workers" in text and "Current value: <b>3</b>" in text
+
+
+async def test_stepper_increment_rerenders_candidate() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "+")
+    await _write(callback, ParsedPanel("s", "+", 0, 4), _FakeSettingsRW())
+    assert "Current value: <b>4</b>" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_stepper_save_persists_via_set_validated() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "sv")
+    settings = _FakeSettingsRW()
+    await _write(callback, ParsedPanel("s", "sv", 0, 7), settings)
+    assert settings.saved == [("worker_count", "7", 1)]  # _user().id == 1
+    assert "Saved" in _call(callback.answer).args[0]
+    assert "Settings" in callback.message.edit_text.await_args.args[0]  # back to the list
+
+
+async def test_stepper_save_clamps_out_of_range_value() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "sv")
+    settings = _FakeSettingsRW()
+    await _write(callback, ParsedPanel("s", "sv", 0, 999), settings)  # field 0 max is 32
+    assert settings.saved == [("worker_count", "32", 1)]
+
+
+async def test_stepper_save_reports_validation_error() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "sv")
+    settings = _FakeSettingsRW()
+    settings.raise_on_save = True
+    await _write(callback, ParsedPanel("s", "sv", 0, 5), settings)
+    assert settings.saved == []
+    call = _call(callback.answer)
+    assert "Couldn't save" in call.args[0] and call.kwargs.get("show_alert") is True
+
+
+async def test_settings_info_screen_renders() -> None:
+    signer = _signer()
+    callback = _callback(signer, "s", "inf")
+    await _navigate(callback, ParsedPanel("s", "inf", 0), _user(), signer)
+    assert "Cache" in callback.message.edit_text.await_args.args[0]
+
+
+# --- write stub (non-settings sections still pending) ---------------------
 async def test_write_stub_acks_with_toast() -> None:
     callback: Any = AsyncMock(spec=CallbackQuery)
     callback.answer = AsyncMock()
-    await panel_write(callback, ParsedPanel("s", "sv", 0, 5))
+    await panel_write(
+        callback,
+        ParsedPanel("u", "ban", 5),
+        _session(),
+        _user(),
+        lambda s: _FakeSettingsRW(),
+        _signer(),
+    )
     callback.answer.assert_awaited_once()
     assert _call(callback.answer).args  # a toast message was supplied

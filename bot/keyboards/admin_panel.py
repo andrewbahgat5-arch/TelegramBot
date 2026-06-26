@@ -32,6 +32,7 @@ from bot.callbacks.factory import CallbackSigner
 from bot.panel.registry import (
     SECTIONS,
     SETTING_FIELDS,
+    SETTINGS_INFO,
     SUBMENUS,
     SettingField,
     is_write_action,
@@ -104,12 +105,14 @@ def build_section_menu(
 def build_settings_menu(role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
     """Settings list. Owner gets one edit button per stepper field; moderators get none.
 
-    Current values are rendered into the message body by the handler (read-only view);
-    these buttons are the (owner-only) edit affordances.
+    Current values are rendered into the message body by the handler (read-only view).
+    Owner gets a stepper edit button per numeric field (write); the Cache / Languages
+    info screens are read affordances shown to all staff.
     """
     buttons: list[InlineKeyboardButton] = []
     if role is UserRole.OWNER:
-        buttons = [_btn(signer, field.label, "s", "e", field.index) for field in SETTING_FIELDS]
+        buttons += [_btn(signer, field.label, "s", "e", field.index) for field in SETTING_FIELDS]
+    buttons += [_btn(signer, item.label, "s", "inf", item.index) for item in SETTINGS_INFO]
     rows = _chunk(buttons)
     rows.append(nav_row(signer, back=("mn", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)

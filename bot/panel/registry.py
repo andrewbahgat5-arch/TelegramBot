@@ -180,3 +180,20 @@ def setting_field(index: int) -> SettingField | None:
     if 0 <= index < len(SETTING_FIELDS):
         return SETTING_FIELDS[index]
     return None
+
+
+# --- Settings info screens ------------------------------------------------
+# Read-only screens for Owner-spec submenu items that have no LOCKED settings key
+# (so we never invent one). Rendered by the read handler, viewable by all staff.
+
+
+@dataclass(frozen=True, slots=True)
+class InfoItem:
+    index: int
+    label: str
+
+
+SETTINGS_INFO: tuple[InfoItem, ...] = (
+    InfoItem(0, "🗃 Cache"),
+    InfoItem(1, "🌐 Languages"),
+)
