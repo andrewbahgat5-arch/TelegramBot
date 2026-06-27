@@ -174,7 +174,9 @@ async def handle_broadcast(
     try:
         broadcast = await broadcast_service_factory(session).create(
             created_by_user_id=user.id,
-            message_text=text,
+            # The worker delivers broadcasts with HTML parse mode (to preserve wizard-
+            # composed formatting), so escape the raw command text to render verbatim.
+            message_text=escape(text),
             target_language=language,
             target_role=role,
             scheduled_at=scheduled_at,

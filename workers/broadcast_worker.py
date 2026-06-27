@@ -187,8 +187,13 @@ class BroadcastWorker:
         _log.info("broadcast_completed", broadcast_id=broadcast_id)
 
     async def _deliver_one(self, telegram_id: int, text: str, plan: AdBroadcastPlan | None) -> None:
-        """Deliver a plain-text broadcast or, when linked, copy the ad (Sprint 9.5)."""
+        """Deliver a broadcast or, when linked, copy the ad (Sprint 9.5).
+
+        ``message_text`` is stored HTML-safe at creation (wizard content as Telegram HTML,
+        command text escaped), so it is delivered with HTML parse mode to preserve rich
+        formatting (bold/italic/underline/strikethrough/spoiler/code/quote/link).
+        """
         if plan is not None and self._ad_sender is not None:
             await deliver_plan(self._ad_sender, plan, telegram_id)
         else:
-            await self._sender.send_message(telegram_id, text)
+            await self._sender.send_message(telegram_id, text, parse_mode="HTML")

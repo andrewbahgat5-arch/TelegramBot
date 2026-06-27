@@ -215,6 +215,26 @@ async def test_broadcast_queues_and_reports_count() -> None:
     assert broadcasts.rows[0].target_language == "en"
 
 
+async def test_broadcast_escapes_html_for_safe_delivery() -> None:
+    # The worker sends broadcasts with HTML parse mode, so raw command text with HTML
+    # metacharacters must be escaped at creation to render verbatim (not break parsing).
+    users = FakeUserRepo()
+    users.by_tid[1] = FakeUser(id=1, telegram_id=1, language="en")
+    broadcasts = FakeBroadcastRepo()
+    service = BroadcastService(broadcast_repo=broadcasts, user_repo=users)
+    message = _message()
+
+    await handle_broadcast(
+        message,
+        CommandObject(args="5 < 10 & rising"),
+        _session(),
+        _owner(),
+        lambda s: service,
+    )
+
+    assert broadcasts.rows[0].message_text == "5 &lt; 10 &amp; rising"
+
+
 async def test_broadcast_empty_text_is_rejected() -> None:
     service = BroadcastService(broadcast_repo=FakeBroadcastRepo(), user_repo=FakeUserRepo())
     message = _message()

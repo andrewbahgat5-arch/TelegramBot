@@ -60,8 +60,13 @@ class FileSenderProtocol(Protocol):
 
 
 class MessageSenderProtocol(Protocol):
-    async def send_message(self, chat_id: int, text: str) -> int:
-        """Send ``text`` to ``chat_id``; return the new message id."""
+    async def send_message(self, chat_id: int, text: str, *, parse_mode: str | None = None) -> int:
+        """Send ``text`` to ``chat_id``; return the new message id.
+
+        ``parse_mode`` is optional and defaults to plain text (``None``) so existing
+        callers (e.g. download-progress notifications) are unchanged; the broadcast
+        worker passes ``"HTML"`` to render formatted content.
+        """
         ...
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:

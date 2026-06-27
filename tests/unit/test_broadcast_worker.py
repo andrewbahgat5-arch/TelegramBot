@@ -33,12 +33,14 @@ class _Sender:
 
     def __init__(self, fail_for: Iterable[int] = ()) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.parse_modes: list[str | None] = []
         self._fail_for = set(fail_for)
 
-    async def send_message(self, chat_id: int, text: str) -> int:
+    async def send_message(self, chat_id: int, text: str, *, parse_mode: str | None = None) -> int:
         if chat_id in self._fail_for:
             raise RuntimeError("bot was blocked by the user")
         self.sent.append((chat_id, text))
+        self.parse_modes.append(parse_mode)
         return 1
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
@@ -88,6 +90,8 @@ async def test_run_once_fans_out_to_all_in_chunks() -> None:
 
     assert handled is True
     assert sorted(chat for chat, _ in sender.sent) == [101, 102, 103]  # banned excluded
+    # Broadcasts deliver with HTML parse mode so stored rich formatting renders.
+    assert sender.parse_modes == ["HTML", "HTML", "HTML"]
     assert row.status == "completed" and row.completed_at is not None
     assert row.total_sent == 3 and row.total_failed == 0
 
