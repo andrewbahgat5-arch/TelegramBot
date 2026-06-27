@@ -20,3 +20,14 @@ def register_profile(cls: type[UserProfile]) -> type[UserProfile]:
 
 
 __all__ = ["PROFILE_REGISTRY", "UserProfile", "register_profile"]
+
+# Import the concrete profiles so they self-register on package import. Placed at
+# the bottom to avoid a circular import (they import register_profile from here).
+# `Premium` is deliberately NOT imported here — it stays out of the registry until
+# the V2 premium tier exists.
+from tests.simulation.users import (  # noqa: E402, F401
+    abuse,
+    active,
+    casual,
+    heavy,
+)
