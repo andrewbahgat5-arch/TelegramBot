@@ -24,6 +24,11 @@ class Broadcast(Base):
     advertisement_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("advertisements.id", ondelete="SET NULL")
     )
+    # Unified audience engine (Sprint 9.6, D-055): when set, the broadcast audience is the
+    # shared expression; NULL = legacy target_role/target_language (dual-read window).
+    audience_expression_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("audience_expressions.id", ondelete="SET NULL")
+    )
     message_text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_total: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     total_sent: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

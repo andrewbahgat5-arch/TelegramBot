@@ -40,6 +40,11 @@ class Advertisement(Base):
     storage_message_id: Mapped[int | None] = mapped_column(BigInteger)
     parse_mode: Mapped[str | None] = mapped_column(String(10))
     audience_mode: Mapped[str] = mapped_column(String(10), nullable=False, server_default="all")
+    # Unified audience engine (Sprint 9.6, D-055): when set, targeting is read from this
+    # shared expression; NULL = legacy ad_audience_rules / target_role (dual-read window).
+    audience_expression_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("audience_expressions.id", ondelete="SET NULL")
+    )
     show_every_n_downloads: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
