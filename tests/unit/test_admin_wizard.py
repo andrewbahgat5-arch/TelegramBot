@@ -319,6 +319,31 @@ async def test_save_ad_creates_with_placements_rules_and_buttons() -> None:
     assert "created" in cb.answer.await_args.args[0]
 
 
+async def test_save_ad_fields_mode_persists_html_parse_mode() -> None:
+    # Content is captured as Telegram HTML, so a fields-mode ad must be saved with HTML
+    # parse mode or the formatting renders as literal tags (rich-text Bug-fix).
+    fsm, cb = _FSM(), _callback()
+    _seed(
+        fsm,
+        WizardState(
+            kind="ad",
+            step=STEP_PREVIEW,
+            placements=["home"],
+            content_mode="fields",
+            content_text="<b>Sale</b> <i>today</i>",
+            internal_name="Camp",
+        ),
+    )
+    ads = _FakeAds()
+    await _dispatch(
+        cb, fsm, ParsedPanel("w", "sv"), ads=ads, casts=_FakeBroadcasts(), aud=_FakeAudience()
+    )
+    assert ads.created is not None
+    assert ads.created["fields"]["delivery"] == "fields"
+    assert ads.created["fields"]["parse_mode"] == "HTML"
+    assert ads.created["fields"]["text"] == "<b>Sale</b> <i>today</i>"
+
+
 async def test_save_broadcast_uses_unified_engine() -> None:
     fsm, cb = _FSM(), _callback()
     _seed(

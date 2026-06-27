@@ -571,6 +571,10 @@ def _ad_fields(ws: WizardState) -> dict[str, str]:
         fields["delivery"] = "fields"
         fields["type"] = "text"
         fields["text"] = ws.content_text or ""
+        # Content is captured as Telegram HTML (entities → tags in ``on_content``), so it
+        # must be delivered with HTML parse mode or the tags render as literal text. This
+        # preserves bold/italic/underline/strikethrough/spoiler/code/quote/link formatting.
+        fields["parse_mode"] = "HTML"
     return fields
 
 
