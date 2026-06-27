@@ -324,6 +324,8 @@ class AdRepositoryProtocol(Repository[T], Protocol[T]):
         parse_mode: str | None = None,
         audience_mode: str = "all",
         scheduled_at: datetime.datetime | None = None,
+        internal_name: str | None = None,
+        internal_notes: str | None = None,
     ) -> T:
         """Insert an ``advertisements`` row (10.10 + Sprint 9.5). ORM stays in infra.
 
@@ -345,7 +347,19 @@ class AdRepositoryProtocol(Repository[T], Protocol[T]):
         ...
 
     async def list_active_for_placement(self, placement: str) -> Sequence[T]:
-        """Active ads for a placement, ranked priority DESC, id ASC (Sprint 9.5, D-044)."""
+        """Active ads for a placement, ranked priority DESC, id ASC (Sprint 9.5, D-044).
+
+        Multi-placement dual-read (Sprint 9.6, D-056): matches an ``ad_placements`` row or,
+        for legacy ads with none, the scalar ``placement`` column.
+        """
+        ...
+
+    async def list_placements(self, ad_id: int) -> list[str]:
+        """The placements an ad occupies (Sprint 9.6, D-056)."""
+        ...
+
+    async def set_placements(self, ad_id: int, placements: Sequence[str]) -> None:
+        """Replace an ad's placement set (Sprint 9.6, D-056)."""
         ...
 
 

@@ -1086,6 +1086,8 @@ class FakeAdRow:
     parse_mode: str | None = None
     audience_mode: str = "all"
     scheduled_at: datetime.datetime | None = None
+    internal_name: str | None = None
+    internal_notes: str | None = None
 
 
 class FakeAdRepo:
@@ -1094,6 +1096,7 @@ class FakeAdRepo:
     def __init__(self) -> None:
         self.by_id: dict[int, FakeAdRow] = {}
         self._next_id = 1
+        self.placements: dict[int, list[str]] = {}  # ad_id -> placement rows (D-056)
 
     async def add(self, entity: FakeAdRow) -> FakeAdRow:
         self.by_id[entity.id] = entity
@@ -1120,8 +1123,21 @@ class FakeAdRepo:
         return self._ranked(matching)
 
     async def list_active_for_placement(self, placement: str) -> Sequence[FakeAdRow]:
-        matching = [a for a in self.by_id.values() if a.is_active and a.placement == placement]
+        # Dual-read (D-056): an ad's placement rows win; legacy ads fall back to the column.
+        matching = []
+        for a in self.by_id.values():
+            if not a.is_active:
+                continue
+            links = self.placements.get(a.id)
+            if (links and placement in links) or (not links and a.placement == placement):
+                matching.append(a)
         return self._ranked(matching)
+
+    async def list_placements(self, ad_id: int) -> list[str]:
+        return sorted(self.placements.get(ad_id, []))
+
+    async def set_placements(self, ad_id: int, placements: Sequence[str]) -> None:
+        self.placements[ad_id] = list(dict.fromkeys(placements))
 
     async def list_all_ads(self) -> Sequence[FakeAdRow]:
         return self._ranked(list(self.by_id.values()))
@@ -1146,6 +1162,8 @@ class FakeAdRepo:
         parse_mode: str | None = None,
         audience_mode: str = "all",
         scheduled_at: datetime.datetime | None = None,
+        internal_name: str | None = None,
+        internal_notes: str | None = None,
     ) -> FakeAdRow:
         row = FakeAdRow(
             id=self._next_id,
@@ -1166,6 +1184,8 @@ class FakeAdRepo:
             parse_mode=parse_mode,
             audience_mode=audience_mode,
             scheduled_at=scheduled_at,
+            internal_name=internal_name,
+            internal_notes=internal_notes,
         )
         self._next_id += 1
         self.by_id[row.id] = row

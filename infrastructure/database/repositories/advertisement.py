@@ -6,9 +6,10 @@ import datetime
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 
 from infrastructure.database.models import Advertisement
+from infrastructure.database.models.ad_placement import AdPlacementLink
 from infrastructure.database.repositories.base import SqlAlchemyRepository
 
 
@@ -50,16 +51,43 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
     async def list_active_for_placement(self, placement: str) -> Sequence[Advertisement]:
         """Active ads for a placement, ranked priority DESC then id ASC (Sprint 9.5).
 
-        Audience filtering is applied per-candidate by ``AudienceService`` (the rule
-        set cannot be expressed as one indexed predicate). Uses
-        ``ix_ads_placement_active_priority``.
+        Multi-placement dual-read (Sprint 9.6, D-056): an ad matches when it has an
+        ``ad_placements`` row for ``placement``, *or* — for legacy ads with no placement
+        rows — when its scalar ``placement`` column matches. Audience filtering is applied
+        per-candidate by ``AudienceService`` (the rule set is not one indexed predicate).
         """
+        has_link = exists().where(
+            AdPlacementLink.advertisement_id == Advertisement.id,
+            AdPlacementLink.placement == placement,
+        )
+        has_any_link = exists().where(AdPlacementLink.advertisement_id == Advertisement.id)
         result = await self.session.execute(
             select(Advertisement)
-            .where(Advertisement.is_active.is_(True), Advertisement.placement == placement)
+            .where(
+                Advertisement.is_active.is_(True),
+                or_(has_link, and_(~has_any_link, Advertisement.placement == placement)),
+            )
             .order_by(Advertisement.priority.desc(), Advertisement.id.asc())
         )
         return result.scalars().all()
+
+    async def list_placements(self, ad_id: int) -> list[str]:
+        """The placements an ad occupies (Sprint 9.6, D-056)."""
+        result = await self.session.execute(
+            select(AdPlacementLink.placement)
+            .where(AdPlacementLink.advertisement_id == ad_id)
+            .order_by(AdPlacementLink.placement.asc())
+        )
+        return list(result.scalars().all())
+
+    async def set_placements(self, ad_id: int, placements: Sequence[str]) -> None:
+        """Replace an ad's placement set (Sprint 9.6, D-056)."""
+        await self.session.execute(
+            delete(AdPlacementLink).where(AdPlacementLink.advertisement_id == ad_id)
+        )
+        for placement in dict.fromkeys(placements):  # de-dupe, preserve order
+            self.session.add(AdPlacementLink(advertisement_id=ad_id, placement=placement))
+        await self.session.flush()
 
     async def create_ad(
         self,
@@ -81,6 +109,8 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         parse_mode: str | None = None,
         audience_mode: str = "all",
         scheduled_at: datetime.datetime | None = None,
+        internal_name: str | None = None,
+        internal_notes: str | None = None,
     ) -> Advertisement:
         ad = Advertisement(
             title=title,
@@ -100,6 +130,8 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
             parse_mode=parse_mode,
             audience_mode=audience_mode,
             scheduled_at=scheduled_at,
+            internal_name=internal_name,
+            internal_notes=internal_notes,
         )
         return await self.add(ad)
 

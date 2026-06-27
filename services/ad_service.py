@@ -69,6 +69,8 @@ _FIELD_TO_COLUMN: dict[str, str] = {
     "storage_chat_id": "storage_chat_id",
     "storage_message_id": "storage_message_id",
     "scheduled_at": "scheduled_at",
+    "internal_name": "internal_name",  # admin-only metadata (D-058)
+    "notes": "internal_notes",
 }
 
 _CLEAR_TOKENS = frozenset({"none", "never", ""})
@@ -359,6 +361,8 @@ class AdService:
             fields.get("storage_message_id"), "storage_message_id"
         )
         scheduled_at = _parse_schedule(fields.get("scheduled_at"))
+        internal_name = _clean(fields.get("internal_name"))
+        internal_notes = _clean(fields.get("notes"))
 
         if delivery_mode == AdDeliveryMode.COPY.value:
             if store_chat is None or store_msg is None:
@@ -387,6 +391,8 @@ class AdService:
             parse_mode=parse_mode,
             audience_mode=audience_mode,
             scheduled_at=scheduled_at,
+            internal_name=internal_name,
+            internal_notes=internal_notes,
         )
 
     async def list_ads(self) -> Sequence[Any]:
@@ -420,6 +426,32 @@ class AdService:
         if ad is None:
             return None
         return await self._ads.apply_update(ad, {"is_active": active})
+
+    async def list_placements(self, ad_id: int) -> Sequence[str]:
+        """The placements an ad occupies (Sprint 9.6, D-056)."""
+        return await self._ads.list_placements(ad_id)
+
+    async def set_placements(self, ad_id: int, placements: Sequence[str]) -> list[str] | None:
+        """Replace an ad's placement set (Sprint 9.6, D-056); None if no such ad.
+
+        Each value is validated against :class:`AdPlacement`; an ad must keep at least one
+        placement. Per-placement §13.6 toggles still gate whether it actually shows.
+        """
+        if await self._ads.get_by_id(ad_id) is None:
+            return None
+        valid = {p.value for p in AdPlacement}
+        cleaned: list[str] = []
+        for placement in placements:
+            token = placement.strip().lower()
+            if token not in valid:
+                opts = ", ".join(sorted(valid))
+                raise InvalidAdError(f"Unknown placement {placement!r}. Use one of: {opts}.")
+            cleaned.append(token)
+        deduped = list(dict.fromkeys(cleaned))  # drop duplicates, preserve order
+        if not deduped:
+            raise InvalidAdError("An ad needs at least one placement.")
+        await self._ads.set_placements(ad_id, deduped)
+        return deduped
 
     async def delete(self, ad_id: int) -> bool:
         ad = await self._ads.get_by_id(ad_id)
@@ -512,6 +544,10 @@ class AdService:
             )
         if "scheduled_at" in fields:
             changes["scheduled_at"] = _parse_schedule(fields["scheduled_at"])
+        if "internal_name" in fields:
+            changes["internal_name"] = _clean(fields["internal_name"])
+        if "notes" in fields:
+            changes["internal_notes"] = _clean(fields["notes"])
 
         final_mode = changes.get("delivery_mode", ad.delivery_mode)
         if final_mode != AdDeliveryMode.COPY.value:

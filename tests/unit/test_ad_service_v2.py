@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import datetime
 
+import pytest
+
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
-from services.ad_service import AdService
+from services.ad_service import AdService, InvalidAdError
 from services.audience_service import AudienceService
 from services.settings_service import SettingsService
 from tests.unit._fakes import (
@@ -200,3 +202,36 @@ async def test_reply_to_message_id_is_forwarded_to_the_sender() -> None:
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi")
     await _show(service, reply_to_message_id=4242)
     assert sender.sent[0]["reply_to_message_id"] == 4242
+
+
+# --- multi-placement + internal metadata (Sprint 9.6, D-056 / D-058) ------
+async def test_set_placements_validates_dedupes_and_stores() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi")
+    result = await service.set_placements(1, ["video_delivery", "audio_delivery", "video_delivery"])
+    assert result == ["video_delivery", "audio_delivery"]  # de-duped, order preserved
+    assert await service.list_placements(1) == ["audio_delivery", "video_delivery"]
+
+
+async def test_set_placements_rejects_unknown_and_empty() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi")
+    with pytest.raises(InvalidAdError):
+        await service.set_placements(1, ["nowhere"])
+    with pytest.raises(InvalidAdError):
+        await service.set_placements(1, [])
+
+
+async def test_set_placements_unknown_ad_returns_none() -> None:
+    service, _, _, _, _ = _build()
+    assert await service.set_placements(999, ["home"]) is None
+
+
+async def test_create_stores_internal_metadata() -> None:
+    service, repo, _, _, _ = _build()
+    ad = await service.create(
+        {"title": "Promo", "text": "hi", "internal_name": "Summer Campaign", "notes": "Q3 push"},
+        created_by=1,
+    )
+    assert ad.internal_name == "Summer Campaign"
+    assert ad.internal_notes == "Q3 push"
