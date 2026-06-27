@@ -197,3 +197,63 @@ SETTINGS_INFO: tuple[InfoItem, ...] = (
     InfoItem(0, "🗃 Cache"),
     InfoItem(1, "🌐 Languages"),
 )
+
+
+# --- Compose-wizard registries (Sprint 9.6, D-059) ------------------------
+# The audience builder and placement builder render *from these registries*, so a new
+# dimension or placement is a registration here, not a change to the wizard engine.
+# ``index`` is the compact callback ``arg`` (keeps signed callback_data tiny, §14.2).
+
+
+@dataclass(frozen=True, slots=True)
+class AudienceOption:
+    """One toggle in the audience builder. ``value=None`` ⇒ a typed sub-input."""
+
+    index: int
+    label: str
+    effect: str  # include | exclude
+    dimension: str  # plan | role | language | user_id | segment
+    value: str | None  # concrete value, or None for a typed sub-input (language/user id)
+
+
+AUDIENCE_OPTIONS: tuple[AudienceOption, ...] = (
+    AudienceOption(0, "🆓 Free", "include", "plan", "free"),
+    AudienceOption(1, "⭐ Premium", "include", "plan", "premium"),
+    AudienceOption(2, "👤 Users", "include", "role", "user"),
+    AudienceOption(3, "🌐 Language…", "include", "language", None),
+    AudienceOption(4, "🆔 User ID…", "include", "user_id", None),
+    AudienceOption(5, "🚫 Premium", "exclude", "plan", "premium"),
+    AudienceOption(6, "🚫 Free", "exclude", "plan", "free"),
+    AudienceOption(7, "🚫 Owner", "exclude", "role", "owner"),
+    AudienceOption(8, "🚫 Moderators", "exclude", "role", "moderator"),
+    AudienceOption(9, "🚫 User ID…", "exclude", "user_id", None),
+)
+
+
+def audience_option(index: int | None) -> AudienceOption | None:
+    if index is not None and 0 <= index < len(AUDIENCE_OPTIONS):
+        return AUDIENCE_OPTIONS[index]
+    return None
+
+
+@dataclass(frozen=True, slots=True)
+class PlacementOption:
+    index: int
+    code: str  # an AdPlacement value (D-044)
+    label: str
+
+
+PLACEMENT_OPTIONS: tuple[PlacementOption, ...] = (
+    PlacementOption(0, "post_download", "📥 Post-download"),
+    PlacementOption(1, "video_delivery", "🎬 Video"),
+    PlacementOption(2, "audio_delivery", "🎵 Audio"),
+    PlacementOption(3, "quality_select", "🎚 Quality"),
+    PlacementOption(4, "home", "🏠 Home"),
+    PlacementOption(5, "history", "📂 History"),
+)
+
+
+def placement_option(index: int | None) -> PlacementOption | None:
+    if index is not None and 0 <= index < len(PLACEMENT_OPTIONS):
+        return PLACEMENT_OPTIONS[index]
+    return None
