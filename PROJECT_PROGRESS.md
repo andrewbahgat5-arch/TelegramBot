@@ -59,7 +59,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Open decisions awaiting Owner | 9 OQs + ratify documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). Task 8.3 `ADMIN_API_KEY` reconciliation RESOLVED (D-051); **8.3 Owner-signed-off 2026-06-26**. Sprint 9 / 9.5 / 10 sign-offs pending. |
 | Last code change | 2026-06-26 — **Owner-feedback #35:** `UserService.unban` now clears `is_banned`/`banned_at`/`ban_reason` (D-054) so an unbanned user shows no stale reason; backfilled 2 existing rows. Hardened `test_concurrent_dequeue_no_duplicates` (flush + no-live-worker note — the 997/1000 failure was a live worker draining the shared queue, not a bug). Uncommitted in worktree `happy-bose-71ed46`. |
 | Last documentation change | 2026-06-26 — MASTER_PLAN §5 (D-054); `TEST_PLAN.md` (PowerShell quoting + worker-off notes); this file (8.3 sign-off). |
-| Next recommended action | **Sprint 11 IN PROGRESS** (code-first, Owner-approved 2026-06-27). Task **11.1 done** (`DEPLOY_ENV` + production-fingerprint boot assertion, D-060; awaiting **Gate G-5** sign-off). Next checkpoint per workflow: Owner reviews 11.1, then proceed to a Phase-A task (recommend **11.5** security suite or **11.6** simulation skeleton). Still pending: Owner verification of 9.5.9 + 9.5.10 and sign-off of S9 + S9.5 + S10. |
+| Next recommended action | **Sprint 11 Phase A COMPLETE** (11.1–11.9 done; 766 pass / 28 e2e-skipped / 2 deselected). Remaining **11.10–11.14 are Phase B** — blocked on the Owner provisioning the @BotFather sandbox bot + isolated test PG/Redis/storage (set `DEPLOY_ENV=test` + `E2E_LIVE=1`), then run live E2E S-1…S-5, load L1–L4, stress ST-1…6, and fill the capacity report. Owner action: **(1)** sign off **Gate G-5** (security config, 11.1/11.5); **(2)** provision Phase-B infra; **(3)** the pre-existing S9/S9.5/S10 sign-offs + 9.5.9/9.5.10 verification still pend. |
 
 ---
 
@@ -594,7 +594,10 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 **Pending Tasks** — all Phase B (require Owner-provisioned sandbox bot + isolated test PG/Redis/storage)
 
-- [ ] **11.10** Run load levels L1, L2, L3, L4 end-to-end; append entries to `PERFORMANCE_REPORT.md`.
+> **Phase-A pre-validation done where possible (no fabricated live numbers):**
+> 11.10 — framework dry-run of L1–L4 via the deterministic stub runs to completion + writes a reproducible `PERFORMANCE_REPORT.md` entry (clearly labelled *not* a capacity measurement; real runs Phase B). 11.11 — ST-1/ST-2 traffic-plan shapes validated; ST-3…6 fault-injection is Phase B. 11.12 — the full **automated** regression + all 5 security categories were run green (766 pass / 28 e2e-skipped); live E2E execution is Phase B. 11.13 — capacity-report methodology section added, marked *pending Phase-B data*. 11.14 — **M-21** (security categories pass) + **M-22** (abuse blocked end-to-end, 0 successful downloads at L2) validated now; M-17/18/19/20 (L4 SLO, S-3/S-4/S-5) are Phase B.
+
+- [ ] **11.10** Run load levels L1, L2, L3, L4 end-to-end; append entries to `PERFORMANCE_REPORT.md`. *(Phase-A dry-run done; real capacity run Phase B.)*
 - [ ] **11.11** Run stress scenarios ST-1 through ST-6; append outcomes to `PERFORMANCE_REPORT.md`.
 - [ ] **11.12** Full regression + every security category run; append to `TEST_RESULTS.md` and `SECURITY_REPORT.md`.
 - [ ] **11.13** Capacity-planning report (Section 25.15.7) appended to `PERFORMANCE_REPORT.md`.
@@ -698,6 +701,19 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-27 — Sprint 11 Phase A COMPLETE (11.1–11.9); Phase B (live runs) blocked on Owner infra
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation — Sprint 11, full Phase A. Owner directive: "continue all the sprint without stop." Proceeded through every code-able task, committing each with all gates green; stopped only at the genuine Phase-B boundary (no live sandbox/infra) rather than fabricating capacity numbers. |
+| **Done (Phase A, 9 tasks)** | **11.1** isolation (`DEPLOY_ENV`+fingerprint, D-060, `core/environment.py` rule registry). **11.5** security suite — all 5 §25.9 categories (`tests/security/…`, 45 tests). **11.6** simulation framework (`tests/simulation/`: `SimulationRunner`+CLI, `StubBotClient`, `MetricsCollector`/`RunSummary`, `ReportWriter`, prod-credential rejection). **11.7** five profiles (Casual/Active/Heavy/Abuse; Premium disabled). **11.8** five traffic generators. **11.9** stress catalog ST-1…ST-6. **11.2** E2E harness + `harness` fixture. **11.3** E2E flow suites (§25.7). **11.4** named scenarios S-1…S-5. |
+| **Validation (cumulative)** | **766 pass / 28 skipped (E2E Phase-B-gated) / 0 fail / 2 deselected**; ruff + format clean; mypy --strict **160** (tests excluded from the strict gate by design); import-linter **7**; bandit **0**. No schema change, no migration, **no new dependency**. CLI verified: `python -m tests.simulation.runner --level=L1..L4` runs to completion deterministically; Abuse → **0 successful downloads** (M-22). |
+| **Phase B — NOT done (needs Owner infra)** | 11.10 real load L1–L4, 11.11 stress ST-1…6 (esp. fault-injection ST-3/4/5/6), live E2E S-1…S-5 execution, 11.13 capacity numbers, 11.14 M-17/18/19/20. All require the @BotFather **sandbox bot** + isolated **test PG/Redis/storage**, then `DEPLOY_ENV=test` + `E2E_LIVE=1`. A clearly-labelled **stub dry-run** of L1–L4 + a capacity-methodology stub are in `PERFORMANCE_REPORT.md` (explicitly *not* capacity numbers). |
+| **Commits (this session)** | `4ac5f0b` 11.1 · `de0e9d3` 11.5 · `cacfaa6` 11.6 · `199366e` 11.7 · `1b1a1a0` 11.8 · `e83ad78` 11.9 · `14816d0` 11.2–11.4 · (this) 11.10-partial + reports. Worktree `happy-bose-71ed46`, branch `claude/happy-bose-71ed46`, parent `066b43a`. Not pushed. |
+| **Gate** | 11.1 + 11.5 touch security/isolation config → **Gate G-5** awaiting Owner `Gate G-5 approved`. |
+| **Owner action** | (1) sign off **Gate G-5**; (2) provision the Phase-B sandbox bot + test infra to run 11.10–11.14 live; (3) the sprint cannot fully close (DoD/Exit) until the live runs + capacity sign-off land. Pre-existing S9/S9.5/S10 sign-offs + 9.5.9/9.5.10 verification still pend. |
+| **Notes for the next agent** | `tests/simulation/` is NOT a pytest collection root (framework); self-tests live in `tests/unit/`. The live `SandboxBotClient` (simulation) and `E2EHarness.connect` (e2e) are the two Phase-B implementation seams. Add isolation rules via `core/environment.ENVIRONMENT_SAFETY_RULES`; profiles via `@register_profile`; generators via `@register_generator` — no engine edits. |
 
 ### Session Handoff — 2026-06-27 — Sprint 11 kickoff: Task 11.1 (test-environment isolation) complete
 

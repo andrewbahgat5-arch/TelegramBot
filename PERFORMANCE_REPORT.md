@@ -224,6 +224,45 @@ For `pytest-benchmark` runs under `tests/performance/`.
 
 ## Standing Entries
 
+### 2026-06-27 — Sprint 11 (11.10 partial) — FRAMEWORK DRY-RUN (stub transport, NOT a capacity measurement)
+
+> **Important:** these numbers come from the deterministic in-memory `StubBotClient`,
+> **not** the real bot. They validate that the simulation framework runs each load
+> level to completion and writes a reproducible report entry (the §25.15.9 / 11.10
+> validation-checklist item), and that the **Abuse profile is fully blocked at scale**.
+> They are **not** SLO/capacity results — the LOCKED Status-Summary rows above stay
+> empty until the Phase-B sandbox + isolated test infra are provisioned and the real
+> L1–L4 runs execute. The V1 SLOs (p95 URL→keyboard ≤ 2 s, download→delivery ≤ 90 s,
+> cache hit ratio) require the live bot and cannot be measured here.
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Phase-A); worktree `happy-bose-71ed46` |
+| Transport | `StubBotClient` (deterministic, network-free) |
+| Seed | 42 |
+| Profiles | Casual,Active,Heavy (mixed) |
+| Command | `python -m tests.simulation.runner --level=<L> --profile=Casual,Active,Heavy --seed=42` |
+
+| Level | Users | Actions | Succeeded | Blocked | Successful downloads | Stub action-latency p95 (ms) |
+|---|---|---|---|---|---|---|
+| L1 | 10 | 439 | 212 | 227 | 64 | 67.9 |
+| L2 | 50 | 2225 | 1082 | 1143 | 326 | 67.5 |
+| L3 | 100 | 4354 | 2145 | 2209 | 647 | 67.6 |
+| L4 | 500 | 22988 | 10789 | 12199 | 3243 | 67.5 |
+
+**Abuse profile (L2, seed 42):** 9050 actions → **0 successful downloads**, 6000 download attempts blocked (M-22 invariant holds at scale).
+
+**Notes:** the ~0.51 mixed-profile block rate is a **stub artifact** — `StubBotClient` enforces the default free daily-limit (10) and rate ceiling, so Heavy users (20–40 downloads/session) are correctly throttled; this is the modeled abuse defense, not a system bottleneck. The stub latency is synthetic. Determinism confirmed (fixed seed → identical per-action outcomes; throughput excluded as wall-clock dependent). Real L1–L4 capacity + SLO verdicts are **pending Phase B**.
+
+### 2026-06-27 — Capacity Report (Sprint 11, 11.13) — PENDING PHASE-B DATA
+
+The capacity-planning report (§25.15.7: max steady-state users, max downloads/hour,
+max queue throughput, +50% hardware estimate, scaling recommendation) requires the
+real L4/L5/L6 runs against the provisioned sandbox + test infra. The framework,
+metrics catalog (§25.15.5), and report writer are in place; this section will be
+filled from the Phase-B `--level=L4/L5/L6` runs. No capacity numbers are asserted
+until then (no fabricated data).
+
 ### Pre-Sprint 0 — 2026-06-23
 
 | Field | Value |
