@@ -22,7 +22,7 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 |---|---|---|---|---|
 | Unit | 2026-06-27 | PASS | + Task 11.1: `DEPLOY_ENV` config, env safety-rule registry, `token_fingerprint` | Sprint 1–11 |
 | Integration | 2026-06-27 | PASS (~80) | (unchanged this task) | Sprint 2–11 |
-| Security | 2026-06-27 | PASS (4) | environment isolation: `DEPLOY_ENV=test` production-fingerprint boot assertion (§25.9.4) | Sprint 11 |
+| Security | 2026-06-27 | PASS (45) | all 5 §25.9 categories: input_validation, authorization, abuse_protection, data_protection (+ env isolation), dependency_scan | Sprint 11 |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
 | Regression | — | — | — | (each sprint adds rows) |
@@ -66,6 +66,22 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-27 — Security — Sprint 11 Task 11.5 (security suite, all 5 §25.9 categories)
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Task 11.5); worktree `happy-bose-71ed46` |
+| Environment | local |
+| Suite | security (+ full unit/integration regression) with the documented deselects |
+| Triggered by | Sprint 11 Task 11.5 — security test suite |
+| Total tests | 732 | Passed | 732 | Failed | 0 | Deselected | 2 |
+| New tests | +41: `input_validation/` (11: malformed/oversized URLs, tampered/forged/oversized callbacks, separator injection), `authorization/` (9: role-gating denials + cross-secret/forged callback rejection), `abuse_protection/` (7: message-rate spam, per-user keying, daily limit, cooldown, ban, owner-exempt), `data_protection/` (7: scrubber + nested + Settings repr + Sentry before_send + substring catalog), `dependency_scan/` (5: exact pins, .env gitignored, no committed .env, pip-audit+bandit CI wiring) |
+| Notes | `pip-audit` + `bandit` already wired as CI gates (`.github/workflows/ci.yml`) — verified, not duplicated. Reuses `tests/unit/_fakes.py` doubles. No source change (mypy 160, import-linter 7, bandit 0 unchanged). |
+
+**Failures:** None.
+
+---
 
 ### 2026-06-27 — Unit + Integration + Security — Sprint 11 Task 11.1 (DEPLOY_ENV + production-fingerprint boot assertion)
 

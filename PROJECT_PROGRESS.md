@@ -567,7 +567,7 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 | Field | Value |
 |---|---|
 | **Status** | `[~]` In Progress |
-| **Completion** | 7% (1 / 14) — 11.1 code-side complete (sandbox-bot/infra provisioning is an Owner Phase-B action) |
+| **Completion** | 14% (2 / 14) — 11.1 + 11.5 done; live-run tasks (Phase B) deferred to Owner infra |
 | **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented and run. Production-readiness is established by simulation, not by hope. |
 | **Stop Point** | Owner reviews `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`; signs off Gate G-5 (Security). |
 | **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) built + gated now; Phase B (L1–L4, ST-1…6, capacity, manual M-17…22) runs once the Owner provisions the @BotFather sandbox bot + isolated test PG/Redis/storage. |
@@ -575,6 +575,8 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 **Completed Tasks**
 
 - [x] **11.1** `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5** (awaiting Owner sign-off). *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
+
+- [x] **11.5** Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5**.
 
 **Pending Tasks**
 

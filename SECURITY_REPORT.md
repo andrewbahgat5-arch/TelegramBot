@@ -24,11 +24,11 @@ Entries are append-only. A correction adds a new entry that references the prior
 
 | Category | Last Run | Last Result | Open Findings |
 |---|---|---|---|
-| Input Validation | — | — | 0 |
-| Authentication & Authorization | — | — | 0 |
-| Abuse Protection | — | — | 0 |
-| Data Security | 2026-06-27 | PASS (4) | 0 |
-| Dependency Security (`pip-audit`) | — | — | 0 |
+| Input Validation | 2026-06-27 | PASS (11) | 0 |
+| Authentication & Authorization | 2026-06-27 | PASS (9) | 0 |
+| Abuse Protection | 2026-06-27 | PASS (7) | 0 |
+| Data Security | 2026-06-27 | PASS (11) | 0 |
+| Dependency Security (`pip-audit`) | — (CI gate; not run locally this task) | — | 0 |
 | Dependency Security (`bandit`) | 2026-06-27 | clean (0) | 0 |
 | Incidents (since launch) | — | — | 0 |
 
@@ -137,6 +137,25 @@ For after-launch security events.
 ---
 
 ## Standing Entries
+
+### 2026-06-27 — Security Validation Run — Sprint 11 Task 11.5 (full security suite)
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Task 11.5); worktree `happy-bose-71ed46` |
+| Environment | local |
+| Sprint | 11 |
+| Triggered by | Task 11.5 — security test suite across all five §25.9 categories |
+| Suites run | `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) |
+| pip-audit | CI gate (`.github/workflows/ci.yml`), not run locally this task |
+| bandit | clean (0 findings); `tests/` excluded by `[tool.bandit].exclude_dirs` |
+| Total cases | 45 | Passed | 45 | Failed | 0 |
+| Notes | §25.9.1 malformed/oversized/forged input rejected at the boundary; §25.9.2 role-gating + HMAC forgery rejection; §25.9.3 message-rate/daily/cooldown/ban enforced, owner exempt, counters keyed per-user (no payload-variation bypass); §25.9.4 scrubber + Settings repr + Sentry before_send redact secrets; §25.9.5 exact dependency pins, `.env` gitignored + not committed, pip-audit/bandit wired in CI. |
+
+**Findings raised this run (if any)**
+- None.
+
+---
 
 ### 2026-06-27 — Security Validation Run — Sprint 11 Task 11.1 (test-environment isolation)
 
