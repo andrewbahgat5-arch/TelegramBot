@@ -1,0 +1,187 @@
+# Production stack — MASTER_PLAN Task 12.1 (Sprint 12, Phase A).
+# Single-host V1 topology (see deploy/README.md §1): the bot + worker + api app
+# containers on top of the postgres / redis / pgbouncer / uptime-kuma infra.
+#
+# SECRETS ARE NOT IN THIS FILE.
+#   - App config is loaded from `.env.production` (env_file) — copy it from
+#     `.env.production.example` and fill real values. NEVER commit `.env.production`.
+#   - Infra credentials (DB_*) come from compose variable interpolation, resolved
+#     from the orchestrator's shell environment or a sibling `deploy/.env`. The
+#     `${VAR:?msg}` guards fail `up` fast if a required secret is missing.
+#
+# Usage:
+#   cp .env.production.example .env.production      # then fill real values
+#   #   provide DB_NAME/DB_USER/DB_PASSWORD to compose (shell export or deploy/.env)
+#   docker compose -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.prod.yml ps
+#
+# Migrations must reach head BEFORE the app boots (deploy/README.md §3):
+#   alembic upgrade head        # current head: 202606270002
+#
+# Image tags are pinned via ${IMAGE_TAG} so rollback = redeploy a previous tag
+# (deploy/README.md §4). The DB path is forced through PgBouncer (DB_HOST=pgbouncer,
+# DB_PORT=6432) regardless of `.env.production`, per D-020.
+#
+# Cross-process /v1/metrics: the always-accurate live gauges (queue_depth,
+# active_workers, db_pool_in_use, redis_connected) work as-is. To also aggregate
+# counters across bot/worker/api, mount one shared empty-at-boot dir into all three
+# and set PROMETHEUS_MULTIPROC_DIR to it (deploy/README.md §2) — left off by default.
+
+name: telegram-bot-prod
+
+# App services share the same env file and the forced PgBouncer DB path.
+x-app: &app
+  env_file:
+    - .env.production
+  environment:
+    # Override whatever `.env.production` carries: the app MUST reach Postgres
+    # through PgBouncer's transaction pool (D-020), never Postgres directly.
+    DB_HOST: pgbouncer
+    DB_PORT: "6432"
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: tgbot_postgres
+    # No host port published in production — reachable only on the internal network.
+    environment:
+      POSTGRES_DB: ${DB_NAME:-telegram_bot}
+      POSTGRES_USER: ${DB_USER:-telegram_bot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (shell env or deploy/.env)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-telegram_bot} -d ${DB_NAME:-telegram_bot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: tgbot_redis
+    # Persistence on (AOF + RDB) per MASTER_PLAN §6.1. Internal network only.
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: tgbot_pgbouncer
+    # Transaction pooling (D-020). LISTEN_PORT=6432 matches deploy/README.md §1 and
+    # the app DB path forced in the x-app anchor. ADMIN_USERS/STATS_USERS allow the
+    # app user to run the SHOW POOLS/SHOW STATS connection-count checks.
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-telegram_bot}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (shell env or deploy/.env)}
+      DB_NAME: ${DB_NAME:-telegram_bot}
+      LISTEN_PORT: "6432"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "20"
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: ${DB_USER:-telegram_bot}
+      STATS_USERS: ${DB_USER:-telegram_bot}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    image: telegram-bot/api:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: tgbot_api
+    # The only externally-published app port: /v1/health, /v1/ready, /v1/metrics.
+    ports:
+      - "${API_BIND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+
+  worker:
+    <<: *app
+    image: telegram-bot/worker:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    container_name: tgbot_worker
+    # One container runs WORKER_COUNT in-process workers (deploy/README.md §1).
+    # DOWNLOAD_TEMP_DIR (default /tmp/downloads) is a scratch volume.
+    volumes:
+      - downloads:/tmp/downloads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  bot:
+    <<: *app
+    image: telegram-bot/bot:${IMAGE_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.bot
+    container_name: tgbot_bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: tgbot_uptime_kuma
+    # Probes the api's /v1/health (liveness) and /v1/ready (readiness).
+    ports:
+      - "${UPTIME_KUMA_PORT:-3010}:3001"
+    volumes:
+      - kuma:/app/data
+    restart: unless-stopped
+
+  # Self-hosted Telegram Bot API server (D-040, deploy/LOCAL_BOT_API.md) — OPT-IN.
+  # Raises the upload cap from 50 MB (public api.telegram.org) to 2 GB. Enable with
+  # `docker compose --profile bot-api -f docker-compose.prod.yml up -d` AND set
+  # BOT_API_BASE_URL=http://bot-api:8081 in .env.production. Default = public API.
+  bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: tgbot_bot_api
+    profiles: ["bot-api"]
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?TELEGRAM_API_ID must be set when the bot-api profile is enabled}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?TELEGRAM_API_HASH must be set when the bot-api profile is enabled}
+    volumes:
+      - botapi:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  downloads:
+  kuma:
+  botapi:
