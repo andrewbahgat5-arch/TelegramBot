@@ -27,12 +27,15 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
         expected_total: int,
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
+        audience_expression_id: int | None = None,
     ) -> Broadcast:
         """Insert a ``pending`` broadcast the worker will pick up (16.8 step 1).
 
         ``advertisement_id`` (Sprint 9.5) links an ad to deliver via copyMessage instead
         of plain ``message_text``. ``scheduled_at`` (9.5.10) defers delivery: NULL = send
         as soon as the worker polls; set → the due-poller skips it until it is due.
+        ``audience_expression_id`` (Sprint 9.6, D-055) targets a unified audience
+        expression; NULL = legacy ``target_role`` / ``target_language``.
         """
         broadcast = Broadcast(
             created_by=created_by,
@@ -42,6 +45,7 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
             expected_total=expected_total,
             advertisement_id=advertisement_id,
             scheduled_at=scheduled_at,
+            audience_expression_id=audience_expression_id,
             status="pending",
         )
         return await self.add(broadcast)

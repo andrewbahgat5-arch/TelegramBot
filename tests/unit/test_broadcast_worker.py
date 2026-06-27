@@ -6,7 +6,12 @@ import datetime
 from collections.abc import Iterable
 from typing import Any
 
-from tests.unit._fakes import FakeBroadcastRepo, FakeUser, FakeUserRepo
+from tests.unit._fakes import (
+    FakeAudienceExpressionRepo,
+    FakeBroadcastRepo,
+    FakeUser,
+    FakeUserRepo,
+)
 from workers.broadcast_worker import BroadcastWorker
 
 
@@ -145,6 +150,43 @@ async def test_run_once_returns_false_when_nothing_pending() -> None:
     worker, _, _ = _build(sender=sender)
     assert await worker.run_once() is False
     assert sender.sent == []
+
+
+async def test_run_once_pages_by_audience_expression() -> None:
+    """A broadcast linked to a unified expression targets the matching audience (D-055)."""
+    sender = _Sender()
+    broadcasts = FakeBroadcastRepo()
+    users = FakeUserRepo()
+    expressions = FakeAudienceExpressionRepo()
+    worker = BroadcastWorker(
+        session_factory=lambda: _FakeSession(),  # type: ignore[arg-type]
+        build_broadcast_repo=lambda s: broadcasts,
+        build_user_repo=lambda s: users,
+        sender=sender,
+        chunk_size=10,
+        build_audience_repo=lambda s: expressions,
+    )
+    users.by_tid[201] = FakeUser(id=1, telegram_id=201, role="user", is_premium=True)
+    users.by_tid[202] = FakeUser(id=2, telegram_id=202, role="user", is_premium=False)
+    users.by_tid[203] = FakeUser(id=3, telegram_id=203, role="user", is_premium=True)
+    users.by_tid[204] = FakeUser(id=4, telegram_id=204, role="owner", is_premium=True)
+
+    expr = await expressions.create(mode="include")
+    await expressions.add_rule(expr.id, effect="include", dimension="plan", value="premium")
+    row = await broadcasts.create_pending(
+        created_by=1,
+        message_text="premium only",
+        target_language=None,
+        target_role=None,
+        expected_total=2,
+        audience_expression_id=expr.id,
+    )
+
+    handled = await worker.run_once()
+
+    assert handled is True
+    assert sorted(chat for chat, _ in sender.sent) == [201, 203]  # premium non-staff only
+    assert row.status == "completed"
 
 
 # --- ad broadcast (Sprint 9.5, D-045) -------------------------------------

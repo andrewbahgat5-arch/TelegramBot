@@ -9,9 +9,10 @@ dimension values OR, across dimensions AND, a matching ``exclude`` removes the u
 (design invariant #17, ``tests/integration/test_audience_query.py``).
 
 Pure infrastructure: builds SQLAlchemy predicates over ``User`` and never imports
-``services`` (Section 8). The default audience guards (exclude banned / staff) are
-layered by the *caller* (the broadcast repository), not here, so the compiled core stays
-bit-for-bit identical to the Python matcher.
+``services`` (Section 8). ``compile_audience_predicate`` is the core — bit-for-bit
+identical to the Python matcher (invariant #17). ``broadcast_audience_predicate`` wraps
+it with the default broadcast guards (exclude banned / staff), kept separate so the core
+never drifts from the matcher.
 """
 
 from __future__ import annotations
@@ -26,6 +27,34 @@ from domain.entities.audience import AudienceRuleSpec
 from domain.enums import AudienceDimension, AudienceEffect, AudienceMode
 from infrastructure.database.models import User
 from infrastructure.database.models.audience_segment import AudienceSegmentMember
+
+_STAFF_ROLES = ("owner", "moderator")
+
+
+def broadcast_audience_predicate(
+    mode: str,
+    rules: Sequence[AudienceRuleSpec],
+    *,
+    now: datetime.datetime,
+) -> ColumnElement[bool]:
+    """The audience core predicate plus the broadcast default guards (design §9.4).
+
+    Never message **banned** users, and never message **staff** (owner/moderator) unless
+    an explicit ``include role=<staff>`` rule names that role. The guards live only here —
+    ``compile_audience_predicate`` stays identical to the Python matcher (invariant #17).
+    """
+    included_staff = {
+        rule.value
+        for rule in rules
+        if rule.effect == AudienceEffect.INCLUDE
+        and rule.dimension == AudienceDimension.ROLE
+        and rule.value in _STAFF_ROLES
+    }
+    excluded_staff = [role for role in _STAFF_ROLES if role not in included_staff]
+    guards: list[ColumnElement[bool]] = [User.is_banned.is_(False)]
+    if excluded_staff:
+        guards.append(User.role.notin_(excluded_staff))
+    return and_(compile_audience_predicate(mode, rules, now=now), *guards)
 
 
 def compile_audience_predicate(

@@ -23,6 +23,7 @@ from infrastructure.database.models.audience_segment import (
     AudienceSegment,
     AudienceSegmentMember,
 )
+from infrastructure.database.repositories.user import UserRepository
 from services.audience_service import evaluate_audience
 from tests.audience_cases import NOW, SCENARIOS, USERS, Scenario, ctx_for
 
@@ -96,3 +97,37 @@ async def test_segment_rule_selects_segment_members(db_session: AsyncSession) ->
     sql_tids = await _sql_selected(db_session, AudienceMode.INCLUDE.value, [rule])
     sql_keys = {u.key for u in USERS if u.telegram_id in sql_tids}
     assert sql_keys == members
+
+
+async def test_broadcast_guards_exclude_banned_and_staff(db_session: AsyncSession) -> None:
+    """`page_for_audience` never returns banned users, and excludes staff unless named."""
+    seeded = {
+        "free": User(telegram_id=870001, role="user", is_premium=False, language="en"),
+        "prem": User(telegram_id=870002, role="user", is_premium=True, language="en"),
+        "mod": User(telegram_id=870003, role="moderator", is_premium=False, language="en"),
+        "owner": User(telegram_id=870004, role="owner", is_premium=True, language="en"),
+        "banned": User(
+            telegram_id=870005, role="user", is_premium=False, is_banned=True, language="en"
+        ),
+    }
+    db_session.add_all(list(seeded.values()))
+    await db_session.flush()
+    mine = {u.telegram_id for u in seeded.values()}
+    repo = UserRepository(db_session)
+
+    async def selected(mode: str, rules: list[AudienceRuleSpec]) -> set[int]:
+        page = await repo.page_for_audience(
+            after_id=0, limit=10_000, mode=mode, rules=rules, now=NOW
+        )
+        return {u.telegram_id for u in page} & mine
+
+    # mode=all, no rules: non-banned, non-staff only.
+    assert await selected(AudienceMode.ALL.value, []) == {
+        seeded["free"].telegram_id,
+        seeded["prem"].telegram_id,
+    }
+    # An explicit include role=moderator lets that staff role through (and only it).
+    moderator_rule = [
+        AudienceRuleSpec(AudienceEffect.INCLUDE.value, AudienceDimension.ROLE.value, "moderator")
+    ]
+    assert await selected(AudienceMode.INCLUDE.value, moderator_rule) == {seeded["mod"].telegram_id}

@@ -7,6 +7,7 @@ from infrastructure.database.repositories.ad_audience_rule import AdAudienceRule
 from infrastructure.database.repositories.ad_button import AdButtonRepository
 from infrastructure.database.repositories.ad_event import AdEventRepository
 from infrastructure.database.repositories.advertisement import AdRepository
+from infrastructure.database.repositories.audience_expression import AudienceExpressionRepository
 from infrastructure.database.repositories.audience_segment import (
     AudienceSegmentMemberRepository,
     AudienceSegmentRepository,
@@ -28,6 +29,7 @@ __all__ = [
     "AdButtonRepository",
     "AdEventRepository",
     "AdRepository",
+    "AudienceExpressionRepository",
     "AudienceSegmentMemberRepository",
     "AudienceSegmentRepository",
     "BroadcastRepository",

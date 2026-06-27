@@ -22,9 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core import metrics
 from core.logging import get_logger
+from domain.entities.audience import AudienceRuleSpec
 from domain.protocols.advertising import AdSenderProtocol
 from domain.protocols.file_sender import MessageSenderProtocol
 from domain.protocols.repositories import (
+    AudienceExpressionRepositoryProtocol,
     BroadcastRepositoryProtocol,
     UserRepositoryProtocol,
 )
@@ -35,6 +37,10 @@ _log = get_logger("workers.broadcast_worker")
 BuildBroadcastRepo = Callable[[AsyncSession], BroadcastRepositoryProtocol[Any]]
 BuildUserRepo = Callable[[AsyncSession], UserRepositoryProtocol[Any]]
 BuildAdService = Callable[[AsyncSession], AdService]
+BuildAudienceRepo = Callable[[AsyncSession], AudienceExpressionRepositoryProtocol[Any]]
+
+# (mode, rules) of a unified audience expression, resolved once per broadcast.
+Audience = tuple[str, list[AudienceRuleSpec]]
 
 
 def _now() -> datetime.datetime:
@@ -54,6 +60,7 @@ class BroadcastWorker:
         idle_sleep_seconds: float = 5.0,
         ad_sender: AdSenderProtocol | None = None,
         build_ad_service: BuildAdService | None = None,
+        build_audience_repo: BuildAudienceRepo | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._build_broadcast_repo = build_broadcast_repo
@@ -64,6 +71,7 @@ class BroadcastWorker:
         self._idle_sleep = idle_sleep_seconds
         self._ad_sender = ad_sender
         self._build_ad_service = build_ad_service
+        self._build_audience_repo = build_audience_repo
 
     async def run_once(self) -> bool:
         """Process at most one pending broadcast. Returns True if one was handled."""
@@ -79,12 +87,21 @@ class BroadcastWorker:
             role: str | None = broadcast.target_role
             language: str | None = broadcast.target_language
             advertisement_id: int | None = broadcast.advertisement_id
+            expression_id: int | None = broadcast.audience_expression_id
             await repo.set_status(broadcast_id, "in_progress")
             await session.commit()
 
         plan = await self._prepare_ad(advertisement_id)
-        await self._fan_out(broadcast_id, text, role, language, plan)
+        audience = await self._load_audience(expression_id)
+        await self._fan_out(broadcast_id, text, role, language, plan, audience)
         return True
+
+    async def _load_audience(self, expression_id: int | None) -> Audience | None:
+        """Resolve a broadcast's unified audience expression once (Sprint 9.6, D-055)."""
+        if expression_id is None or self._build_audience_repo is None:
+            return None
+        async with self._session_factory() as session:
+            return await self._build_audience_repo(session).get_rules(expression_id)
 
     async def _prepare_ad(self, advertisement_id: int | None) -> AdBroadcastPlan | None:
         """Resolve a linked ad into a reusable delivery plan once (Sprint 9.5)."""
@@ -107,15 +124,29 @@ class BroadcastWorker:
         role: str | None,
         language: str | None,
         plan: AdBroadcastPlan | None = None,
+        audience: Audience | None = None,
     ) -> None:
         after_id = 0
         while True:
             async with self._session_factory() as session:
-                page = list(
-                    await self._build_user_repo(session).page_for_broadcast(
-                        after_id=after_id, limit=self._chunk_size, role=role, language=language
+                user_repo = self._build_user_repo(session)
+                if audience is not None:  # unified-expression audience (Sprint 9.6, D-055)
+                    mode, rules = audience
+                    page = list(
+                        await user_repo.page_for_audience(
+                            after_id=after_id,
+                            limit=self._chunk_size,
+                            mode=mode,
+                            rules=rules,
+                            now=_now(),
+                        )
                     )
-                )
+                else:  # legacy role/language filter
+                    page = list(
+                        await user_repo.page_for_broadcast(
+                            after_id=after_id, limit=self._chunk_size, role=role, language=language
+                        )
+                    )
             if not page:
                 break
 

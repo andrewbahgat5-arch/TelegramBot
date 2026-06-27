@@ -32,6 +32,7 @@ from infrastructure.database.repositories.active_download import ActiveDownloadR
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
 from infrastructure.database.repositories.ad_button import AdButtonRepository
 from infrastructure.database.repositories.advertisement import AdRepository
+from infrastructure.database.repositories.audience_expression import AudienceExpressionRepository
 from infrastructure.database.repositories.audience_segment import AudienceSegmentMemberRepository
 from infrastructure.database.repositories.broadcast import BroadcastRepository
 from infrastructure.database.repositories.cached_file import CachedFileRepository
@@ -274,6 +275,7 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         chunk_size=chunk_size,
         ad_sender=ad_sender,
         build_ad_service=build_ad_service,
+        build_audience_repo=AudienceExpressionRepository,
     )
 
     process_id = f"{socket.gethostname()}:{os.getpid()}"

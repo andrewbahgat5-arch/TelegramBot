@@ -8,7 +8,9 @@ from collections.abc import Sequence
 from sqlalchemy import case, func, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
+from domain.entities.audience import AudienceRuleSpec
 from domain.enums import UserRole
+from infrastructure.database.audience_query import broadcast_audience_predicate
 from infrastructure.database.models import User
 from infrastructure.database.repositories.base import SqlAlchemyRepository
 
@@ -131,6 +133,35 @@ class UserRepository(SqlAlchemyRepository[User]):
             select(func.count()).select_from(User).where(*self._audience_filters(role, language))
         )
         return int(result.scalar_one())
+
+    async def count_for_audience(
+        self, *, mode: str, rules: Sequence[AudienceRuleSpec], now: datetime.datetime
+    ) -> int:
+        """Count the broadcast audience defined by a unified expression (Sprint 9.6, D-055)."""
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(broadcast_audience_predicate(mode, rules, now=now))
+        )
+        return int(result.scalar_one())
+
+    async def page_for_audience(
+        self,
+        *,
+        after_id: int,
+        limit: int,
+        mode: str,
+        rules: Sequence[AudienceRuleSpec],
+        now: datetime.datetime,
+    ) -> Sequence[User]:
+        """One id-cursor page of the unified-expression audience, ascending (Sprint 9.6)."""
+        result = await self.session.execute(
+            select(User)
+            .where(User.id > after_id, broadcast_audience_predicate(mode, rules, now=now))
+            .order_by(User.id.asc())
+            .limit(limit)
+        )
+        return result.scalars().all()
 
     async def page_for_broadcast(
         self, *, after_id: int, limit: int, role: str | None, language: str | None

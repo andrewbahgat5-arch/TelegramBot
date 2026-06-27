@@ -17,6 +17,8 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Protocol, TypeVar
 
+from domain.entities.audience import AudienceRuleSpec
+
 T = TypeVar("T")
 
 
@@ -70,6 +72,24 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         self, *, after_id: int, limit: int, role: str | None, language: str | None
     ) -> Sequence[T]:
         """One id-cursor page of the non-banned broadcast audience, ascending (16.8)."""
+        ...
+
+    async def count_for_audience(
+        self, *, mode: str, rules: Sequence[AudienceRuleSpec], now: datetime.datetime
+    ) -> int:
+        """Count the broadcast audience defined by a unified expression (Sprint 9.6, D-055)."""
+        ...
+
+    async def page_for_audience(
+        self,
+        *,
+        after_id: int,
+        limit: int,
+        mode: str,
+        rules: Sequence[AudienceRuleSpec],
+        now: datetime.datetime,
+    ) -> Sequence[T]:
+        """One id-cursor page of the unified-expression broadcast audience (Sprint 9.6)."""
         ...
 
 
@@ -226,10 +246,13 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         expected_total: int,
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
+        audience_expression_id: int | None = None,
     ) -> T:
         """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8).
 
         ``scheduled_at`` (9.5.10) defers delivery until due; NULL = immediate.
+        ``audience_expression_id`` (Sprint 9.6, D-055) targets a unified audience
+        expression; NULL = legacy ``target_role`` / ``target_language``.
         """
         ...
 
@@ -248,6 +271,22 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
 
     async def add_counts(self, broadcast_id: int, *, sent: int, failed: int) -> None:
         """Increment ``total_sent`` / ``total_failed`` after a delivered chunk (16.8)."""
+        ...
+
+
+class AudienceExpressionRepositoryProtocol(Repository[T], Protocol[T]):
+    """CRUD for the unified audience expression + its rules (Sprint 9.6, D-055)."""
+
+    async def create(self, *, mode: str) -> T:
+        """Create an audience expression with the given mode (all/include/exclude)."""
+        ...
+
+    async def add_rule(self, expression_id: int, *, effect: str, dimension: str, value: str) -> Any:
+        """Append one rule to an expression."""
+        ...
+
+    async def get_rules(self, expression_id: int) -> tuple[str, list[AudienceRuleSpec]] | None:
+        """Return ``(mode, rules)`` for an expression, or None when it does not exist."""
         ...
 
 

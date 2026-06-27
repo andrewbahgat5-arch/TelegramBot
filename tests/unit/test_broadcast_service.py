@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import pytest
 
+from domain.entities.audience import AudienceRuleSpec
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
-from tests.unit._fakes import FakeBroadcastRepo, FakeUser, FakeUserRepo
+from tests.unit._fakes import (
+    FakeAudienceExpressionRepo,
+    FakeBroadcastRepo,
+    FakeUser,
+    FakeUserRepo,
+)
 
 
 def _build() -> tuple[BroadcastService, FakeBroadcastRepo, FakeUserRepo]:
@@ -13,6 +19,18 @@ def _build() -> tuple[BroadcastService, FakeBroadcastRepo, FakeUserRepo]:
     users = FakeUserRepo()
     service = BroadcastService(broadcast_repo=broadcasts, user_repo=users)
     return service, broadcasts, users
+
+
+def _build_with_expressions() -> tuple[
+    BroadcastService, FakeBroadcastRepo, FakeUserRepo, FakeAudienceExpressionRepo
+]:
+    broadcasts = FakeBroadcastRepo()
+    users = FakeUserRepo()
+    expressions = FakeAudienceExpressionRepo()
+    service = BroadcastService(
+        broadcast_repo=broadcasts, user_repo=users, expression_repo=expressions
+    )
+    return service, broadcasts, users, expressions
 
 
 def _seed_users(users: FakeUserRepo) -> None:
@@ -57,3 +75,52 @@ async def test_create_rejects_unknown_role() -> None:
     _seed_users(users)
     with pytest.raises(InvalidBroadcastError):
         await service.create(created_by_user_id=3, message_text="hi", target_role="wizard")
+
+
+# --- unified audience engine (Sprint 9.6, D-055) --------------------------
+def _seed_premium(users: FakeUserRepo) -> None:
+    users.by_tid[201] = FakeUser(id=1, telegram_id=201, role="user", is_premium=True)
+    users.by_tid[202] = FakeUser(id=2, telegram_id=202, role="user", is_premium=False)
+    users.by_tid[203] = FakeUser(id=3, telegram_id=203, role="user", is_premium=True)
+    users.by_tid[204] = FakeUser(id=4, telegram_id=204, role="owner", is_premium=True)
+
+
+async def test_create_with_expression_persists_rules_and_links_broadcast() -> None:
+    service, broadcasts, users, expressions = _build_with_expressions()
+    _seed_premium(users)
+
+    broadcast = await service.create(
+        created_by_user_id=3,
+        message_text="premium only",
+        audience_mode="include",
+        audience_rules=[AudienceRuleSpec("include", "plan", "premium")],
+    )
+
+    # An expression was created, linked, and its rules persisted.
+    assert broadcast.audience_expression_id is not None
+    mode, rules = await expressions.get_rules(broadcast.audience_expression_id)  # type: ignore[misc]
+    assert mode == "include"
+    assert rules == [AudienceRuleSpec("include", "plan", "premium")]
+    # Audience snapshot counts premium non-staff users only (owner excluded by guard).
+    assert broadcast.expected_total == 2  # tg 201 + 203 (204 is owner, 202 free)
+
+
+async def test_create_with_expression_rejects_unknown_mode() -> None:
+    service, _, users, _ = _build_with_expressions()
+    _seed_premium(users)
+    with pytest.raises(InvalidBroadcastError):
+        await service.create(
+            created_by_user_id=3,
+            message_text="hi",
+            audience_mode="sometimes",
+            audience_rules=[AudienceRuleSpec("include", "plan", "premium")],
+        )
+
+
+async def test_create_without_expression_repo_falls_back_to_legacy() -> None:
+    """The legacy role/language path still works when no expression repo is wired."""
+    service, _, users = _build()
+    _seed_premium(users)
+    broadcast = await service.create(created_by_user_id=3, message_text="hi")
+    assert broadcast.audience_expression_id is None
+    assert broadcast.expected_total == 3  # three non-staff users (owner excluded)

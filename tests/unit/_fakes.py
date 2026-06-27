@@ -16,9 +16,11 @@ from typing import Any
 
 from core.config import Settings
 from core.uuid7 import uuid7_str
+from domain.entities.audience import AudienceRuleSpec
 from domain.entities.media import DownloadedFile, MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.protocols.downloader import Capability, ProviderHealth
+from services.audience_service import AudienceContext, evaluate_audience
 from services.cache_service import CacheService
 
 ENV_EXAMPLE = str(Path(__file__).resolve().parents[2] / ".env.example")
@@ -201,6 +203,50 @@ class FakeUserRepo:
         self, *, after_id: int, limit: int, role: str | None, language: str | None
     ) -> Sequence[FakeUser]:
         return [u for u in self._audience(role, language) if u.id > after_id][:limit]
+
+    def _audience_expr(
+        self, mode: str, rules: Sequence[AudienceRuleSpec], now: datetime.datetime
+    ) -> list[FakeUser]:
+        """Mirror ``broadcast_audience_predicate``: matcher result + banned/staff guards."""
+        included_staff = {
+            r.value
+            for r in rules
+            if r.effect == "include" and r.dimension == "role" and r.value in ("owner", "moderator")
+        }
+        out: list[FakeUser] = []
+        for u in self.by_tid.values():
+            if u.is_banned:
+                continue
+            if u.role in ("owner", "moderator") and u.role not in included_staff:
+                continue
+            premium = u.is_premium and (u.premium_expires_at is None or u.premium_expires_at > now)
+            ctx = AudienceContext(
+                role=u.role,
+                plan="premium" if premium else "free",
+                language=u.language,
+                telegram_id=u.telegram_id,
+                user_row_id=u.id,
+                untargeted_exempt=False,
+            )
+            if evaluate_audience(mode, list(rules), ctx, set()):
+                out.append(u)
+        return sorted(out, key=lambda u: u.id)
+
+    async def count_for_audience(
+        self, *, mode: str, rules: Sequence[AudienceRuleSpec], now: datetime.datetime
+    ) -> int:
+        return len(self._audience_expr(mode, rules, now))
+
+    async def page_for_audience(
+        self,
+        *,
+        after_id: int,
+        limit: int,
+        mode: str,
+        rules: Sequence[AudienceRuleSpec],
+        now: datetime.datetime,
+    ) -> Sequence[FakeUser]:
+        return [u for u in self._audience_expr(mode, rules, now) if u.id > after_id][:limit]
 
 
 # --- Settings store fake --------------------------------------------------
@@ -901,6 +947,7 @@ class FakeBroadcastRow:
     completed_at: datetime.datetime | None = None
     advertisement_id: int | None = None
     scheduled_at: datetime.datetime | None = None
+    audience_expression_id: int | None = None
 
 
 class FakeBroadcastRepo:
@@ -932,6 +979,7 @@ class FakeBroadcastRepo:
         expected_total: int,
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
+        audience_expression_id: int | None = None,
     ) -> FakeBroadcastRow:
         row = FakeBroadcastRow(
             id=self._next_id,
@@ -942,6 +990,7 @@ class FakeBroadcastRepo:
             expected_total=expected_total,
             advertisement_id=advertisement_id,
             scheduled_at=scheduled_at,
+            audience_expression_id=audience_expression_id,
             status="pending",
         )
         self._next_id += 1
@@ -973,6 +1022,42 @@ class FakeBroadcastRepo:
         if row is not None:
             row.total_sent += sent
             row.total_failed += failed
+
+
+# --- Sprint 9.6 unified audience expression fake --------------------------
+@dataclass
+class FakeAudienceExpressionRow:
+    id: int
+    mode: str
+
+
+class FakeAudienceExpressionRepo:
+    """In-memory ``AudienceExpressionRepositoryProtocol`` (Sprint 9.6, D-055)."""
+
+    def __init__(self) -> None:
+        self.exprs: dict[int, FakeAudienceExpressionRow] = {}
+        self.rules: dict[int, list[AudienceRuleSpec]] = {}
+        self._next_id = 1
+
+    async def create(self, *, mode: str) -> FakeAudienceExpressionRow:
+        row = FakeAudienceExpressionRow(id=self._next_id, mode=mode)
+        self.exprs[row.id] = row
+        self.rules[row.id] = []
+        self._next_id += 1
+        return row
+
+    async def add_rule(
+        self, expression_id: int, *, effect: str, dimension: str, value: str
+    ) -> AudienceRuleSpec:
+        rule = AudienceRuleSpec(effect=effect, dimension=dimension, value=value)
+        self.rules.setdefault(expression_id, []).append(rule)
+        return rule
+
+    async def get_rules(self, expression_id: int) -> tuple[str, list[AudienceRuleSpec]] | None:
+        row = self.exprs.get(expression_id)
+        if row is None:
+            return None
+        return row.mode, list(self.rules.get(expression_id, []))
 
 
 # --- Sprint 9 ad fakes ----------------------------------------------------

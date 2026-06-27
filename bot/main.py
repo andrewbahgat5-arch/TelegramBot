@@ -44,6 +44,7 @@ from infrastructure.database.repositories.active_download import ActiveDownloadR
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
 from infrastructure.database.repositories.ad_button import AdButtonRepository
 from infrastructure.database.repositories.advertisement import AdRepository
+from infrastructure.database.repositories.audience_expression import AudienceExpressionRepository
 from infrastructure.database.repositories.audience_segment import (
     AudienceSegmentMemberRepository,
     AudienceSegmentRepository,
@@ -233,6 +234,7 @@ async def main() -> None:
         return BroadcastService(
             broadcast_repo=BroadcastRepository(session),
             user_repo=UserRepository(session),
+            expression_repo=AudienceExpressionRepository(session),
         )
 
     def make_audience_service(session: AsyncSession) -> AudienceService:
