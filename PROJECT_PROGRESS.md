@@ -567,7 +567,7 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 | Field | Value |
 |---|---|
 | **Status** | `[~]` In Progress |
-| **Completion** | 14% (2 / 14) — 11.1 + 11.5 done; live-run tasks (Phase B) deferred to Owner infra |
+| **Completion** | 21% (3 / 14) — 11.1 + 11.5 + 11.6 done; live-run tasks (Phase B) deferred to Owner infra |
 | **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented and run. Production-readiness is established by simulation, not by hope. |
 | **Stop Point** | Owner reviews `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`; signs off Gate G-5 (Security). |
 | **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) built + gated now; Phase B (L1–L4, ST-1…6, capacity, manual M-17…22) runs once the Owner provisions the @BotFather sandbox bot + isolated test PG/Redis/storage. |
@@ -578,13 +578,13 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 - [x] **11.5** Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5**.
 
+- [x] **11.6** `tests/simulation/` framework skeleton — **2026-06-27.** `SimulationRunner` (+ `LOAD_LEVELS` L1–L6, `reject_production_credentials` in `__init__`, §25.15.9 CLI `python -m tests.simulation.runner`), `BotClient` ABC + deterministic network-free `StubBotClient` (models rate/daily/rapid-fire defenses; `SandboxBotClient` is a Phase-B placeholder), `UserProfile` base + `PROFILE_REGISTRY`, `MetricsCollector`/`RunSummary` (p50/p95/p99, error rate, throughput, blocked-download count), append-only `ReportWriter`, `SimulatedAction`/`ActionResult`. Self-tests in `tests/unit/test_simulation_framework.py` (8). **Validation:** 740 pass (+8) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160 (tests excluded); bandit 0. *Live sandbox transport + real load runs are Phase B.*
+
 **Pending Tasks**
 
 - [ ] **11.2** `tests/e2e/harness.py` — sandbox-bot client, test-account pool, deterministic action delays.
 - [ ] **11.3** E2E suites under `tests/e2e/{bot_core, download_flow, cache_flow, queue_flow, error_flow}/` covering Section 25.7.
 - [ ] **11.4** Named E2E scenarios S-1 through S-5 under `tests/e2e/scenarios/` (S-3 uses mocked secondary provider).
-- [ ] **11.5** Security test suite under `tests/security/` covering all five categories in Section 25.9. `pip-audit` + `bandit` wired as CI gates.
-- [ ] **11.6** `tests/simulation/` framework — `SimulationRunner`, `BotClient`, `MetricsCollector`, `ReportWriter`, `UserProfile` base. Production-credential rejection in `__init__`.
 - [ ] **11.7** Five V1 user profiles (`Casual`, `Active`, `Heavy`, `Abuse`; `Premium` stub for V2).
 - [ ] **11.8** AI-controlled traffic generators (`RandomTraffic`, `ScheduledSpike`, `PeakHour`, `Viral`, `PlatformPattern`).
 - [ ] **11.9** Stress-scenario catalog under `tests/simulation/scenarios/` (ST-1 through ST-6).
