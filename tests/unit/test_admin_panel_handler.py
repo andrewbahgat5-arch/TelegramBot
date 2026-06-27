@@ -127,6 +127,13 @@ class _FakeAd:
         self.priority = 1000
         self.show_every_n_downloads = 1
         self.target_role = None
+        self.audience_mode = "all"
+        self.internal_name: str | None = None
+        self.internal_notes: str | None = None
+        self.content_text: str | None = "Promo text"
+        self.delivery_mode = "fields"
+        self.storage_chat_id: int | None = None
+        self.storage_message_id: int | None = None
 
 
 class _FakeAds:
@@ -150,6 +157,12 @@ class _FakeAds:
     async def delete(self, ad_id: int) -> bool:
         self.calls.append(("delete", ad_id))
         return ad_id == self.ad.id
+
+    async def list_placements(self, ad_id: int) -> list[str]:
+        return ["home"]
+
+    async def list_buttons(self, ad_id: int) -> list[Any]:
+        return []
 
     async def overall_stats(self) -> Any:
         return SimpleNamespace(total_ads=1, active_ads=1, impressions=100, clicks=10)
@@ -180,6 +193,9 @@ class _FakeAudience:
     async def add_rule(self, ad_id: int, *, effect: str, dimension: str, value: str) -> Any:
         self.rules.append((ad_id, effect, dimension, value))
         return SimpleNamespace(id=len(self.rules))
+
+    async def list_rules(self, ad_id: int) -> list[Any]:
+        return []
 
 
 def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
@@ -601,11 +617,37 @@ async def test_ad_broadcast_requires_confirm() -> None:
     assert "42" in _call(callback.answer).args[0]
 
 
-async def test_ad_action_without_target_hints() -> None:
+def _picker_rows(callback: Any, signer: CallbackSigner, action: str) -> set[int | None]:
+    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    return {
+        p.arg
+        for row in markup.inline_keyboard
+        for b in row
+        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == action
+    }
+
+
+async def test_ad_top_level_action_shows_ad_picker() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "di")
     await _awrite(callback, ParsedPanel("a", "di", None), _FakeAds())
-    assert "List" in _call(callback.answer).args[0]
+    callback.message.edit_text.assert_awaited_once()
+    assert 1 in _picker_rows(callback, signer, "di")  # the ad is a targeted row
+
+
+async def test_ad_top_level_edit_shows_ad_picker() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "ed")
+    await _awrite(callback, ParsedPanel("a", "ed", None), _FakeAds())
+    assert 1 in _picker_rows(callback, signer, "ed")
+
+
+async def test_ad_edit_with_target_opens_wizard() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "ed")
+    await _awrite(callback, ParsedPanel("a", "ed", 1), _FakeAds())
+    # Edit-in-wizard renders the Preview edit-hub via bot.edit_message_text.
+    assert "Preview" in callback.bot.edit_message_text.await_args.args[0]
 
 
 async def test_ad_create_starts_wizard() -> None:

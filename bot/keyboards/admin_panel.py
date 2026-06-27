@@ -219,6 +219,20 @@ def _ad_button_label(ad: Any) -> str:
     return f"{state} #{ad.id} {ad.title}"[:60]
 
 
+def build_ad_action_list(
+    ads: Sequence[Any], action: str, signer: CallbackSigner
+) -> InlineKeyboardMarkup:
+    """Pick which ad a top-level Manage-Campaigns action applies to.
+
+    The section-menu Enable/Disable/Delete/Broadcast/Edit buttons carry no ad id; tapping
+    one lists the ads with each row carrying that same ``action`` plus the ad's id, so the
+    selected row re-enters the write handler fully targeted (no dead-end, Bug-fix sprint).
+    """
+    rows = [[_btn(signer, _ad_button_label(ad), "a", action, ad.id)] for ad in ads]
+    rows.append(nav_row(signer, back=("a", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_ad_detail(ad: Any, role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
     """An ad's detail screen with owner-only actions reflecting its current state.
 

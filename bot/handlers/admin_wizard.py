@@ -107,6 +107,61 @@ async def start(
     await callback.answer()
 
 
+async def start_edit(
+    callback: CallbackQuery,
+    ad_id: int,
+    state: FSMContext,
+    signer: CallbackSigner,
+    *,
+    ads: AdService,
+    audience: AudienceService,
+) -> None:
+    """Open the wizard pre-loaded from an existing ad, landing on the Preview edit-hub."""
+    if not isinstance(callback.message, Message):
+        await callback.answer()
+        return
+    ad = await ads.get(ad_id)
+    if ad is None:
+        await callback.answer("Ad not found.", show_alert=True)
+        return
+    placements = list(await ads.list_placements(ad_id))
+    buttons = await ads.list_buttons(ad_id)
+    rules = await audience.list_rules(ad_id)
+    await state.set_state(None)
+    ws = WizardState(
+        kind="ad",
+        step=STEP_PREVIEW,
+        return_to="flow",
+        editing_ad_id=ad.id,
+        audience_mode=ad.audience_mode,
+        rules=[[r.effect, r.dimension, r.value] for r in rules],
+        placements=placements,
+        enabled=ad.is_active,
+        priority=ad.priority,
+        frequency=ad.show_every_n_downloads,
+        internal_name=ad.internal_name or ad.title,
+        internal_notes=ad.internal_notes,
+        content_mode=_content_mode_of(ad),
+        content_text=ad.content_text,
+        storage_chat_id=ad.storage_chat_id,
+        storage_message_id=ad.storage_message_id,
+        buttons=[[b.text, b.url] for b in buttons],
+        chat_id=callback.message.chat.id,
+        message_id=callback.message.message_id,
+    )
+    await _persist(state, ws)
+    await _edit(callback.bot, ws, build_wizard_preview(ws, signer), _screen_text(ws))  # type: ignore[arg-type]
+    await callback.answer()
+
+
+def _content_mode_of(ad: object) -> str | None:
+    if getattr(ad, "delivery_mode", None) == "copy":
+        return "copy"
+    if getattr(ad, "content_text", None):
+        return "fields"
+    return None
+
+
 # --- callback dispatch ----------------------------------------------------
 async def dispatch(
     callback: CallbackQuery,
@@ -527,6 +582,9 @@ async def _save_ad(
     audience_service_factory: AudienceServiceFactory,
 ) -> str:
     ads = ad_service_factory(session)
+    audience = audience_service_factory(session)
+    if ws.editing_ad_id is not None:
+        return await _update_ad(ws, ads, audience, ws.editing_ad_id)
     ad = await ads.create(
         _ad_fields(ws),
         created_by=user.id,
@@ -535,7 +593,6 @@ async def _save_ad(
     )
     if ws.placements:
         await ads.set_placements(ad.id, ws.placements)
-    audience = audience_service_factory(session)
     for effect, dimension, value in ws.rules:
         await audience.add_rule(ad.id, effect=effect, dimension=dimension, value=value)
     for text, url in ws.buttons:
@@ -543,6 +600,29 @@ async def _save_ad(
     if not ws.enabled:
         await ads.set_active(ad.id, False)
     return f"Ad #{ad.id} created"
+
+
+async def _update_ad(ws: WizardState, ads: AdService, audience: AudienceService, ad_id: int) -> str:
+    """Apply an edit composition onto an existing ad (replace rules/placements/buttons)."""
+    fields = _ad_fields(ws)
+    if ws.content_mode == "copy":
+        if ws.storage_chat_id is not None:
+            fields["storage_chat_id"] = str(ws.storage_chat_id)
+        if ws.storage_message_id is not None:
+            fields["storage_message_id"] = str(ws.storage_message_id)
+    ad = await ads.edit(ad_id, fields)
+    if ad is None:
+        raise InvalidAdError("That ad no longer exists.")
+    if ws.placements:
+        await ads.set_placements(ad_id, ws.placements)
+    await audience.clear_rules(ad_id)
+    for effect, dimension, value in ws.rules:
+        await audience.add_rule(ad_id, effect=effect, dimension=dimension, value=value)
+    await ads.clear_buttons(ad_id)
+    for text, url in ws.buttons:
+        await ads.add_button(ad_id, text=text, url=url)
+    await ads.set_active(ad_id, ws.enabled)
+    return f"Ad #{ad_id} updated"
 
 
 async def _save_broadcast(

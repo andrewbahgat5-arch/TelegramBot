@@ -69,13 +69,29 @@ class _FSM:
 class _FakeAds:
     def __init__(self) -> None:
         self.created: dict[str, Any] | None = None
+        self.edited: dict[str, Any] | None = None
         self.placements: list[str] = []
         self.buttons: list[tuple[str, str]] = []
         self.active: bool | None = None
+        self.cleared_buttons = False
+        self.ad: Any = None  # the ad returned by get() in edit mode
 
     async def create(self, fields: Any, *, created_by: int, **kw: Any) -> Any:
         self.created = {"fields": dict(fields), "created_by": created_by, **kw}
         return SimpleNamespace(id=11)
+
+    async def get(self, ad_id: int) -> Any:
+        return self.ad
+
+    async def edit(self, ad_id: int, fields: Any) -> Any:
+        self.edited = {"ad_id": ad_id, "fields": dict(fields)}
+        return SimpleNamespace(id=ad_id)
+
+    async def list_placements(self, ad_id: int) -> list[str]:
+        return ["video_delivery"]
+
+    async def list_buttons(self, ad_id: int) -> list[Any]:
+        return [SimpleNamespace(text="Old", url="https://old")]
 
     async def set_placements(self, ad_id: int, placements: Any) -> list[str]:
         self.placements = list(placements)
@@ -85,6 +101,11 @@ class _FakeAds:
         self.buttons.append((text, url))
         return SimpleNamespace(id=1)
 
+    async def clear_buttons(self, ad_id: int) -> int:
+        self.cleared_buttons = True
+        self.buttons = []
+        return 0
+
     async def set_active(self, ad_id: int, active: bool) -> Any:
         self.active = active
         return SimpleNamespace(id=ad_id)
@@ -93,10 +114,18 @@ class _FakeAds:
 class _FakeAudience:
     def __init__(self) -> None:
         self.rules: list[tuple[int, str, str, str]] = []
+        self.cleared = False
 
     async def add_rule(self, ad_id: int, *, effect: str, dimension: str, value: str) -> Any:
         self.rules.append((ad_id, effect, dimension, value))
         return SimpleNamespace(id=len(self.rules))
+
+    async def list_rules(self, ad_id: int) -> list[Any]:
+        return [SimpleNamespace(effect="include", dimension="plan", value="free")]
+
+    async def clear_rules(self, ad_id: int) -> int:
+        self.cleared = True
+        return 0
 
 
 class _FakeBroadcasts:
@@ -340,6 +369,65 @@ async def test_cancel_clears_state() -> None:
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
     )
+    assert fsm.data == {}
+
+
+# --- edit-in-wizard (Bug-fix sprint) --------------------------------------
+def _existing_ad() -> Any:
+    return SimpleNamespace(
+        id=5,
+        title="Camp",
+        is_active=True,
+        priority=3,
+        show_every_n_downloads=2,
+        audience_mode="include",
+        internal_name="Camp",
+        internal_notes=None,
+        delivery_mode="fields",
+        content_text="Promo!",
+        storage_chat_id=None,
+        storage_message_id=None,
+    )
+
+
+async def test_start_edit_loads_ad_into_wizard() -> None:
+    fsm, cb = _FSM(), _callback()
+    ads, aud = _FakeAds(), _FakeAudience()
+    ads.ad = _existing_ad()
+    await admin_wizard.start_edit(cb, 5, fsm, _signer(), ads=ads, audience=aud)  # type: ignore[arg-type]
+    ws = WizardState.from_data(fsm.data["wizard"])
+    assert ws.editing_ad_id == 5 and ws.step == STEP_PREVIEW
+    assert ws.placements == ["video_delivery"]
+    assert ws.rules == [["include", "plan", "free"]]
+    assert ws.buttons == [["Old", "https://old"]]
+    assert ws.priority == 3 and ws.frequency == 2 and ws.content_text == "Promo!"
+    assert "Preview" in cb.bot.edit_message_text.await_args.args[0]
+
+
+async def test_save_edit_updates_existing_ad() -> None:
+    fsm, cb = _FSM(), _callback()
+    ws = WizardState(
+        kind="ad",
+        step=STEP_PREVIEW,
+        editing_ad_id=5,
+        placements=["home"],
+        rules=[["include", "plan", "premium"]],
+        content_mode="fields",
+        content_text="New copy",
+        buttons=[["Go", "https://x"]],
+        enabled=False,
+        internal_name="Camp",
+    )
+    _seed(fsm, ws)
+    ads, aud = _FakeAds(), _FakeAudience()
+    await _dispatch(cb, fsm, ParsedPanel("w", "sv"), ads=ads, casts=_FakeBroadcasts(), aud=aud)
+    assert ads.created is None and ads.edited is not None
+    assert ads.edited["ad_id"] == 5 and ads.edited["fields"]["text"] == "New copy"
+    assert ads.placements == ["home"]
+    assert aud.cleared and aud.rules == [(5, "include", "plan", "premium")]
+    assert ads.cleared_buttons and ads.buttons == [("Go", "https://x")]
+    assert ads.active is False
+    assert "updated" in cb.answer.await_args.args[0]
     assert fsm.data == {}
 
 

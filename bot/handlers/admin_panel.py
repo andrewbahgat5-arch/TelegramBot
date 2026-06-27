@@ -38,6 +38,7 @@ from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.handlers import admin_wizard
 from bot.keyboards.admin_panel import (
+    build_ad_action_list,
     build_ad_detail,
     build_ad_list,
     build_confirm,
@@ -175,6 +176,17 @@ async def panel_write(
     # Compose-wizard entry points (9.6.10): Ads "Create" / Broadcast "Create" + presets.
     if panel.section == "a" and panel.action == "cr":
         await admin_wizard.start(callback, state, callback_signer, kind="ad")
+        return
+    if panel.section == "a" and panel.action == "ed" and panel.arg is not None:
+        # Full edit-in-wizard: load the existing ad into the compose wizard (Bug-fix sprint).
+        await admin_wizard.start_edit(
+            callback,
+            panel.arg,
+            state,
+            callback_signer,
+            ads=ad_service_factory(session),
+            audience=audience_service_factory(session),
+        )
         return
     if panel.section == "b" and panel.action in ("cr", "bf", "bp", "ba", "bl"):
         await admin_wizard.start(callback, state, callback_signer, kind="broadcast")
@@ -701,6 +713,23 @@ _AD_CONFIRM = {
     "bc": ("bcc", "broadcast to ALL users ad"),
 }
 
+# Top-level Manage-Campaigns actions that need an ad chosen first → render a picker.
+_AD_PICKER_ACTIONS = frozenset({"en", "di", "de", "bc", "ed"})
+_AD_PICKER_VERB = {
+    "en": "enable",
+    "di": "disable",
+    "de": "delete",
+    "bc": "broadcast",
+    "ed": "edit",
+}
+
+
+def _ad_picker_text(action: str, rows: Sequence[Any]) -> str:
+    if not rows:
+        return "📢 <b>Advertisements</b>\n\nNo ads yet — create one first."
+    verb = _AD_PICKER_VERB.get(action, "manage")
+    return f"📢 <b>Pick an ad to {verb}</b>\nTap an ad below."
+
 
 async def _ads_write(
     callback: CallbackQuery,
@@ -712,10 +741,19 @@ async def _ads_write(
 ) -> None:
     """Enable / Disable / Delete / Broadcast a selected ad; destructive steps confirm first."""
     ad_id, action = panel.arg, panel.action
-    if action in ("cr", "ed"):  # create/edit wizards land in 9.6.10
-        await callback.answer("Ad create/edit wizard is coming soon.", show_alert=False)
-        return
     if ad_id is None:
+        # A top-level Manage-Campaigns action (no ad chosen yet): show an ad picker whose
+        # rows carry the same action + an ad id, so the next tap is fully targeted.
+        if action in _AD_PICKER_ACTIONS:
+            rows = await ads.list_ads()
+            if isinstance(callback.message, Message):
+                await _safe_edit(
+                    callback.message,
+                    _ad_picker_text(action, rows),
+                    build_ad_action_list(rows, action, signer),
+                )
+            await callback.answer()
+            return
         await callback.answer("Open 📋 List and tap an ad first.", show_alert=False)
         return
     if action in _AD_CONFIRM:  # render the confirm screen
