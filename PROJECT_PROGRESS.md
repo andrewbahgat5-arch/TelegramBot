@@ -567,7 +567,7 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 | Field | Value |
 |---|---|
 | **Status** | `[~]` In Progress |
-| **Completion** | 29% (4 / 14) — 11.1 + 11.5 + 11.6 + 11.7 done; live-run tasks (Phase B) deferred to Owner infra |
+| **Completion** | 36% (5 / 14) — 11.1 + 11.5 + 11.6 + 11.7 + 11.8 done; live-run tasks (Phase B) deferred to Owner infra |
 | **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented and run. Production-readiness is established by simulation, not by hope. |
 | **Stop Point** | Owner reviews `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`; signs off Gate G-5 (Security). |
 | **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) built + gated now; Phase B (L1–L4, ST-1…6, capacity, manual M-17…22) runs once the Owner provisions the @BotFather sandbox bot + isolated test PG/Redis/storage. |
@@ -580,6 +580,8 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 - [x] **11.6** `tests/simulation/` framework skeleton — **2026-06-27.** `SimulationRunner` (+ `LOAD_LEVELS` L1–L6, `reject_production_credentials` in `__init__`, §25.15.9 CLI `python -m tests.simulation.runner`), `BotClient` ABC + deterministic network-free `StubBotClient` (models rate/daily/rapid-fire defenses; `SandboxBotClient` is a Phase-B placeholder), `UserProfile` base + `PROFILE_REGISTRY`, `MetricsCollector`/`RunSummary` (p50/p95/p99, error rate, throughput, blocked-download count), append-only `ReportWriter`, `SimulatedAction`/`ActionResult`. Self-tests in `tests/unit/test_simulation_framework.py` (8). **Validation:** 740 pass (+8) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160 (tests excluded); bandit 0. *Live sandbox transport + real load runs are Phase B.*
 
+- [x] **11.8** AI-controlled traffic generators — **2026-06-27.** `tests/simulation/traffic/`: `RandomTraffic`, `ScheduledSpike`, `PeakHour`, `Viral`, `PlatformPattern` self-register in `TRAFFIC_REGISTRY`. Each produces a deterministic `TrafficPlan` (per-user `Spawn(profile, start_offset_s)`) — profile mix for the stub runner now, arrival-timing for Phase-B live runs. Tests in `tests/unit/test_traffic_generators.py` (9: registry, determinism, window bounds, spike-clustering, viral monotonicity, peak concentration, platform validation). **Validation:** 754 pass (+9); ruff+format clean; bandit 0.
+
 - [x] **11.7** Five V1 user profiles — **2026-06-27.** `Casual`/`Active`/`Heavy`/`Abuse` (registered in `PROFILE_REGISTRY` via `@register_profile`); `Premium` present but disabled (`enabled=False`, not registered) until V2. Each emits a deterministic action stream. Verified: `python -m tests.simulation.runner --level=L1 --profile=Abuse --seed=42` → 0 successful downloads (M-22 invariant); `--profile=Casual` → downloads succeed. Tests in `tests/unit/test_user_profiles.py` (5). **Validation:** 745 pass (+5); ruff+format clean; bandit 0.
 
 **Pending Tasks**
@@ -587,7 +589,6 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 - [ ] **11.2** `tests/e2e/harness.py` — sandbox-bot client, test-account pool, deterministic action delays.
 - [ ] **11.3** E2E suites under `tests/e2e/{bot_core, download_flow, cache_flow, queue_flow, error_flow}/` covering Section 25.7.
 - [ ] **11.4** Named E2E scenarios S-1 through S-5 under `tests/e2e/scenarios/` (S-3 uses mocked secondary provider).
-- [ ] **11.8** AI-controlled traffic generators (`RandomTraffic`, `ScheduledSpike`, `PeakHour`, `Viral`, `PlatformPattern`).
 - [ ] **11.9** Stress-scenario catalog under `tests/simulation/scenarios/` (ST-1 through ST-6).
 - [ ] **11.10** Run load levels L1, L2, L3, L4 end-to-end; append entries to `PERFORMANCE_REPORT.md`.
 - [ ] **11.11** Run stress scenarios ST-1 through ST-6; append outcomes to `PERFORMANCE_REPORT.md`.
