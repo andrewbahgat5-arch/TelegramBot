@@ -341,3 +341,51 @@ async def test_cancel_clears_state() -> None:
         aud=_FakeAudience(),
     )
     assert fsm.data == {}
+
+
+# --- audience mutual exclusivity (Owner UX #1/#2/#3) ----------------------
+async def test_audience_selecting_opposite_side_swaps_not_conflicts() -> None:
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
+    # Include Premium (opt 1), then Exclude Premium (opt 5) for the SAME target.
+    await _dispatch(
+        cb,
+        fsm,
+        ParsedPanel("w", "atg", 1),
+        ads=_FakeAds(),
+        casts=_FakeBroadcasts(),
+        aud=_FakeAudience(),
+    )
+    await _dispatch(
+        cb,
+        fsm,
+        ParsedPanel("w", "atg", 5),
+        ads=_FakeAds(),
+        casts=_FakeBroadcasts(),
+        aud=_FakeAudience(),
+    )
+    ws = WizardState.from_data(fsm.data["wizard"])
+    assert ws.rules == [["exclude", "plan", "premium"]]  # never both — the side swapped
+    assert ws.audience_mode == "all"  # no include rule remains
+    assert ws.step == STEP_AUDIENCE  # stayed on the same screen (Owner #4/#5)
+
+
+def test_audience_keyboard_hides_the_opposite_side() -> None:
+    from bot.keyboards.admin_panel import build_wizard_audience
+
+    signer = _signer()
+    ws = WizardState(
+        kind="broadcast",
+        step=STEP_AUDIENCE,
+        audience_mode="include",
+        rules=[["include", "plan", "premium"]],
+    )
+    markup = build_wizard_audience(ws, signer)
+    shown = {
+        p.arg
+        for row in markup.inline_keyboard
+        for b in row
+        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "atg"
+    }
+    assert 1 in shown  # Include Premium still offered (and marked)
+    assert 5 not in shown  # Exclude Premium hidden while Premium is included

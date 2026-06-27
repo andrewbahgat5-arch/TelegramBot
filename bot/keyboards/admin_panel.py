@@ -333,12 +333,19 @@ def build_wizard_audience(state: WizardState, signer: CallbackSigner) -> InlineK
             for idx, (code, label) in enumerate(modes)
         ]
     )
+    taken = {(e, d, v) for e, d, v in state.rules}
     option_buttons: list[InlineKeyboardButton] = []
     for opt in AUDIENCE_OPTIONS:
         if opt.value is None:  # typed sub-input: show how many such rules exist
             count = sum(1 for e, d, _v in state.rules if e == opt.effect and d == opt.dimension)
             label = f"{opt.label}" + (f" ({count})" if count else "")
         else:
+            # Mutual exclusivity: hide a target already chosen on the opposite side, so the
+            # admin can never create an Include+Exclude conflict (Owner #1/#2/#3). It
+            # reappears the moment the opposite selection is removed.
+            opposite = "exclude" if opt.effect == "include" else "include"
+            if (opposite, opt.dimension, opt.value) in taken:
+                continue
             active = [opt.effect, opt.dimension, opt.value] in state.rules
             label = f"{_mark(active)} {opt.label}"
         option_buttons.append(_w(signer, label, "atg", opt.index))

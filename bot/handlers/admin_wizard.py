@@ -194,20 +194,38 @@ def _apply(ws: WizardState, action: str, arg: int | None, value: int | None) -> 
         ws.buttons = []
 
 
+def _opposite(effect: str) -> str:
+    return "exclude" if effect == "include" else "include"
+
+
+def _set_rule(ws: WizardState, effect: str, dimension: str, value: str) -> None:
+    """Select a target on one side, clearing it from the other — never both (Owner #1)."""
+    opposite = [_opposite(effect), dimension, value]
+    if opposite in ws.rules:
+        ws.rules.remove(opposite)
+    rule = [effect, dimension, value]
+    if rule not in ws.rules:
+        ws.rules.append(rule)
+
+
+def _recompute_audience_mode(ws: WizardState) -> None:
+    """Choosing any Include switches to include; removing the last reverts to All."""
+    if any(e == "include" for e, _d, _v in ws.rules):
+        ws.audience_mode = "include"
+    elif ws.audience_mode == "include":
+        ws.audience_mode = "all"
+
+
 def _toggle_audience(ws: WizardState, arg: int | None) -> None:
     opt = audience_option(arg)
     if opt is None or opt.value is None:
         return
     rule = [opt.effect, opt.dimension, opt.value]
     if rule in ws.rules:
-        ws.rules.remove(rule)
+        ws.rules.remove(rule)  # deselect
     else:
-        ws.rules.append(rule)
-    # "Choosing any Include switches to include; removing the last reverts to All."
-    if any(e == "include" for e, _d, _v in ws.rules):
-        ws.audience_mode = "include"
-    elif ws.audience_mode == "include":
-        ws.audience_mode = "all"
+        _set_rule(ws, opt.effect, opt.dimension, opt.value)  # select + clear opposite
+    _recompute_audience_mode(ws)
 
 
 def _toggle_placement(ws: WizardState, arg: int | None) -> None:
@@ -304,11 +322,8 @@ def _apply_text(ws: WizardState, field: str, raw: str) -> str | None:
             return None
         if opt.dimension == "user_id" and not raw.lstrip("-").isdigit():
             return "Send a numeric Telegram id."
-        rule = [opt.effect, opt.dimension, raw]
-        if rule not in ws.rules:
-            ws.rules.append(rule)
-        if opt.effect == "include":
-            ws.audience_mode = "include"
+        _set_rule(ws, opt.effect, opt.dimension, raw)  # select + clear opposite (#1)
+        _recompute_audience_mode(ws)
         return None
     return None
 
