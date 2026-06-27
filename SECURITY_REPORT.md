@@ -27,9 +27,9 @@ Entries are append-only. A correction adds a new entry that references the prior
 | Input Validation | — | — | 0 |
 | Authentication & Authorization | — | — | 0 |
 | Abuse Protection | — | — | 0 |
-| Data Security | — | — | 0 |
+| Data Security | 2026-06-27 | PASS (4) | 0 |
 | Dependency Security (`pip-audit`) | — | — | 0 |
-| Dependency Security (`bandit`) | — | — | 0 |
+| Dependency Security (`bandit`) | 2026-06-27 | clean (0) | 0 |
 | Incidents (since launch) | — | — | 0 |
 
 This summary is the only mutable region. Update its rows after each new entry.
@@ -137,6 +137,27 @@ For after-launch security events.
 ---
 
 ## Standing Entries
+
+### 2026-06-27 — Security Validation Run — Sprint 11 Task 11.1 (test-environment isolation)
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Task 11.1); worktree `happy-bose-71ed46`, parent `066b43a` |
+| Environment | local |
+| Sprint | 11 |
+| Triggered by | Task 11.1 — `DEPLOY_ENV` plumbing + production-fingerprint boot assertion (D-032/D-060) |
+| Suites run | `tests/security/test_environment_isolation.py` (data_security category — §25.9.4) |
+| pip-audit | not run this task (Dependency Security suite wiring is Task 11.5) |
+| bandit | clean (0 findings) on `core/security.py`, `core/environment.py`, `core/config.py` |
+| Total cases | 4 | Passed | 4 | Failed | 0 |
+| Notes | First occupant of `tests/security/`. The guard refuses to boot a `DEPLOY_ENV=test` process whose `BOT_TOKEN` matches the configured `PROD_BOT_TOKEN_FINGERPRINT` (SHA-256, one-way — no secret stored, Hard Rule 6). The check is generic/extensible: `core/environment.py::ENVIRONMENT_SAFETY_RULES` (future rules: test must not use a production DB/Redis/storage/webhook). |
+
+**Findings raised this run (if any)**
+- None.
+
+**Gate:** This task changes security/isolation configuration → Gate **G-5** (Security configuration). Awaiting Owner `Gate G-5 approved`.
+
+---
 
 ### Pre-Sprint 0 — 2026-06-23
 

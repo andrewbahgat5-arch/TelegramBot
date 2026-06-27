@@ -59,7 +59,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Open decisions awaiting Owner | 9 OQs + ratify documented deviations (BroadcastWorker polling vs §16.8; `downloads` has no `job_id`/`media_id`). Task 8.3 `ADMIN_API_KEY` reconciliation RESOLVED (D-051); **8.3 Owner-signed-off 2026-06-26**. Sprint 9 / 9.5 / 10 sign-offs pending. |
 | Last code change | 2026-06-26 — **Owner-feedback #35:** `UserService.unban` now clears `is_banned`/`banned_at`/`ban_reason` (D-054) so an unbanned user shows no stale reason; backfilled 2 existing rows. Hardened `test_concurrent_dequeue_no_duplicates` (flush + no-live-worker note — the 997/1000 failure was a live worker draining the shared queue, not a bug). Uncommitted in worktree `happy-bose-71ed46`. |
 | Last documentation change | 2026-06-26 — MASTER_PLAN §5 (D-054); `TEST_PLAN.md` (PowerShell quoting + worker-off notes); this file (8.3 sign-off). |
-| Next recommended action | Owner verifies **9.5.9 + 9.5.10** (per `TEST_PLAN.md`), then human-verification + sign-off of Sprint 9 + 9.5 + 10. **Sprint 11** (testing framework, security, load/stress) to start in a new session. |
+| Next recommended action | **Sprint 11 IN PROGRESS** (code-first, Owner-approved 2026-06-27). Task **11.1 done** (`DEPLOY_ENV` + production-fingerprint boot assertion, D-060; awaiting **Gate G-5** sign-off). Next checkpoint per workflow: Owner reviews 11.1, then proceed to a Phase-A task (recommend **11.5** security suite or **11.6** simulation skeleton). Still pending: Owner verification of 9.5.9 + 9.5.10 and sign-off of S9 + S9.5 + S10. |
 
 ---
 
@@ -566,14 +566,18 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 14) |
+| **Status** | `[~]` In Progress |
+| **Completion** | 7% (1 / 14) — 11.1 code-side complete (sandbox-bot/infra provisioning is an Owner Phase-B action) |
 | **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented and run. Production-readiness is established by simulation, not by hope. |
 | **Stop Point** | Owner reviews `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`; signs off Gate G-5 (Security). |
+| **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) built + gated now; Phase B (L1–L4, ST-1…6, capacity, manual M-17…22) runs once the Owner provisions the @BotFather sandbox bot + isolated test PG/Redis/storage. |
+
+**Completed Tasks**
+
+- [x] **11.1** `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5** (awaiting Owner sign-off). *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
 
 **Pending Tasks**
 
-- [ ] **11.1** Sandbox bot + isolated test environment (D-032); `DEPLOY_ENV=test` plumbing; production-fingerprint startup assertion.
 - [ ] **11.2** `tests/e2e/harness.py` — sandbox-bot client, test-account pool, deterministic action delays.
 - [ ] **11.3** E2E suites under `tests/e2e/{bot_core, download_flow, cache_flow, queue_flow, error_flow}/` covering Section 25.7.
 - [ ] **11.4** Named E2E scenarios S-1 through S-5 under `tests/e2e/scenarios/` (S-3 uses mocked secondary provider).
@@ -686,6 +690,20 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 ## Session Handoff Log
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
+
+### Session Handoff — 2026-06-27 — Sprint 11 kickoff: Task 11.1 (test-environment isolation) complete
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation — Sprint 11 (Testing, Security & Load Framework) start. Owner approved the breakdown + a **code-first / defer-live-runs** phasing and chose **11.1** as the first checkpoint. |
+| **Scope decisions** | Live runs (E2E execution, load L1–L4, stress ST-1…6, capacity, manual M-17…22) are **Phase B**, deferred until the Owner provisions a @BotFather sandbox bot + isolated test PG/Redis/storage. Phase A is framework code, built + gated now. Worktree confirmed: **`happy-bose-71ed46`** (this session physically ran in `nostalgic-heyrovsky-e17d8d` but all edits/commits target happy-bose). Push only on Owner request. |
+| **What changed (11.1)** | Two LOCKED §13.2 env keys added (Owner-approved, **D-060**): `DEPLOY_ENV` (`development`/`test`/`production`, default `development`) + `PROD_BOT_TOKEN_FINGERPRINT` (SHA-256 hex of the prod token — a one-way hash, not a secret). New `core/security.py::token_fingerprint`. New **extensible** `core/environment.py`: `EnvironmentSafetyRule` + `ENVIRONMENT_SAFETY_RULES` registry + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`. `core/config.py` gained the two fields, a `deploy_env` normalizer, a self-enforcing `_enforce_environment_safety` model-validator, and `is_test_env`/`is_production` props. First rule (D-032): refuse to boot `DEPLOY_ENV=test` against the production bot. `.env.example` updated. |
+| **Why the registry** | Owner refinement: keep the validation generic so future isolation rules (test must not use a production DB/Redis/storage/webhook) register without touching the startup architecture. Rules are run by one model-validator, so every current + future entry point inherits them. |
+| **Validation** | **691 pass** (671 → +20) / 0 fail / 2 deselected (documented env gotchas). ruff + format clean; mypy --strict **160** files; import-linter **7** contracts; bandit **0**. No schema change, no migration, no new dependency. First occupant of `tests/security/`. |
+| **Gate** | Touches security/isolation configuration → **Gate G-5** (Security configuration). PR must carry `Gate G-5 approved` before merge. |
+| **Commits** | (this commit) Sprint 11 Task 11.1. Worktree `happy-bose-71ed46`, branch `claude/happy-bose-71ed46`, parent `066b43a`. |
+| **Owner action** | Review 11.1 + sign off **Gate G-5**. Then approve the next Phase-A checkpoint (recommend **11.5** security suite, or **11.6** simulation skeleton). |
+| **Notes for the next agent** | Add new environment safety rules by appending to `core/environment.py::ENVIRONMENT_SAFETY_RULES` — never re-wire the startup path. The fingerprint is `core.security.token_fingerprint(token)` (SHA-256); store only the hash, never a token (Hard Rule 6). `tests/security/` is now live (first file: `test_environment_isolation.py`); 11.5 fills the remaining four §25.9 categories. |
 
 ### Session Handoff — 2026-06-27 — Sprint 9.6 Admin Panel: unified audience engine + multi-placement + compose wizard (C1–C9, **COMPLETE — Owner signed off 2026-06-27**)
 

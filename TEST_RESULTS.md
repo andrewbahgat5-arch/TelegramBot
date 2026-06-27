@@ -20,9 +20,9 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-25 | PASS (~449) | + Task 9.5.10: timeparse, scheduling (ad gate + broadcast due-poller), `--at` handlers | Sprint 1–10 |
-| Integration | 2026-06-25 | PASS (~80) | + Task 9.5.10: broadcast due-poller filter (`get_next_pending(now)`) | Sprint 2–10 |
-| Security | — | — | — | (Sprint 11) |
+| Unit | 2026-06-27 | PASS | + Task 11.1: `DEPLOY_ENV` config, env safety-rule registry, `token_fingerprint` | Sprint 1–11 |
+| Integration | 2026-06-27 | PASS (~80) | (unchanged this task) | Sprint 2–11 |
+| Security | 2026-06-27 | PASS (4) | environment isolation: `DEPLOY_ENV=test` production-fingerprint boot assertion (§25.9.4) | Sprint 11 |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
 | E2E (Telegram bot) | — | — | — | (Sprint 11) |
 | Regression | — | — | — | (each sprint adds rows) |
@@ -66,6 +66,23 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-27 — Unit + Integration + Security — Sprint 11 Task 11.1 (DEPLOY_ENV + production-fingerprint boot assertion)
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Task 11.1); worktree `happy-bose-71ed46`, parent `066b43a` |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer); DB head `202606270002` (no schema change this task) |
+| Suite | all (unit + integration + security) with the documented environmental deselects |
+| Triggered by | Sprint 11 Task 11.1 — test-environment isolation plumbing |
+| Total tests | 691 | Passed | 691 | Failed | 0 | Deselected | 2 |
+| New tests | +20 over the 671 baseline: unit `test_security.py` (4: `token_fingerprint`), unit `test_environment.py` (7: rule registry + aggregation + error), unit `test_config.py` (+5: `DEPLOY_ENV` default/normalize/production/invalid/fingerprint-default), security `test_environment_isolation.py` (4: test-vs-prod refuse-boot, sandbox-boots, production-ignores, no-fingerprint-noop) |
+| Coverage by path | `core/security.py` `token_fingerprint` (SHA-256); `core/environment.py` safety-rule registry + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`; `core/config.py` `DEPLOY_ENV` Literal + normalizer + `_enforce_environment_safety` model-validator + `is_test_env`/`is_production`. First occupant of the `tests/security/` collection root (§25.2). |
+| Notes | Two LOCKED §13.2 keys added (`DEPLOY_ENV`, `PROD_BOT_TOKEN_FINGERPRINT`) — Owner-approved, D-060. `.env.example` updated. No schema change, no migration, no new dependency. Gates: ruff + format clean; mypy --strict 160 files; import-linter 7 contracts; bandit 0. Touches security configuration → Gate **G-5** (awaiting Owner sign-off). |
+
+**Failures:** None. (Deselect set unchanged: redis concurrent-dequeue, settings upsert drift, settings_service ignore — all documented environmental gotchas.)
+
+---
 
 ### 2026-06-27 — Unit + Integration — Sprint 9.6 unified audience + multi-placement + compose wizard (C1–C9)
 

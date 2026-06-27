@@ -98,6 +98,37 @@ def test_webhook_secret_required_in_webhook_mode(
         _settings()
 
 
+def test_deploy_env_defaults_to_development() -> None:
+    settings = _settings()
+    assert settings.deploy_env == "development"
+    assert settings.is_test_env is False
+    assert settings.is_production is False
+
+
+def test_deploy_env_normalized_to_lowercase(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_ENV", "  TEST ")
+    settings = _settings()
+    assert settings.deploy_env == "test"
+    assert settings.is_test_env is True
+
+
+def test_deploy_env_production_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_ENV", "production")
+    settings = _settings()
+    assert settings.is_production is True
+    assert settings.is_test_env is False
+
+
+def test_invalid_deploy_env_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DEPLOY_ENV", "staging")
+    with pytest.raises(ValidationError):
+        _settings()
+
+
+def test_prod_fingerprint_defaults_empty() -> None:
+    assert _settings().prod_bot_token_fingerprint == ""
+
+
 def test_missing_required_field_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     # No env file and no env vars -> required fields are missing.
     for key in (

@@ -18,6 +18,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.constants import REDACTED, SECRET_KEY_SUBSTRINGS
+from core.environment import EnvironmentMisconfiguredError, evaluate_environment_safety
 
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
@@ -42,6 +43,17 @@ class Settings(BaseSettings):
     # Telegram Bot API server base URL (e.g. http://bot-api:8081) to raise the cap
     # to 2 GB (D-040). Used by the bot + worker Telegram clients.
     bot_api_base_url: str = Field("", alias="BOT_API_BASE_URL")
+
+    # --- Deployment environment / test isolation (D-060, D-032) ---
+    # Selects the deployment environment. `test` activates the §25.6 isolation
+    # guards (see core.environment); the simulation runner / e2e harness require it.
+    deploy_env: Literal["development", "test", "production"] = Field(
+        "development", alias="DEPLOY_ENV"
+    )
+    # SHA-256 hex fingerprint of the PRODUCTION bot token — a one-way hash, not a
+    # secret. When DEPLOY_ENV=test and sha256(BOT_TOKEN) equals this, the process
+    # refuses to boot (production-fingerprint assertion, D-032/D-060). Empty → off.
+    prod_bot_token_fingerprint: str = Field("", alias="PROD_BOT_TOKEN_FINGERPRINT")
 
     # --- Database ---
     db_host: str = Field("localhost", alias="DB_HOST")
@@ -112,6 +124,15 @@ class Settings(BaseSettings):
             raise ValueError(f"LOG_LEVEL must be one of {sorted(_VALID_LOG_LEVELS)}, got {value!r}")
         return normalized
 
+    @field_validator("deploy_env", mode="before")
+    @classmethod
+    def _normalize_deploy_env(cls, value: object) -> object:
+        # Env values arrive verbatim; accept any case/whitespace, then let the
+        # Literal reject anything outside development/test/production.
+        if isinstance(value, str):
+            return value.strip().lower()
+        return value
+
     @field_validator("telegram_alerts_chat_id", mode="before")
     @classmethod
     def _empty_chat_id_is_none(cls, value: object) -> object:
@@ -133,6 +154,17 @@ class Settings(BaseSettings):
             raise ValueError("BOT_WEBHOOK_SECRET is required when BOT_WEBHOOK_URL is set")
         return self
 
+    @model_validator(mode="after")
+    def _enforce_environment_safety(self) -> Settings:
+        # Self-enforcing isolation guard (D-060): every process that builds Settings
+        # runs the §25.6 safety rules. Raises a non-ValueError so it propagates out
+        # of Settings() unchanged (refuse-to-boot) instead of becoming a generic
+        # ValidationError. Extend the rule set in core.environment, not here.
+        violations = evaluate_environment_safety(self)
+        if violations:
+            raise EnvironmentMisconfiguredError(violations)
+        return self
+
     # --- Derived helpers ---
     @property
     def sentry_enabled(self) -> bool:
@@ -148,6 +180,16 @@ class Settings(BaseSettings):
     def use_webhook(self) -> bool:
         """Empty webhook URL means long-polling mode (Section 13.2)."""
         return bool(self.bot_webhook_url)
+
+    @property
+    def is_test_env(self) -> bool:
+        """True when running the isolated test deployment (D-032, Section 25.6)."""
+        return self.deploy_env == "test"
+
+    @property
+    def is_production(self) -> bool:
+        """True when running the production deployment (D-032)."""
+        return self.deploy_env == "production"
 
     @property
     def use_local_bot_api(self) -> bool:
