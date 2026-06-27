@@ -138,6 +138,18 @@ For after-launch security events.
 
 ## Standing Entries
 
+### 2026-06-27 — Gate G-5 (Security configuration) — ✅ APPROVED by Owner
+
+| Field | Value |
+|---|---|
+| Gate | **G-5 — Security configuration** (§25.13, D-037) |
+| Status | ✅ **Approved by Owner — 2026-06-27** |
+| Scope | Sprint 11 Phase A changes touching secrets handling / isolation / rate-limit semantics: Task 11.1 (`DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` production-fingerprint boot assertion, D-060; `core/environment.py` safety-rule registry) and Task 11.5 (the five §25.9 security categories). |
+| Verified | No new leak path (scrubber + Settings repr + Sentry before_send redact secrets; fingerprint is a one-way hash, no secret stored); rate-limit/abuse semantics enforced (45 security tests green); test-vs-production isolation guard refuses to boot the sandbox against the production bot. |
+| Git SHA at approval | `03c9885` (worktree `happy-bose-71ed46`, pushed to origin) |
+
+---
+
 ### 2026-06-27 — Security Validation Run — Sprint 11 Task 11.5 (full security suite)
 
 | Field | Value |

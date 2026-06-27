@@ -52,7 +52,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, D-049, D-050; `BOT_API_BASE_URL` env var) |
-| Current sprint | **Sprint 11 — Phase A ✅ COMPLETE (implementation), Phase B ⏳ waiting for infrastructure (2026-06-27).** All 9 code-only tasks (11.1–11.9) done, gated, committed, **pushed** (`6e88739`), and signed off; the 5 remaining tasks (11.10–11.14) are live executions blocked on Owner-provisioned sandbox bot + test infra (see the Phase B Checklist in the Sprint 11 section). Awaiting **Gate G-5** sign-off. Earlier: deferred-backlog (8.3/9.5.9/9.5.10) done; Sprint 9 + 9.5 + 10 still `[~]` Under Review. |
+| Current sprint | **Sprint 11 — Phase A ✅ COMPLETE (implementation), Phase B ⏳ waiting for infrastructure (2026-06-27).** All 9 code-only tasks (11.1–11.9) done, gated, committed, **pushed** (`6e88739`), and signed off; the 5 remaining tasks (11.10–11.14) are live executions blocked on Owner-provisioned sandbox bot + test infra (see the Phase B Checklist in the Sprint 11 section). **Gate G-5 ✅ approved 2026-06-27.** Next: **Sprint 12 — Launch Readiness** (new session). Earlier: deferred-backlog (8.3/9.5.9/9.5.10) done; Sprint 9 + 9.5 + 10 still `[~]` Under Review. |
 | Sprints completed | 8 / 13 signed off (S0–S8; 8.3 HTTP API now implemented, `[~]` Under Review). S9 under review; **S9.5 now 10/10 implemented** (`[~]` Under Review); S10 under review. |
 | Tasks completed | 86 / 105 (S0–S6 = 65; S7: 4/4; S8: **3/3**; S9: 4/4; S9.5: **10/10** — 9.5.9 + 9.5.10 now done; S10: 8/8 — S8.3/S9/S9.5/S10 under review) + Owner-feedback hardening rounds #14–#31 |
 | Open blockers | 0 |
@@ -566,19 +566,19 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | ✅ **Phase A — Completed (implementation done)** · ⏳ **Phase B — Waiting for Infrastructure** |
+| **Status** | ✅ **Phase A — Completed & ARCHIVED (Gate G-5 approved 2026-06-27)** · ⏳ **Phase B — Waiting for Infrastructure** |
 | **Phase A (implementation)** | **COMPLETE — all 9 code-only tasks done, gated, committed, pushed, and signed off (2026-06-27).** 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9. There is **no remaining code work** in Sprint 11; the framework, security suite, simulation, and E2E scaffolding are finished. |
 | **Phase B (infra-dependent validation)** | **WAITING FOR INFRASTRUCTURE.** 11.10–11.14 are not code — they are *live executions* that require the Owner to provision the @BotFather sandbox bot + isolated test PG/Redis/storage. See the **Phase B Checklist** below (the handoff for the future Phase-B session). |
 | **Completion** | Phase A: **9/9 (100%)**. Phase B: **0/5** (blocked on infra). Overall Sprint 11: 9/14 tasks; the remaining 5 are infrastructure-gated, not implementation. |
 | **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented (Phase A ✅) and run live (Phase B ⏳). |
-| **Stop Point** | Owner signs off **Gate G-5** (Security config) for Phase A; Phase B closes after the live runs + capacity sign-off against `TEST_RESULTS.md` / `SECURITY_REPORT.md` / `PERFORMANCE_REPORT.md`. |
+| **Stop Point** | **Gate G-5 (Security config) ✅ approved by Owner 2026-06-27 — Phase A signed off & archived.** Phase B closes after the live runs + capacity sign-off against `TEST_RESULTS.md` / `SECURITY_REPORT.md` / `PERFORMANCE_REPORT.md` (resumes when sandbox infra is ready). |
 | **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) is built + gated + pushed; Phase B (live L1–L4, ST-1…6, S-1…S-5, capacity, manual M-17…22) runs once the sandbox bot + isolated test infra exist. |
 
 **Completed Tasks — Phase A · ✅ Completed / Signed Off 2026-06-27** (all gated green, committed `4ac5f0b`…`14816d0`, pushed to `origin/claude/happy-bose-71ed46`)
 
-- [x] **11.1** ✅ Completed / Signed Off — `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5** (awaiting Owner sign-off). *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
+- [x] **11.1** ✅ Completed / Signed Off — `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5 ✅ approved 2026-06-27**. *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
 
-- [x] **11.5** ✅ Completed / Signed Off — Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5**.
+- [x] **11.5** ✅ Completed / Signed Off — Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5 ✅ approved 2026-06-27**.
 
 - [x] **11.2** ✅ Completed / Signed Off — E2E harness — **2026-06-27.** `tests/e2e/harness.py`: `E2EHarness` (sandbox-bot client wrapper; `connect` is Phase B), `AccountPool` + `SandboxAccount` (fixed test-account pool, round-robin), `DeterministicDelays` (seeded), `sandbox_ready`/`skip_if_sandbox_unavailable` gating on `DEPLOY_ENV=test` + `E2E_LIVE=1`. `tests/e2e/conftest.py` exposes the `harness` fixture (skips when the sandbox is unavailable). Harness self-tests `tests/e2e/test_harness.py` (5, run now). 
 
@@ -625,7 +625,7 @@ live execution. Work top-to-bottom; each block is a prerequisite for the next.
 
 **Validation Results:** Phase A — 766 pass / 28 skipped (E2E, Phase-B-gated) / 2 deselected; ruff + format clean; mypy --strict 160; import-linter 7; bandit 0. Phase B — pending infrastructure.
 **Known Issues:** none.
-**Next Recommended Action:** Phase A is finalized + pushed (`6e88739`). **Owner: sign off Gate G-5**, then provision the Phase-B infrastructure above. No further implementation until infra is available.
+**Next Recommended Action:** Phase A is finalized, **Gate G-5 ✅ approved (2026-06-27)**, and archived. Phase B stays parked until the sandbox infra is ready. Development continues with **Sprint 12 — Launch Readiness** in a new session (see that section + the kickoff prompt the Owner was given).
 
 ---
 
