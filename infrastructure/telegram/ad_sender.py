@@ -22,12 +22,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from aiogram import Bot
-from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    InputRichMessage,
-    ReplyParameters,
-)
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from core.logging import get_logger
 from domain.enums import AdType
@@ -124,26 +119,6 @@ class TelegramAdSender:
             message_id=message_id,
             reply_markup=_build_markup(buttons),
             reply_to_message_id=reply_to_message_id,
-        )
-
-    async def send_rich_ad(
-        self,
-        chat_id: int,
-        *,
-        markdown: str,
-        buttons: Sequence[AdButtonSpec],
-        reply_to_message_id: int | None = None,
-    ) -> None:
-        reply = (
-            ReplyParameters(message_id=reply_to_message_id)
-            if reply_to_message_id is not None
-            else None
-        )
-        await self._bot.send_rich_message(
-            chat_id,
-            InputRichMessage(markdown=markdown),
-            reply_markup=_build_markup(buttons),
-            reply_parameters=reply,
         )
 
 

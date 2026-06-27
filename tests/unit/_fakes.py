@@ -1211,14 +1211,10 @@ class FakeAdRepo:
 class FakeAdSender:
     """In-memory ``AdSenderProtocol`` recording each ad sent (Sprint 9.5)."""
 
-    def __init__(
-        self, *, error: Exception | None = None, rich_error: Exception | None = None
-    ) -> None:
+    def __init__(self, *, error: Exception | None = None) -> None:
         self._error = error
-        self._rich_error = rich_error
         self.sent: list[dict[str, Any]] = []
         self.copied: list[dict[str, Any]] = []
-        self.rich: list[dict[str, Any]] = []
 
     async def send_ad(
         self,
@@ -1261,25 +1257,6 @@ class FakeAdSender:
                 "chat_id": chat_id,
                 "from_chat_id": from_chat_id,
                 "message_id": message_id,
-                "buttons": list(buttons),
-                "reply_to_message_id": reply_to_message_id,
-            }
-        )
-
-    async def send_rich_ad(
-        self,
-        chat_id: int,
-        *,
-        markdown: str,
-        buttons: Sequence[Any],
-        reply_to_message_id: int | None = None,
-    ) -> None:
-        if self._rich_error is not None:
-            raise self._rich_error
-        self.rich.append(
-            {
-                "chat_id": chat_id,
-                "markdown": markdown,
                 "buttons": list(buttons),
                 "reply_to_message_id": reply_to_message_id,
             }

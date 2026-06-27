@@ -143,7 +143,6 @@ async def start_edit(
         internal_notes=ad.internal_notes,
         content_mode=_content_mode_of(ad),
         content_text=ad.content_text,
-        content_markdown=ad.content_text,  # stored content is the rich-markdown source
         storage_chat_id=ad.storage_chat_id,
         storage_message_id=ad.storage_message_id,
         buttons=[[b.text, b.url] for b in buttons],
@@ -400,17 +399,12 @@ async def on_content(
         return
     if message.content_type == "text" and message.text:
         ws.content_mode = "fields"
-        # Keep both renderings: the raw text is the Rich-Markdown source an ad delivers via
-        # sendRichMessage (headings/lists/details/…); html_text is the broadcast send and the
-        # ad's classic fallback.
         ws.content_text = message.html_text or message.text
-        ws.content_markdown = message.text
         ws.storage_chat_id = None
         ws.storage_message_id = None
     else:  # preserve native Telegram content verbatim via copy_message
         ws.content_mode = "copy"
         ws.content_text = None
-        ws.content_markdown = None
         ws.storage_chat_id = message.chat.id
         ws.storage_message_id = message.message_id
     await state.set_state(None)
@@ -574,13 +568,13 @@ def _ad_fields(ws: WizardState) -> dict[str, str]:
     if ws.content_mode == "copy":
         fields["delivery"] = "copy"
     else:
-        # Typed text is authored as Rich Markdown and delivered via sendRichMessage, so it
-        # renders the full format (headings/lists/collapsible blocks/images + inline styles)
-        # that classic parse_mode cannot. The raw source is stored as the ad's content_text;
-        # delivery falls back to a classic text send if the Bot API lacks rich messages.
-        fields["delivery"] = "rich"
+        fields["delivery"] = "fields"
         fields["type"] = "text"
-        fields["text"] = ws.content_markdown or ws.content_text or ""
+        fields["text"] = ws.content_text or ""
+        # Content is captured as Telegram HTML (entities → tags in ``on_content``), so it
+        # must be delivered with HTML parse mode or the tags render as literal text. This
+        # preserves bold/italic/underline/strikethrough/spoiler/code/quote/link formatting.
+        fields["parse_mode"] = "HTML"
     return fields
 
 

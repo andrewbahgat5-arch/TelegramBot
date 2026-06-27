@@ -74,23 +74,6 @@ class AdSenderProtocol(Protocol):
         """
         ...
 
-    async def send_rich_ad(
-        self,
-        chat_id: int,
-        *,
-        markdown: str,
-        buttons: Sequence[AdButtonSpec],
-        reply_to_message_id: int | None = None,
-    ) -> None:
-        """Deliver a ``rich``-mode ad via ``sendRichMessage`` (Rich Markdown source).
-
-        Renders the full Rich Message format (headings, lists, collapsible blocks, image
-        blocks, tables, plus standard inline formatting) that classic ``parse_mode`` cannot.
-        May raise if the Bot API server does not support rich messages — the caller falls
-        back to a classic send so an ad never silently fails to deliver.
-        """
-        ...
-
 
 class AdClickSignerProtocol(Protocol):
     def pack_ad_click(self, ad_id: int, button_id: int | None = None) -> str:

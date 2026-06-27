@@ -319,9 +319,9 @@ async def test_save_ad_creates_with_placements_rules_and_buttons() -> None:
     assert "created" in cb.answer.await_args.args[0]
 
 
-async def test_save_ad_text_content_uses_rich_markdown() -> None:
-    # Typed text is authored as Rich Markdown and saved as a rich-delivery ad carrying the
-    # raw source, so sendRichMessage renders the full format (headings/lists/details/…).
+async def test_save_ad_fields_mode_persists_html_parse_mode() -> None:
+    # Content is captured as Telegram HTML, so a fields-mode ad must be saved with HTML
+    # parse mode or the formatting renders as literal tags (rich-text Bug-fix).
     fsm, cb = _FSM(), _callback()
     _seed(
         fsm,
@@ -330,8 +330,7 @@ async def test_save_ad_text_content_uses_rich_markdown() -> None:
             step=STEP_PREVIEW,
             placements=["home"],
             content_mode="fields",
-            content_text="<b>Sale</b>",
-            content_markdown="# Sale\n- item",
+            content_text="<b>Sale</b> <i>today</i>",
             internal_name="Camp",
         ),
     )
@@ -340,9 +339,9 @@ async def test_save_ad_text_content_uses_rich_markdown() -> None:
         cb, fsm, ParsedPanel("w", "sv"), ads=ads, casts=_FakeBroadcasts(), aud=_FakeAudience()
     )
     assert ads.created is not None
-    assert ads.created["fields"]["delivery"] == "rich"
-    assert ads.created["fields"]["text"] == "# Sale\n- item"  # raw markdown source
-    assert "parse_mode" not in ads.created["fields"]
+    assert ads.created["fields"]["delivery"] == "fields"
+    assert ads.created["fields"]["parse_mode"] == "HTML"
+    assert ads.created["fields"]["text"] == "<b>Sale</b> <i>today</i>"
 
 
 async def test_save_broadcast_uses_unified_engine() -> None:
