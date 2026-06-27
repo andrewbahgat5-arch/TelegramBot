@@ -24,7 +24,7 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 | Integration | 2026-06-27 | PASS (~80) | (unchanged this task) | Sprint 2–11 |
 | Security | 2026-06-27 | PASS (45) | all 5 §25.9 categories: input_validation, authorization, abuse_protection, data_protection (+ env isolation), dependency_scan | Sprint 11 |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
-| E2E (Telegram bot) | — | — | — | (Sprint 11) |
+| E2E (Telegram bot) | 2026-06-27 | PASS (5) + 28 SKIPPED | harness self-tests pass; flow/scenario suites skip until Phase-B sandbox (DEPLOY_ENV=test + E2E_LIVE=1) | Sprint 11 |
 | Regression | — | — | — | (each sprint adds rows) |
 
 This summary is the only mutable region of this file. Update its rows whenever a new run lands below.
@@ -66,6 +66,22 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-06-27 — Simulation framework + E2E — Sprint 11 Tasks 11.2–11.4, 11.6–11.9
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit (Sprint 11 Phase-A framework); worktree `happy-bose-71ed46` |
+| Environment | local |
+| Suite | unit + e2e (+ full regression) with the documented deselects |
+| Triggered by | Sprint 11 Phase-A: simulation framework (11.6–11.9) + E2E harness/suites/scenarios (11.2–11.4) |
+| Total tests | 766 | Passed | 766 | Failed | 0 | Skipped | 28 | Deselected | 2 |
+| New tests | simulation: `test_simulation_framework.py` (8), `test_user_profiles.py` (5), `test_traffic_generators.py` (9), `test_stress_scenarios.py` (7); e2e: `test_harness.py` (5, run) + 28 flow/scenario tests (skip until Phase B) |
+| Notes | `tests/simulation/` is not a pytest collection root (framework); its self-tests live under `tests/unit/`. E2E flow + S-1…S-5 scenario tests are collected and skip cleanly until `DEPLOY_ENV=test` + `E2E_LIVE=1` against the provisioned sandbox (Phase B). CLI verified: `python -m tests.simulation.runner --level=L1 --profile=Abuse --seed=42` → 0 successful downloads (M-22); `--profile=Casual` → downloads succeed. mypy unaffected (tests excluded from the strict gate); bandit 0 (tests excluded). |
+
+**Failures:** None. **Skips:** 28 E2E flow/scenario tests — Phase-B sandbox not provisioned (documented gate, re-enable with `DEPLOY_ENV=test` + `E2E_LIVE=1`).
+
+---
 
 ### 2026-06-27 — Security — Sprint 11 Task 11.5 (security suite, all 5 §25.9 categories)
 

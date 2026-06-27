@@ -44,9 +44,7 @@ def test_each_profile_emits_deterministic_actions() -> None:
 
 
 async def test_abuse_profile_is_fully_blocked() -> None:
-    runner = SimulationRunner(
-        settings=_settings(), client=StubBotClient(rng=_rng(5)), seed=5
-    )
+    runner = SimulationRunner(settings=_settings(), client=StubBotClient(rng=_rng(5)), seed=5)
     summary = await runner.run(level="L1", profiles=[PROFILE_REGISTRY["Abuse"]])
     # The core requirement (§25.15.1 / M-22): zero successful downloads for abusers.
     assert summary.successful_downloads == 0
@@ -54,9 +52,7 @@ async def test_abuse_profile_is_fully_blocked() -> None:
 
 
 async def test_casual_profile_downloads_succeed() -> None:
-    runner = SimulationRunner(
-        settings=_settings(), client=StubBotClient(rng=_rng(11)), seed=11
-    )
+    runner = SimulationRunner(settings=_settings(), client=StubBotClient(rng=_rng(11)), seed=11)
     summary = await runner.run(level="L1", profiles=[PROFILE_REGISTRY["Casual"]])
     assert summary.successful_downloads > 0
     assert summary.blocked_downloads == 0

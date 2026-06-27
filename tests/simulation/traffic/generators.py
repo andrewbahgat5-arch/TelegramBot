@@ -41,9 +41,7 @@ class RandomTraffic(TrafficGenerator):
 
     def plan(self, *, total_users: int, rng: random.Random, window_s: float = 60.0) -> TrafficPlan:
         profiles = _weighted_profiles(self._mix, total_users, rng)
-        return [
-            Spawn(i + 1, profiles[i], rng.uniform(0.0, window_s)) for i in range(total_users)
-        ]
+        return [Spawn(i + 1, profiles[i], rng.uniform(0.0, window_s)) for i in range(total_users)]
 
 
 @register_generator
@@ -117,6 +115,4 @@ class PlatformPattern(TrafficGenerator):
 
     def plan(self, *, total_users: int, rng: random.Random, window_s: float = 60.0) -> TrafficPlan:
         profiles = _weighted_profiles(self._mix, total_users, rng)
-        return [
-            Spawn(i + 1, profiles[i], rng.uniform(0.0, window_s)) for i in range(total_users)
-        ]
+        return [Spawn(i + 1, profiles[i], rng.uniform(0.0, window_s)) for i in range(total_users)]
