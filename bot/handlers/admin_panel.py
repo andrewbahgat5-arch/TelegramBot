@@ -196,7 +196,7 @@ async def panel_write(
             callback, panel, settings_service_factory(session), user, callback_signer, state
         )
         return
-    if panel.section == "u":  # Users management (9.6.6)
+    if panel.section in ("u", "m"):  # Users + Moderation management (9.6.6, Owner req #10)
         await _users_write(
             callback,
             panel,
@@ -205,6 +205,7 @@ async def panel_write(
             settings_service_factory(session),
             user,
             callback_signer,
+            state,
         )
         return
     if panel.section == "a":  # Advertisements management (9.6.9)
@@ -320,6 +321,18 @@ _USER_CONFIRM = {
     "rma": ("rmac", "remove admin from"),
 }
 
+# Top-level Users / Moderation actions carry no target id. Tapping one arms a guided
+# "send the Telegram ID" prompt; the typed id then re-enters the same apply/confirm path
+# the per-user detail buttons use (Owner req #10 — direct user-id input for every action).
+_USER_ACTION_PROMPT = {
+    "ban": "Ban a user",
+    "ubn": "Unban a user",
+    "up": "Upgrade to Premium",
+    "rp": "Remove Premium",
+    "mka": "Make Admin",
+    "rma": "Remove Admin",
+}
+
 
 async def _users_write(
     callback: CallbackQuery,
@@ -329,10 +342,14 @@ async def _users_write(
     settings: SettingsService,
     actor: UserSnapshot,
     signer: CallbackSigner,
+    state: FSMContext,
 ) -> None:
     """Ban / Unban / Premium / Admin on a selected user, destructive steps behind a confirm."""
     tid, action = panel.arg, panel.action
-    if tid is None:  # a top-level submenu button without a target
+    if tid is None:  # a top-level submenu button (Users or Moderation) without a target
+        if action in _USER_ACTION_PROMPT:  # arm the guided id-entry, then act (Owner req #10)
+            await _arm_user_action(callback, state, panel.section, action, signer)
+            return
         await callback.answer("Open 📋 List and tap a user first.", show_alert=False)
         return
     if action in _USER_CONFIRM:  # render the confirm screen
@@ -456,6 +473,35 @@ def _user_lookup_text() -> str:
     return "🔍 <b>User Info</b>\n\nSend the user's Telegram ID in chat."
 
 
+def _user_action_prompt_text(action: str) -> str:
+    title = _USER_ACTION_PROMPT.get(action, "Manage a user")
+    return f"🔧 <b>{title}</b>\n\nSend the user's Telegram ID in chat."
+
+
+async def _arm_user_action(
+    callback: CallbackQuery,
+    state: FSMContext,
+    section: str,
+    action: str,
+    signer: CallbackSigner,
+) -> None:
+    """Prompt for a Telegram id, then apply ``action`` to that user (Owner req #10)."""
+    if isinstance(callback.message, Message):
+        await state.set_state(PanelStates.user_action)
+        await state.update_data(
+            action=action,
+            section=section,
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+        )
+        await _safe_edit(
+            callback.message,
+            _user_action_prompt_text(action),
+            build_input_prompt(signer, back=(section, "op", None), cancel=(section, "op", None)),
+        )
+    await callback.answer()
+
+
 async def _arm_user_lookup(
     callback: CallbackQuery, state: FSMContext, signer: CallbackSigner
 ) -> None:
@@ -561,6 +607,86 @@ async def on_user_lookup(
     else:
         text, markup = view
     await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+
+
+# --- guided input: a typed Telegram id for a Users / Moderation action (Owner #10) ---
+@router.message(PanelStates.user_action, OwnerFilter)
+async def on_user_action_input(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user: UserSnapshot,
+    user_service_factory: UserServiceFactory,
+    admin_service_factory: AdminServiceFactory,
+    settings_service_factory: SettingsServiceFactory,
+    callback_signer: CallbackSigner,
+) -> None:
+    """Apply a top-level Users / Moderation action to the typed Telegram id.
+
+    Destructive actions (ban / remove premium / make-or-remove admin) route through the
+    same confirm screen the detail buttons use; additive ones (unban / upgrade premium)
+    act directly. The owner can never be targeted from the panel.
+    """
+    data = await state.get_data()
+    action, section = data.get("action"), data.get("section")
+    chat_id, message_id = data.get("chat_id"), data.get("message_id")
+    if not isinstance(action, str) or chat_id is None or message_id is None:
+        await state.clear()
+        return
+    menu_section = section if isinstance(section, str) else "u"
+    raw = (message.text or "").strip()
+    try:
+        tid = int(raw)
+    except ValueError:
+        await message.reply("Please send a numeric Telegram ID, or tap ❌ Cancel.")
+        return  # keep the state for the next attempt
+    await state.clear()
+    users = user_service_factory(session)
+    snap = await users.find(tid)
+    menu = build_section_menu(menu_section, user.role, callback_signer)
+    if snap is None:
+        await bot.edit_message_text(
+            f"No user with id <code>{tid}</code>.",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=menu,
+        )
+        return
+    if snap.role is UserRole.OWNER:  # mirror build_user_detail: the owner is untouchable
+        await bot.edit_message_text(
+            "⚠️ The owner can't be managed from the panel.",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=menu,
+        )
+        return
+    if action in _USER_CONFIRM:  # destructive → confirm screen (same as the detail flow)
+        confirmed, verb = _USER_CONFIRM[action]
+        await bot.edit_message_text(
+            f"⚠️ <b>Confirm</b>\n\nReally {verb} <code>{tid}</code>?",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=build_confirm(
+                callback_signer, confirm=("u", confirmed, tid, None), cancel=("u", "inf", tid)
+            ),
+        )
+        return
+    # additive (unban / upgrade premium) → apply directly, then show the detail screen
+    await _apply_user_action(users, action, tid)
+    view = await _user_detail_view(
+        users,
+        admin_service_factory(session),
+        settings_service_factory(session),
+        tid,
+        user.role,
+        callback_signer,
+    )
+    if view is not None:
+        text, markup = view
+        await bot.edit_message_text(
+            text, chat_id=chat_id, message_id=message_id, reply_markup=markup
+        )
 
 
 # --- guided input: compose wizard typed value / content (9.6.10) ----------

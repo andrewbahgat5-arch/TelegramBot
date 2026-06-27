@@ -9,6 +9,9 @@ or write clears pending input, so only one guided input is ever active at a time
 * :attr:`setting_value` — the Owner is typing a new value for a numeric setting
   (the "Enter Value" alternative to the minus/plus stepper, 9.6.7).
 * :attr:`user_lookup` — staff is typing a Telegram id for User Info (9.6.8).
+* :attr:`user_action` — the Owner is typing a Telegram id to ban / unban / change
+  premium / change admin for a top-level Users or Moderation action (Owner req #10);
+  the chosen action rides in the FSM data as ``action``.
 * :attr:`wizard_text` — the Owner is typing a wizard value (internal name / notes /
   language / user id / button), discriminated by ``field`` in the FSM data (9.6 wizard).
 * :attr:`wizard_content` — the Owner is sending the advertisement content; the next
@@ -23,5 +26,6 @@ from aiogram.fsm.state import State, StatesGroup
 class PanelStates(StatesGroup):
     setting_value = State()
     user_lookup = State()
+    user_action = State()
     wizard_text = State()
     wizard_content = State()

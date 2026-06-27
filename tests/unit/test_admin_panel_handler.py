@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.handlers.admin_panel import (
     on_setting_value,
+    on_user_action_input,
     on_user_lookup,
     open_panel,
     open_settings,
@@ -512,13 +513,24 @@ async def test_make_admin_confirm_sets_role() -> None:
     assert users.calls == [("role", 555, UserRole.MODERATOR)]
 
 
-async def test_user_action_without_target_hints_to_list() -> None:
+async def test_users_ban_without_target_arms_id_prompt() -> None:
+    """Top-level Users ▸ Ban (no target) now arms a guided id prompt (Owner req #10)."""
     signer = _signer()
     callback = _callback(signer, "u", "ban")
     users = _FakeUsersRW()
     await _uwrite(callback, ParsedPanel("u", "ban", None), users)
+    assert users.calls == []  # nothing applied yet — waiting for the typed id
+    assert "Telegram ID" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_moderation_ban_without_target_arms_id_prompt() -> None:
+    """Moderation ▸ Ban (section ``m``) no longer dead-ends; it arms the same prompt."""
+    signer = _signer()
+    callback = _callback(signer, "m", "ban")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("m", "ban", None), users)
     assert users.calls == []
-    assert "List" in _call(callback.answer).args[0]
+    assert "Telegram ID" in callback.message.edit_text.await_args.args[0]
 
 
 async def test_user_detail_renders_via_navigation() -> None:
@@ -755,6 +767,86 @@ async def test_user_lookup_unknown_id_reports_not_found() -> None:
         _signer(),
     )
     assert "No user" in bot.edit_message_text.await_args.args[0]
+
+
+# --- guided id entry for a Users / Moderation action (Owner req #10) -------
+async def _action_input(
+    users: _FakeUsersRW, *, action: str, section: str, text: str, bot: Any, state: Any
+) -> None:
+    message: Any = AsyncMock(spec=Message)
+    message.text = text
+    message.reply = AsyncMock()
+    await on_user_action_input(
+        message,
+        state,
+        bot,
+        _session(),
+        _user(),
+        lambda s: users,
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeSettings(),
+        _signer(),
+    )
+
+
+async def test_action_input_unban_acts_directly_and_shows_detail() -> None:
+    bot = AsyncMock()
+    state = _state({"action": "ubn", "section": "m", "chat_id": 10, "message_id": 20})
+    users = _FakeUsersRW()
+    await _action_input(users, action="ubn", section="m", text="555", bot=bot, state=state)
+    assert users.calls == [("unban", 555)]
+    state.clear.assert_awaited_once()
+    assert "555" in bot.edit_message_text.await_args.args[0]  # user detail re-rendered
+
+
+async def test_action_input_ban_routes_through_confirm() -> None:
+    bot = AsyncMock()
+    state = _state({"action": "ban", "section": "u", "chat_id": 10, "message_id": 20})
+    users = _FakeUsersRW()
+    await _action_input(users, action="ban", section="u", text="555", bot=bot, state=state)
+    assert users.calls == []  # destructive → confirm first, no mutation yet
+    assert "Confirm" in bot.edit_message_text.await_args.args[0]
+
+
+async def test_action_input_unknown_id_reports_not_found() -> None:
+    bot = AsyncMock()
+    state = _state({"action": "ban", "section": "u", "chat_id": 10, "message_id": 20})
+    users = _FakeUsersRW()
+    await _action_input(users, action="ban", section="u", text="404", bot=bot, state=state)
+    assert users.calls == []
+    assert "No user" in bot.edit_message_text.await_args.args[0]
+
+
+async def test_action_input_owner_is_protected() -> None:
+    bot = AsyncMock()
+    state = _state({"action": "ban", "section": "u", "chat_id": 10, "message_id": 20})
+    users = _FakeUsersRW()
+    users.target = replace(users.target, role=UserRole.OWNER)
+    await _action_input(users, action="ban", section="u", text="555", bot=bot, state=state)
+    assert users.calls == []
+    assert "owner" in bot.edit_message_text.await_args.args[0].lower()
+
+
+async def test_action_input_non_numeric_keeps_state() -> None:
+    bot = AsyncMock()
+    state = _state({"action": "ban", "section": "u", "chat_id": 10, "message_id": 20})
+    message: Any = AsyncMock(spec=Message)
+    message.text = "abc"
+    message.reply = AsyncMock()
+    await on_user_action_input(
+        message,
+        state,
+        bot,
+        _session(),
+        _user(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeSettings(),
+        _signer(),
+    )
+    message.reply.assert_awaited_once()
+    state.clear.assert_not_awaited()
+    bot.edit_message_text.assert_not_awaited()
 
 
 # --- guided "Enter Value" for settings (9.6.7) ----------------------------
