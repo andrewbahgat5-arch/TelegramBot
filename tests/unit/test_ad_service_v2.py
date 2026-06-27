@@ -30,9 +30,11 @@ _SECRET = "test-secret"
 
 def _build(
     settings_data: dict[str, tuple[str, str]] | None = None,
+    *,
+    ad_sender: FakeAdSender | None = None,
 ) -> tuple[AdService, FakeAdRepo, FakeAdSender, FakeAdButtonRepo, FakeAudienceRuleRepo]:
     repo = FakeAdRepo()
-    sender = FakeAdSender()
+    sender = ad_sender or FakeAdSender()
     buttons = FakeAdButtonRepo()
     rules = FakeAudienceRuleRepo()
     data = {"ads_enabled": ("true", "bool")}
@@ -107,6 +109,26 @@ async def test_copy_mode_uses_copy_message() -> None:
     assert sender.sent == []
     assert sender.copied[0]["from_chat_id"] == -1009
     assert sender.copied[0]["message_id"] == 42
+
+
+# --- rich mode (Rich Markdown via sendRichMessage) ------------------------
+async def test_rich_mode_uses_send_rich_message() -> None:
+    service, repo, sender, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(
+        id=1, title="Rich", delivery_mode="rich", content_text="# Heading\n- item"
+    )
+    assert await _show(service) is True
+    assert sender.sent == [] and sender.copied == []
+    assert sender.rich[0]["markdown"] == "# Heading\n- item"
+
+
+async def test_rich_mode_falls_back_to_classic_send_when_unsupported() -> None:
+    sender = FakeAdSender(rich_error=RuntimeError("bot api lacks rich messages"))
+    service, repo, _, _, _ = _build(ad_sender=sender)
+    repo.by_id[1] = FakeAdRow(id=1, title="Rich", delivery_mode="rich", content_text="# Heading")
+    assert await _show(service) is True  # delivered despite the rich failure
+    assert sender.rich == []  # rich attempt raised
+    assert sender.sent[0]["ad_type"] == "text" and sender.sent[0]["text"] == "# Heading"
 
 
 # --- new media types (9.5.3) ----------------------------------------------

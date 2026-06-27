@@ -28,3 +28,4 @@ class AdDeliveryMode(StrEnum):
 
     FIELDS = "fields"  # programmatic: type + text + file_id + buttons
     COPY = "copy"  # copyMessage of a stored source message (rich content)
+    RICH = "rich"  # sendRichMessage of Rich Markdown (headings/lists/details/…) source

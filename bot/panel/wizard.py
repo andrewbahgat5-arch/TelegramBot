@@ -72,7 +72,8 @@ class WizardState:
     internal_notes: str | None = None
     # Content (copy mode = a stored message; fields mode = composed text).
     content_mode: str | None = None  # "copy" | "fields"
-    content_text: str | None = None
+    content_text: str | None = None  # HTML rendering (broadcast send / fallback)
+    content_markdown: str | None = None  # raw Rich-Markdown source (ad rich-message send)
     storage_chat_id: int | None = None
     storage_message_id: int | None = None
     buttons: list[list[str]] = field(default_factory=list)  # [text, url]
@@ -96,6 +97,7 @@ class WizardState:
             "internal_notes": self.internal_notes,
             "content_mode": self.content_mode,
             "content_text": self.content_text,
+            "content_markdown": self.content_markdown,
             "storage_chat_id": self.storage_chat_id,
             "storage_message_id": self.storage_message_id,
             "buttons": self.buttons,

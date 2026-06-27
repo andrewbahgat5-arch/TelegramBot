@@ -110,8 +110,21 @@ class AdBroadcastPlan:
 
 
 async def deliver_plan(sender: AdSenderProtocol, plan: AdBroadcastPlan, chat_id: int) -> None:
-    """Deliver a prepared ad to one chat (``copy`` or ``fields`` mode)."""
-    if (
+    """Deliver a prepared ad to one chat (``rich`` / ``copy`` / ``fields`` mode)."""
+    if plan.delivery_mode == AdDeliveryMode.RICH.value and plan.content_text:
+        try:
+            await sender.send_rich_ad(chat_id, markdown=plan.content_text, buttons=plan.buttons)
+        except Exception as exc:  # rich unsupported → classic text fallback
+            _log.warning("ad_broadcast_rich_fallback", chat_id=chat_id, error=str(exc))
+            await sender.send_ad(
+                chat_id,
+                ad_type=AdType.TEXT.value,
+                text=plan.content_text,
+                media_file_id=None,
+                buttons=plan.buttons,
+                parse_mode=None,
+            )
+    elif (
         plan.delivery_mode == AdDeliveryMode.COPY.value
         and plan.storage_chat_id
         and plan.storage_message_id
@@ -241,7 +254,9 @@ class AdService:
         """Send one ad and record the impression (16.7 steps 5-6). Best-effort."""
         buttons = await self._build_buttons(ad)
         try:
-            if (
+            if ad.delivery_mode == AdDeliveryMode.RICH and ad.content_text:
+                await self._send_rich(ad, chat_id, buttons, reply_to_message_id)
+            elif (
                 ad.delivery_mode == AdDeliveryMode.COPY
                 and ad.storage_chat_id
                 and ad.storage_message_id
@@ -270,6 +285,33 @@ class AdService:
         metrics.record_ad_shown()
         _log.info("ad_shown", ad_id=ad.id, chat_id=chat_id)
         return True
+
+    async def _send_rich(
+        self,
+        ad: Any,
+        chat_id: int,
+        buttons: Sequence[AdButtonSpec],
+        reply_to_message_id: int | None,
+    ) -> None:
+        """Deliver a Rich-Markdown ad, falling back to a classic text send if unsupported."""
+        try:
+            await self._sender.send_rich_ad(
+                chat_id,
+                markdown=ad.content_text,
+                buttons=buttons,
+                reply_to_message_id=reply_to_message_id,
+            )
+        except Exception as exc:  # Bot API server without rich-message support, etc.
+            _log.warning("ad_rich_fallback", ad_id=ad.id, chat_id=chat_id, error=str(exc))
+            await self._sender.send_ad(
+                chat_id,
+                ad_type=AdType.TEXT.value,
+                text=ad.content_text,
+                media_file_id=None,
+                buttons=buttons,
+                parse_mode=None,
+                reply_to_message_id=reply_to_message_id,
+            )
 
     async def record_click(
         self, ad_id: int, button_id: int | None = None, *, user_row_id: int | None = None
