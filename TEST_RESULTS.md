@@ -67,6 +67,22 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-06-27 — Unit + Integration — Sprint 9.6 unified audience + multi-placement + compose wizard (C1–C9)
+
+| Field | Value |
+|---|---|
+| Git SHA | `c70ad5e` (C6–C8) + this C9 docs commit; worktree `happy-bose-71ed46` |
+| Environment | local (Docker up: postgres:15 + redis:7 + pgbouncer); DB migrated to head `202606270002` |
+| Suite | all (unit + integration) with the documented environmental deselects |
+| Triggered by | Sprint 9.6 checkpoints C1–C9 (F-2/EP-22 + F-3/EP-23) |
+| Total tests | 669 | Passed | 669 | Failed | 0 | Deselected | 2 |
+| Coverage by path | audience evaluator (`test_wizard_engine.py` 11 + `test_audience_evaluator.py` 12): navigation/skip-placement/validation/edit-hub + the Python matcher truth table. SQL≡Python (`integration/test_audience_query.py`): the compiler matches the matcher over real Postgres rows for every truth-table scenario + segment + broadcast guards (banned/staff). schema (`integration/test_audience_expression_schema.py` 3): expression/rules round-trip + cascade + SET NULL + backfill. broadcasts (`test_broadcast_service.py` +3, `test_broadcast_worker.py` +1): create with expression, expected_total via count_for_audience, worker pages by expression. multi-placement + metadata (`test_ad_service_v2.py` +4, `integration/test_ad_placements.py` 3). wizard handlers (`test_admin_wizard.py` 12): start/type/toggles/typed input/content capture/save ad+broadcast/validation-jump/cancel. |
+| Notes | Deselect set unchanged (redis concurrent-dequeue, settings upsert drift, settings_service ignore). Migrations `202606270001` + `202606270002` applied + reversible. No new dependency / env var / settings key. Gates: ruff + format clean; mypy --strict 158 files; import-linter 7 contracts; bandit 0. |
+
+**Failures:** None. (Heed the documented gotchas: dev-DB `free_daily_limit` drift and a live worker draining the shared queue both cause non-regression reds — see the deselect set.)
+
+---
+
 ### 2026-06-25 — Unit + Integration — Task 9.5.10 (ad/broadcast scheduling, deferred-backlog)
 
 | Field | Value |

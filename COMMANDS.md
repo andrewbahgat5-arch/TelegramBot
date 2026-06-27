@@ -38,13 +38,22 @@ These appear on bot messages — no typing needed:
 
 ---
 
+> **Admin inline panel (Sprint 9.6, F-2/EP-22).** Most administration now happens through an
+> inline keyboard panel rather than typed commands. `/admin` opens the root panel and `/settings`
+> opens it at Settings (both Staff; Owner sees write actions, Moderators see read-only — write
+> buttons are hidden, not disabled). Ads/Broadcast **Create** opens a guided **compose wizard**
+> (Type → Audience → Placement → Settings → Content → Preview → Save) with multi-select audience
+> (incl. premium) and placement, native-content capture, and an edit-from-preview hub. The
+> `key=value` commands below remain as the scriptable/scriptable-debug surface.
+
 ## 2. Staff (Owner **and** Moderator) — read-only admin
 
 | Command | Usage | What it does |
 |---|---|---|
+| `/admin` | `/admin` | Opens the inline admin control panel (Sprint 9.6). |
 | `/stats` | `/stats` | System stats: total users, banned count, lifetime downloads, queue depth + in-flight jobs. |
 | `/userinfo` | `/userinfo <telegram_id>` | Shows one user's detail (name, role, status, download counts). |
-| `/settings` | `/settings` | Lists all settings keys with their values and types. |
+| `/settings` | `/settings` | Opens the inline Settings panel (current values + per-field editors). |
 
 ---
 
