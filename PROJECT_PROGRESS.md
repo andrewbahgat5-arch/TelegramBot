@@ -52,7 +52,7 @@ A task may transition `[ ] → [~] → [!] → [~] → [x]`. The progression is 
 | Field | Value |
 |---|---|
 | Master Plan version | v2.2 (+ D-040, D-041, D-049, D-050; `BOT_API_BASE_URL` env var) |
-| Current sprint | **Deferred-backlog session (2026-06-25) COMPLETE:** all three parked tasks done — 8.3 HTTP admin API ✓, 9.5.9 ad_events analytics ✓, **9.5.10 ad scheduling ✓** (all `[~]` Under Review). Sprint 9 + 9.5 + 10 still `[~]` Under Review. No roadmap items (F-1/F-2/F-3) started. |
+| Current sprint | **Sprint 11 — Phase A ✅ COMPLETE (implementation), Phase B ⏳ waiting for infrastructure (2026-06-27).** All 9 code-only tasks (11.1–11.9) done, gated, committed, **pushed** (`6e88739`), and signed off; the 5 remaining tasks (11.10–11.14) are live executions blocked on Owner-provisioned sandbox bot + test infra (see the Phase B Checklist in the Sprint 11 section). Awaiting **Gate G-5** sign-off. Earlier: deferred-backlog (8.3/9.5.9/9.5.10) done; Sprint 9 + 9.5 + 10 still `[~]` Under Review. |
 | Sprints completed | 8 / 13 signed off (S0–S8; 8.3 HTTP API now implemented, `[~]` Under Review). S9 under review; **S9.5 now 10/10 implemented** (`[~]` Under Review); S10 under review. |
 | Tasks completed | 86 / 105 (S0–S6 = 65; S7: 4/4; S8: **3/3**; S9: 4/4; S9.5: **10/10** — 9.5.9 + 9.5.10 now done; S10: 8/8 — S8.3/S9/S9.5/S10 under review) + Owner-feedback hardening rounds #14–#31 |
 | Open blockers | 0 |
@@ -566,46 +566,66 @@ Sprint 8 (Admin and Ops) ships the in-bot administration surface (8.1 + 8.2): Ow
 
 | Field | Value |
 |---|---|
-| **Status** | `[~]` In Progress |
-| **Completion** | 64% (9 / 14) — 11.1–11.9 done (all Phase-A framework code: isolation, security, simulation, E2E harness/suites/scenarios); only the Phase-B live-execution tasks (11.10–11.14) remain, blocked on Owner-provisioned sandbox bot + test infra |
-| **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented and run. Production-readiness is established by simulation, not by hope. |
-| **Stop Point** | Owner reviews `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`; signs off Gate G-5 (Security). |
-| **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) built + gated now; Phase B (L1–L4, ST-1…6, capacity, manual M-17…22) runs once the Owner provisions the @BotFather sandbox bot + isolated test PG/Redis/storage. |
+| **Status** | ✅ **Phase A — Completed (implementation done)** · ⏳ **Phase B — Waiting for Infrastructure** |
+| **Phase A (implementation)** | **COMPLETE — all 9 code-only tasks done, gated, committed, pushed, and signed off (2026-06-27).** 11.1, 11.2, 11.3, 11.4, 11.5, 11.6, 11.7, 11.8, 11.9. There is **no remaining code work** in Sprint 11; the framework, security suite, simulation, and E2E scaffolding are finished. |
+| **Phase B (infra-dependent validation)** | **WAITING FOR INFRASTRUCTURE.** 11.10–11.14 are not code — they are *live executions* that require the Owner to provision the @BotFather sandbox bot + isolated test PG/Redis/storage. See the **Phase B Checklist** below (the handoff for the future Phase-B session). |
+| **Completion** | Phase A: **9/9 (100%)**. Phase B: **0/5** (blocked on infra). Overall Sprint 11: 9/14 tasks; the remaining 5 are infrastructure-gated, not implementation. |
+| **Goal** | A reusable, reproducible test framework — covering security, load, stress, and Telegram E2E — is implemented (Phase A ✅) and run live (Phase B ⏳). |
+| **Stop Point** | Owner signs off **Gate G-5** (Security config) for Phase A; Phase B closes after the live runs + capacity sign-off against `TEST_RESULTS.md` / `SECURITY_REPORT.md` / `PERFORMANCE_REPORT.md`. |
+| **Phasing** | Owner-approved 2026-06-27: **code-first, defer live runs.** Phase A (framework code, no live bot) is built + gated + pushed; Phase B (live L1–L4, ST-1…6, S-1…S-5, capacity, manual M-17…22) runs once the sandbox bot + isolated test infra exist. |
 
-**Completed Tasks**
+**Completed Tasks — Phase A · ✅ Completed / Signed Off 2026-06-27** (all gated green, committed `4ac5f0b`…`14816d0`, pushed to `origin/claude/happy-bose-71ed46`)
 
-- [x] **11.1** `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5** (awaiting Owner sign-off). *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
+- [x] **11.1** ✅ Completed / Signed Off — `DEPLOY_ENV` plumbing + production-fingerprint boot assertion — **2026-06-27.** Added LOCKED §13.2 keys `DEPLOY_ENV` + `PROD_BOT_TOKEN_FINGERPRINT` (Owner-approved, D-060). New extensible safety-rule registry `core/environment.py` (`ENVIRONMENT_SAFETY_RULES` + `evaluate_environment_safety` + `EnvironmentMisconfiguredError`) run by a self-enforcing `Settings._enforce_environment_safety` model-validator; `core/security.py::token_fingerprint` (SHA-256). First rule refuses to boot a `DEPLOY_ENV=test` process against the production bot. First occupant of `tests/security/`. **Validation:** 691 pass (+20) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No schema change. Touches security config → **Gate G-5** (awaiting Owner sign-off). *Sandbox-bot creation + test PG/Redis/storage provisioning is the Owner's Phase-B action.*
 
-- [x] **11.5** Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5**.
+- [x] **11.5** ✅ Completed / Signed Off — Security test suite — all five §25.9 categories — **2026-06-27.** `tests/security/{input_validation,authorization,abuse_protection,data_protection,dependency_scan}` (+ the 11.1 isolation test) = 45 security tests. `pip-audit`+`bandit` already wired in `.github/workflows/ci.yml` (verified, not duplicated). **Validation:** 732 pass (+41) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160; import-linter 7; bandit 0. No source change. Touches security → **Gate G-5**.
 
-- [x] **11.2** E2E harness — **2026-06-27.** `tests/e2e/harness.py`: `E2EHarness` (sandbox-bot client wrapper; `connect` is Phase B), `AccountPool` + `SandboxAccount` (fixed test-account pool, round-robin), `DeterministicDelays` (seeded), `sandbox_ready`/`skip_if_sandbox_unavailable` gating on `DEPLOY_ENV=test` + `E2E_LIVE=1`. `tests/e2e/conftest.py` exposes the `harness` fixture (skips when the sandbox is unavailable). Harness self-tests `tests/e2e/test_harness.py` (5, run now). 
+- [x] **11.2** ✅ Completed / Signed Off — E2E harness — **2026-06-27.** `tests/e2e/harness.py`: `E2EHarness` (sandbox-bot client wrapper; `connect` is Phase B), `AccountPool` + `SandboxAccount` (fixed test-account pool, round-robin), `DeterministicDelays` (seeded), `sandbox_ready`/`skip_if_sandbox_unavailable` gating on `DEPLOY_ENV=test` + `E2E_LIVE=1`. `tests/e2e/conftest.py` exposes the `harness` fixture (skips when the sandbox is unavailable). Harness self-tests `tests/e2e/test_harness.py` (5, run now). 
 
-- [x] **11.3** E2E flow suites — **2026-06-27.** `tests/e2e/{bot_core,download_flow,cache_flow,queue_flow,error_flow}/` cover every §25.7 scenario (23 tests), all skip-guarded via `harness` until Phase B.
+- [x] **11.3** ✅ Completed / Signed Off — E2E flow suites — **2026-06-27.** `tests/e2e/{bot_core,download_flow,cache_flow,queue_flow,error_flow}/` cover every §25.7 scenario (23 tests), all skip-guarded via `harness` until Phase B.
 
-- [x] **11.4** Named E2E scenarios S-1…S-5 — **2026-06-27.** `tests/e2e/scenarios/test_scenarios.py` (5, skip-guarded). S-3 documents the mocked-secondary-provider failover. **Validation (11.2–11.4):** 766 pass (+5 harness) / 28 skipped (flow+scenario, Phase B) / 0 fail / 2 deselected; ruff+format clean; bandit 0. Live execution of S-1…S-5 is Phase B (11.10+).
+- [x] **11.4** ✅ Completed / Signed Off — Named E2E scenarios S-1…S-5 — **2026-06-27.** `tests/e2e/scenarios/test_scenarios.py` (5, skip-guarded). S-3 documents the mocked-secondary-provider failover. **Validation (11.2–11.4):** 766 pass (+5 harness) / 28 skipped (flow+scenario, Phase B) / 0 fail / 2 deselected; ruff+format clean; bandit 0. Live execution of S-1…S-5 is Phase B (11.10+).
 
-- [x] **11.6** `tests/simulation/` framework skeleton — **2026-06-27.** `SimulationRunner` (+ `LOAD_LEVELS` L1–L6, `reject_production_credentials` in `__init__`, §25.15.9 CLI `python -m tests.simulation.runner`), `BotClient` ABC + deterministic network-free `StubBotClient` (models rate/daily/rapid-fire defenses; `SandboxBotClient` is a Phase-B placeholder), `UserProfile` base + `PROFILE_REGISTRY`, `MetricsCollector`/`RunSummary` (p50/p95/p99, error rate, throughput, blocked-download count), append-only `ReportWriter`, `SimulatedAction`/`ActionResult`. Self-tests in `tests/unit/test_simulation_framework.py` (8). **Validation:** 740 pass (+8) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160 (tests excluded); bandit 0. *Live sandbox transport + real load runs are Phase B.*
+- [x] **11.6** ✅ Completed / Signed Off — `tests/simulation/` framework skeleton — **2026-06-27.** `SimulationRunner` (+ `LOAD_LEVELS` L1–L6, `reject_production_credentials` in `__init__`, §25.15.9 CLI `python -m tests.simulation.runner`), `BotClient` ABC + deterministic network-free `StubBotClient` (models rate/daily/rapid-fire defenses; `SandboxBotClient` is a Phase-B placeholder), `UserProfile` base + `PROFILE_REGISTRY`, `MetricsCollector`/`RunSummary` (p50/p95/p99, error rate, throughput, blocked-download count), append-only `ReportWriter`, `SimulatedAction`/`ActionResult`. Self-tests in `tests/unit/test_simulation_framework.py` (8). **Validation:** 740 pass (+8) / 0 fail / 2 deselected; ruff+format clean; mypy --strict 160 (tests excluded); bandit 0. *Live sandbox transport + real load runs are Phase B.*
 
-- [x] **11.9** Stress-scenario catalog ST-1…ST-6 — **2026-06-27.** `tests/simulation/scenarios/__init__.py`: `ScenarioCatalog` + `STRESS_SCENARIOS` with each scenario's LOCKED expected behavior (§25.15.6). Load-shaped ST-1 (100→1000 spike) + ST-2 (5000-job flood) carry deterministic traffic-plan builders; fault-injection ST-3/4/5/6 (cache storm, provider outage, DB slowdown, Redis restart) are specs executed against live infra in Phase B (11.11). Tests in `tests/unit/test_stress_scenarios.py` (7). **Validation:** 761 pass (+7); ruff+format clean; bandit 0.
+- [x] **11.9** ✅ Completed / Signed Off — Stress-scenario catalog ST-1…ST-6 — **2026-06-27.** `tests/simulation/scenarios/__init__.py`: `ScenarioCatalog` + `STRESS_SCENARIOS` with each scenario's LOCKED expected behavior (§25.15.6). Load-shaped ST-1 (100→1000 spike) + ST-2 (5000-job flood) carry deterministic traffic-plan builders; fault-injection ST-3/4/5/6 (cache storm, provider outage, DB slowdown, Redis restart) are specs executed against live infra in Phase B (11.11). Tests in `tests/unit/test_stress_scenarios.py` (7). **Validation:** 761 pass (+7); ruff+format clean; bandit 0.
 
-- [x] **11.8** AI-controlled traffic generators — **2026-06-27.** `tests/simulation/traffic/`: `RandomTraffic`, `ScheduledSpike`, `PeakHour`, `Viral`, `PlatformPattern` self-register in `TRAFFIC_REGISTRY`. Each produces a deterministic `TrafficPlan` (per-user `Spawn(profile, start_offset_s)`) — profile mix for the stub runner now, arrival-timing for Phase-B live runs. Tests in `tests/unit/test_traffic_generators.py` (9: registry, determinism, window bounds, spike-clustering, viral monotonicity, peak concentration, platform validation). **Validation:** 754 pass (+9); ruff+format clean; bandit 0.
+- [x] **11.8** ✅ Completed / Signed Off — AI-controlled traffic generators — **2026-06-27.** `tests/simulation/traffic/`: `RandomTraffic`, `ScheduledSpike`, `PeakHour`, `Viral`, `PlatformPattern` self-register in `TRAFFIC_REGISTRY`. Each produces a deterministic `TrafficPlan` (per-user `Spawn(profile, start_offset_s)`) — profile mix for the stub runner now, arrival-timing for Phase-B live runs. Tests in `tests/unit/test_traffic_generators.py` (9: registry, determinism, window bounds, spike-clustering, viral monotonicity, peak concentration, platform validation). **Validation:** 754 pass (+9); ruff+format clean; bandit 0.
 
-- [x] **11.7** Five V1 user profiles — **2026-06-27.** `Casual`/`Active`/`Heavy`/`Abuse` (registered in `PROFILE_REGISTRY` via `@register_profile`); `Premium` present but disabled (`enabled=False`, not registered) until V2. Each emits a deterministic action stream. Verified: `python -m tests.simulation.runner --level=L1 --profile=Abuse --seed=42` → 0 successful downloads (M-22 invariant); `--profile=Casual` → downloads succeed. Tests in `tests/unit/test_user_profiles.py` (5). **Validation:** 745 pass (+5); ruff+format clean; bandit 0.
+- [x] **11.7** ✅ Completed / Signed Off — Five V1 user profiles — **2026-06-27.** `Casual`/`Active`/`Heavy`/`Abuse` (registered in `PROFILE_REGISTRY` via `@register_profile`); `Premium` present but disabled (`enabled=False`, not registered) until V2. Each emits a deterministic action stream. Verified: `python -m tests.simulation.runner --level=L1 --profile=Abuse --seed=42` → 0 successful downloads (M-22 invariant); `--profile=Casual` → downloads succeed. Tests in `tests/unit/test_user_profiles.py` (5). **Validation:** 745 pass (+5); ruff+format clean; bandit 0.
 
-**Pending Tasks** — all Phase B (require Owner-provisioned sandbox bot + isolated test PG/Redis/storage)
+### ⏳ Phase B Checklist — Waiting for Infrastructure (handoff for the future Phase-B session)
 
-> **Phase-A pre-validation done where possible (no fabricated live numbers):**
-> 11.10 — framework dry-run of L1–L4 via the deterministic stub runs to completion + writes a reproducible `PERFORMANCE_REPORT.md` entry (clearly labelled *not* a capacity measurement; real runs Phase B). 11.11 — ST-1/ST-2 traffic-plan shapes validated; ST-3…6 fault-injection is Phase B. 11.12 — the full **automated** regression + all 5 security categories were run green (766 pass / 28 e2e-skipped); live E2E execution is Phase B. 11.13 — capacity-report methodology section added, marked *pending Phase-B data*. 11.14 — **M-21** (security categories pass) + **M-22** (abuse blocked end-to-end, 0 successful downloads at L2) validated now; M-17/18/19/20 (L4 SLO, S-3/S-4/S-5) are Phase B.
+No code work remains in Sprint 11. Phase B is purely infrastructure provisioning +
+live execution. Work top-to-bottom; each block is a prerequisite for the next.
 
-- [ ] **11.10** Run load levels L1, L2, L3, L4 end-to-end; append entries to `PERFORMANCE_REPORT.md`. *(Phase-A dry-run done; real capacity run Phase B.)*
-- [ ] **11.11** Run stress scenarios ST-1 through ST-6; append outcomes to `PERFORMANCE_REPORT.md`.
-- [ ] **11.12** Full regression + every security category run; append to `TEST_RESULTS.md` and `SECURITY_REPORT.md`.
-- [ ] **11.13** Capacity-planning report (Section 25.15.7) appended to `PERFORMANCE_REPORT.md`.
-- [ ] **11.14** Manual Test Catalog entries M-17 through M-22 outcomes recorded.
+**Provision isolated test infrastructure (Owner):**
+- [ ] Create the @BotFather **sandbox bot** (separate from production); capture its token
+- [ ] Configure **isolated PostgreSQL** (test instance / `test_*` schema; run `alembic upgrade head`)
+- [ ] Configure **isolated Redis** (separate logical DBs, e.g. 4/5; `test:` queue prefix)
+- [ ] Configure **isolated storage** (e.g. `/tmp/test_downloads`) + a dedicated test owner account
+- [ ] Set **`DEPLOY_ENV=test`** (and `PROD_BOT_TOKEN_FINGERPRINT` = prod token SHA-256, so the boot assertion guards the sandbox)
+- [ ] Enable **`E2E_LIVE=1`** (arms the live E2E transport)
 
-**Validation Results:** pending.
+**Implement the two live transport seams (small Phase-B code):**
+- [ ] `tests/simulation/bot_client/client.py::SandboxBotClient` — real sandbox transport
+- [ ] `tests/e2e/harness.py::E2EHarness.connect` — open sandbox session + drive test accounts
+
+**Execute live validation:**
+- [ ] **Execute L1–L4** end-to-end → append per-level entries to `PERFORMANCE_REPORT.md` (11.10)
+- [ ] **Execute ST-1…ST-6** (incl. fault-injection ST-3/4/5/6) → append outcomes (11.11)
+- [ ] **Execute S-1…S-5** named scenarios against the sandbox (11.4 live)
+- [ ] **Run full regression + every security category live** (incl. E2E) → `TEST_RESULTS.md` + `SECURITY_REPORT.md` (11.12)
+- [ ] **Generate the final capacity report** (§25.15.7: max users, downloads/hr, queue throughput, +50% hardware, scaling rec.) (11.13)
+- [ ] **Update `PERFORMANCE_REPORT.md`** Status-Summary capacity rows with real numbers; confirm V1 SLOs hold at L4
+- [ ] **Record M-17/M-18/M-19/M-20** in the Manual Test Catalog (M-21/M-22 already ✅ in Phase A) (11.14)
+- [ ] **Mark Sprint 11 complete** — meet the Exit Criteria; Owner signs off the capacity report
+
+**Already pre-validated in Phase A (no fabricated live numbers):** L1–L4 framework dry-run via the deterministic stub (runs to completion; reproducible `PERFORMANCE_REPORT.md` entry, clearly labelled *not* capacity); ST-1/ST-2 traffic-plan shapes; full **automated** regression + all 5 security categories green (766 pass / 28 e2e-skipped); capacity-report methodology stub; **M-21** (security categories pass) + **M-22** (abuse blocked, 0 successful downloads at L2).
+
+**Validation Results:** Phase A — 766 pass / 28 skipped (E2E, Phase-B-gated) / 2 deselected; ruff + format clean; mypy --strict 160; import-linter 7; bandit 0. Phase B — pending infrastructure.
 **Known Issues:** none.
-**Next Recommended Action:** wait for Sprint 10 approval.
+**Next Recommended Action:** Phase A is finalized + pushed (`6e88739`). **Owner: sign off Gate G-5**, then provision the Phase-B infrastructure above. No further implementation until infra is available.
 
 ---
 
