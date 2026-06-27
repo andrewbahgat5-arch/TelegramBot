@@ -142,6 +142,13 @@ def step_index(step_id: str) -> int:
     return _STEP_INDEX.get(step_id, -1)
 
 
+def step_at(index: int | None) -> str | None:
+    """The step id at registry ``index`` (the compact callback ``arg``), or None."""
+    if index is not None and 0 <= index < len(STEPS):
+        return STEPS[index].step_id
+    return None
+
+
 def has_step(kind: str, step_id: str) -> bool:
     return any(s.step_id == step_id for s in applicable_steps(kind))
 

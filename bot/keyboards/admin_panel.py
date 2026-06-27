@@ -33,12 +33,21 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.callbacks.factory import CallbackSigner
 from bot.panel.registry import (
+    AUDIENCE_OPTIONS,
+    PLACEMENT_OPTIONS,
     SECTIONS,
     SETTING_FIELDS,
     SETTINGS_INFO,
     SUBMENUS,
     SettingField,
     is_write_action,
+)
+from bot.panel.wizard import (
+    STEP_PREVIEW,
+    WizardState,
+    next_step,
+    prev_step,
+    step_index,
 )
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
@@ -257,3 +266,160 @@ def build_user_detail(
         rows = _chunk(actions)
     rows.append(nav_row(signer, back=("u", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# --- compose wizard (Sprint 9.6, D-057/D-059) -----------------------------
+# Every wizard callback rides the "w" section; all its actions are write-tier (absent
+# from READ_ACTIONS), so they are owner-only and hidden from moderators. Step ids ride as
+# the compact ``arg`` int (``step_index``); option ids as ``arg`` from the registries.
+
+
+def _w(
+    signer: CallbackSigner,
+    label: str,
+    action: str,
+    arg: int | None = None,
+    value: int | None = None,
+) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=label, callback_data=signer.pack_panel("w", action, arg, value)
+    )
+
+
+def _wizard_controls(
+    signer: CallbackSigner, state: WizardState, step_id: str, *, can_save: bool = False
+) -> list[list[InlineKeyboardButton]]:
+    """Back/Next (or Save) + Cancel/Home, honouring the edit-from-preview hub."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if state.return_to == "preview":  # reached via Edit ▸ — one button back to the hub
+        rows.append([_w(signer, "✅ Done", "go", step_index(STEP_PREVIEW))])
+    else:
+        advance: list[InlineKeyboardButton] = []
+        nxt = prev_step(state.kind, step_id)
+        if nxt is not None:
+            advance.append(_w(signer, "⬅️ Back", "go", step_index(nxt)))
+        if can_save:
+            advance.append(_w(signer, "✅ Save", "sv"))
+        else:
+            forward = next_step(state.kind, step_id)
+            if forward is not None:
+                advance.append(_w(signer, "Next ▸", "go", step_index(forward)))
+        if advance:
+            rows.append(advance)
+    rows.append([_w(signer, "❌ Cancel", "cx"), _btn(signer, "🏠 Home", "mn", "hm")])
+    return rows
+
+
+def build_wizard_type(signer: CallbackSigner) -> InlineKeyboardMarkup:
+    rows = [
+        [_w(signer, "📢 Persistent Ad", "ty", 0), _w(signer, "📣 Broadcast", "ty", 1)],
+        [_w(signer, "❌ Cancel", "cx"), _btn(signer, "🏠 Home", "mn", "hm")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _mark(active: bool) -> str:
+    return "☑" if active else "☐"
+
+
+def build_wizard_audience(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    from bot.panel.wizard import STEP_AUDIENCE
+
+    rows: list[list[InlineKeyboardButton]] = []
+    modes = [("all", "All"), ("include", "Include"), ("exclude", "Exclude")]
+    rows.append(
+        [
+            _w(signer, f"{'•' if state.audience_mode == code else ' '} {label}", "am", idx)
+            for idx, (code, label) in enumerate(modes)
+        ]
+    )
+    option_buttons: list[InlineKeyboardButton] = []
+    for opt in AUDIENCE_OPTIONS:
+        if opt.value is None:  # typed sub-input: show how many such rules exist
+            count = sum(1 for e, d, _v in state.rules if e == opt.effect and d == opt.dimension)
+            label = f"{opt.label}" + (f" ({count})" if count else "")
+        else:
+            active = [opt.effect, opt.dimension, opt.value] in state.rules
+            label = f"{_mark(active)} {opt.label}"
+        option_buttons.append(_w(signer, label, "atg", opt.index))
+    rows.extend(_chunk(option_buttons))
+    rows.extend(_wizard_controls(signer, state, STEP_AUDIENCE))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wizard_placement(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    from bot.panel.wizard import STEP_PLACEMENT
+
+    buttons = [
+        _w(signer, f"{_mark(opt.code in state.placements)} {opt.label}", "ptg", opt.index)
+        for opt in PLACEMENT_OPTIONS
+    ]
+    rows = _chunk(buttons)
+    rows.extend(_wizard_controls(signer, state, STEP_PLACEMENT))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wizard_settings(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    from bot.panel.wizard import STEP_SETTINGS
+
+    rows: list[list[InlineKeyboardButton]] = [
+        [_w(signer, f"{_mark(state.enabled)} Enabled", "en")],
+        [
+            _w(signer, "➖", "pr", None, state.priority - 1),  # noqa: RUF001
+            _w(signer, f"Priority: {state.priority}", "pr", None, state.priority),
+            _w(signer, "➕", "pr", None, state.priority + 1),  # noqa: RUF001
+        ],
+    ]
+    if state.kind == "ad":
+        freq = max(1, state.frequency)
+        rows.append(
+            [
+                _w(signer, "➖", "fr", None, max(1, freq - 1)),  # noqa: RUF001
+                _w(signer, f"Every: {freq}", "fr", None, freq),
+                _w(signer, "➕", "fr", None, freq + 1),  # noqa: RUF001
+            ]
+        )
+    rows.append([_w(signer, "✏️ Internal name", "in"), _w(signer, "📝 Notes", "no")])
+    rows.extend(_wizard_controls(signer, state, STEP_SETTINGS))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wizard_content(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    from bot.panel.wizard import STEP_CONTENT
+
+    rows: list[list[InlineKeyboardButton]] = [[_w(signer, "📩 Send content", "ct")]]
+    if state.content_mode is not None:
+        button_row = [_w(signer, "➕ Add button", "ba")]  # noqa: RUF001
+        if state.buttons:
+            button_row.append(_w(signer, f"🗑 Clear buttons ({len(state.buttons)})", "bc"))
+        rows.append(button_row)
+    rows.extend(_wizard_controls(signer, state, STEP_CONTENT))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wizard_preview(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+    """Preview = the edit hub: jump to any section, then return here (Owner #10)."""
+    from bot.panel.wizard import (
+        STEP_AUDIENCE,
+        STEP_CONTENT,
+        STEP_PLACEMENT,
+        STEP_SETTINGS,
+        has_step,
+    )
+
+    edits = [_w(signer, "✏️ Audience", "ed", step_index(STEP_AUDIENCE))]
+    if has_step(state.kind, STEP_PLACEMENT):
+        edits.append(_w(signer, "✏️ Placement", "ed", step_index(STEP_PLACEMENT)))
+    edits.append(_w(signer, "✏️ Settings", "ed", step_index(STEP_SETTINGS)))
+    edits.append(_w(signer, "✏️ Content", "ed", step_index(STEP_CONTENT)))
+    rows = _chunk(edits)
+    rows.append([_w(signer, "✅ Save", "sv"), _w(signer, "❌ Cancel", "cx")])
+    rows.append([_btn(signer, "🏠 Home", "mn", "hm")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_wizard_input_prompt(signer: CallbackSigner, *, back_step: int) -> InlineKeyboardMarkup:
+    """Cancel/Back row shown while the wizard waits for typed input or content."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[_w(signer, "⬅️ Back", "go", back_step), _w(signer, "❌ Cancel", "cx")]]
+    )

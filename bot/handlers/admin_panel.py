@@ -36,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
+from bot.handlers import admin_wizard
 from bot.keyboards.admin_panel import (
     build_ad_detail,
     build_ad_list,
@@ -55,6 +56,7 @@ from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.ad_service import AdService
 from services.admin_service import AdminService
+from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
 from services.queue_service import QueueService
 from services.settings_service import (
@@ -72,6 +74,7 @@ SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
 AdminServiceFactory = Callable[[AsyncSession], AdminService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
+AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
 
 OwnerFilter = RoleFilter(UserRole.OWNER)
 
@@ -152,9 +155,30 @@ async def panel_write(
     admin_service_factory: AdminServiceFactory,
     ad_service_factory: AdServiceFactory,
     broadcast_service_factory: BroadcastServiceFactory,
+    audience_service_factory: AudienceServiceFactory,
     callback_signer: CallbackSigner,
 ) -> None:
+    if panel.section == "w":  # compose wizard — manages its own FSM state (no clear)
+        await admin_wizard.dispatch(
+            callback,
+            panel,
+            state,
+            session=session,
+            user=user,
+            signer=callback_signer,
+            ad_service_factory=ad_service_factory,
+            broadcast_service_factory=broadcast_service_factory,
+            audience_service_factory=audience_service_factory,
+        )
+        return
     await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
+    # Compose-wizard entry points (9.6.10): Ads "Create" / Broadcast "Create" + presets.
+    if panel.section == "a" and panel.action == "cr":
+        await admin_wizard.start(callback, state, callback_signer, kind="ad")
+        return
+    if panel.section == "b" and panel.action in ("cr", "bf", "bp", "ba", "bl"):
+        await admin_wizard.start(callback, state, callback_signer, kind="broadcast")
+        return
     if panel.section == "s":  # Settings stepper / guided entry (9.6.5, 9.6.7)
         await _settings_write(
             callback, panel, settings_service_factory(session), user, callback_signer, state
@@ -525,6 +549,31 @@ async def on_user_lookup(
     else:
         text, markup = view
     await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+
+
+# --- guided input: compose wizard typed value / content (9.6.10) ----------
+@router.message(PanelStates.wizard_text, OwnerFilter)
+async def on_wizard_text(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    callback_signer: CallbackSigner,
+    ad_service_factory: AdServiceFactory,
+) -> None:
+    await admin_wizard.on_text(message, state, bot, session, callback_signer, ad_service_factory)
+
+
+@router.message(PanelStates.wizard_content, OwnerFilter)
+async def on_wizard_content(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    callback_signer: CallbackSigner,
+    ad_service_factory: AdServiceFactory,
+) -> None:
+    await admin_wizard.on_content(message, state, bot, session, callback_signer, ad_service_factory)
 
 
 # --- rendering ------------------------------------------------------------

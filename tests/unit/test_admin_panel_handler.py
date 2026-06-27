@@ -171,6 +171,17 @@ class _FakeBroadcasts:
         return SimpleNamespace(id=1, expected_total=42)
 
 
+class _FakeAudience:
+    """Minimal AudienceService stand-in (only the wizard ad-save uses add_rule)."""
+
+    def __init__(self) -> None:
+        self.rules: list[tuple[int, str, str, str]] = []
+
+    async def add_rule(self, ad_id: int, *, effect: str, dimension: str, value: str) -> Any:
+        self.rules.append((ad_id, effect, dimension, value))
+        return SimpleNamespace(id=len(self.rules))
+
+
 def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = signer.pack_panel(section, action)
@@ -178,6 +189,7 @@ def _callback(signer: CallbackSigner, section: str, action: str) -> Any:
     callback.message.chat = SimpleNamespace(id=10)
     callback.message.message_id = 20
     callback.message.edit_text = AsyncMock()
+    callback.bot = AsyncMock()  # wizard renders via callback.bot.edit_message_text
     callback.answer = AsyncMock()
     return callback
 
@@ -317,6 +329,7 @@ async def _write(
         lambda s: _FakeAdmin(),
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
         _signer(),
     )
 
@@ -425,6 +438,7 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         lambda s: _FakeAdmin(),
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
         _signer(),
     )
 
@@ -511,13 +525,12 @@ async def test_user_detail_renders_via_navigation() -> None:
     assert "555" in callback.message.edit_text.await_args.args[0]
 
 
-# --- write stub (broadcast section still pending) -------------------------
-async def test_write_stub_acks_for_pending_section() -> None:
-    callback: Any = AsyncMock(spec=CallbackQuery)
-    callback.answer = AsyncMock()
-    await _bwrite(callback, ParsedPanel("b", "cr"))  # broadcast create lands in 9.6.10
-    callback.answer.assert_awaited_once()
-    assert _call(callback.answer).args  # a toast message was supplied
+# --- compose wizard entry (9.6.10) ----------------------------------------
+async def test_broadcast_create_starts_wizard() -> None:
+    signer = _signer()
+    callback = _callback(signer, "b", "cr")
+    await _bwrite(callback, ParsedPanel("b", "cr"))
+    assert "Compose" in callback.bot.edit_message_text.await_args.args[0]
 
 
 # --- ads management (9.6.9) -----------------------------------------------
@@ -533,6 +546,7 @@ async def _bwrite(callback: Any, panel: ParsedPanel) -> None:
         lambda s: _FakeAdmin(),
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
         _signer(),
     )
 
@@ -551,6 +565,7 @@ async def _awrite(
         lambda s: _FakeAdmin(),
         lambda s: ads,
         lambda s: broadcasts or _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
         _signer(),
     )
 
@@ -593,11 +608,11 @@ async def test_ad_action_without_target_hints() -> None:
     assert "List" in _call(callback.answer).args[0]
 
 
-async def test_ad_create_is_pending() -> None:
+async def test_ad_create_starts_wizard() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "cr")
     await _awrite(callback, ParsedPanel("a", "cr"), _FakeAds())
-    assert "coming soon" in _call(callback.answer).args[0]
+    assert "Compose" in callback.bot.edit_message_text.await_args.args[0]
 
 
 async def test_ads_list_renders_tappable_rows() -> None:
