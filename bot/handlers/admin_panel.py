@@ -810,7 +810,11 @@ async def _stats_text(users: UserService, queue: QueueService) -> str:
     depth, active = await queue.depth(), await queue.active_count()
     return (
         "📊 <b>Statistics</b>\n"
-        f"Users: <b>{stats.total_users}</b> (banned {stats.banned_users})\n"
+        f"Users: <b>{stats.total_users}</b> "
+        f"(⭐ {stats.premium_users} premium · 🛡 {stats.staff_users} staff · "
+        f"🚫 {stats.banned_users} banned)\n"
+        f"Joined today: <b>{stats.new_today}</b> · last 7 days: {stats.new_this_week}\n"
+        f"Active today: <b>{stats.active_today}</b>\n"
         f"Lifetime downloads: <b>{stats.total_downloads}</b>\n"
         f"Queue: <b>{depth}</b> waiting · {active} in flight"
     )

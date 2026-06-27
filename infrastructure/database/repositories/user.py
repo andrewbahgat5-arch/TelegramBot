@@ -111,6 +111,30 @@ class UserRepository(SqlAlchemyRepository[User]):
         )
         return int(result.scalar_one())
 
+    async def count_created_since(self, since: datetime.datetime) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.created_at >= since)
+        )
+        return int(result.scalar_one())
+
+    async def count_active_since(self, since: datetime.datetime) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.last_activity_at >= since)
+        )
+        return int(result.scalar_one())
+
+    async def count_premium(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.is_premium.is_(True))
+        )
+        return int(result.scalar_one())
+
+    async def count_staff(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.role.in_(_STAFF_ROLES))
+        )
+        return int(result.scalar_one())
+
     @staticmethod
     def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:
         """Broadcast audience filters (16.8, item #14).

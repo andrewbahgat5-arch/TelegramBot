@@ -28,11 +28,21 @@ _log = get_logger("services.user_service")
 
 @dataclass(frozen=True, slots=True)
 class UserStats:
-    """Aggregate user counts for the admin ``/stats`` command (Task 8.2)."""
+    """Aggregate user counts for the admin ``/stats`` command (Task 8.2).
+
+    The richer cohort fields (joined today / this week, active today, premium, staff)
+    feed the panel Statistics screen. They default to ``0`` so existing callers that
+    only set the core three keep working.
+    """
 
     total_users: int
     banned_users: int
     total_downloads: int
+    new_today: int = 0
+    new_this_week: int = 0
+    active_today: int = 0
+    premium_users: int = 0
+    staff_users: int = 0
 
 
 class UserService:
@@ -97,11 +107,19 @@ class UserService:
         return None if row is None else UserSnapshot.from_row(row)
 
     async def get_stats(self) -> UserStats:
-        """Aggregate counts for admin ``/stats`` (total / banned users, lifetime downloads)."""
+        """Aggregate counts for admin stats (totals, today/week cohorts, premium, staff)."""
+        now = datetime.datetime.now(datetime.UTC)
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_ago = now - datetime.timedelta(days=7)
         return UserStats(
             total_users=await self._repo.count_all(),
             banned_users=await self._repo.count_banned(),
             total_downloads=await self._repo.sum_total_downloads(),
+            new_today=await self._repo.count_created_since(today_start),
+            new_this_week=await self._repo.count_created_since(week_ago),
+            active_today=await self._repo.count_active_since(today_start),
+            premium_users=await self._repo.count_premium(),
+            staff_users=await self._repo.count_staff(),
         )
 
     async def list_users(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:

@@ -10,7 +10,7 @@ import pytest
 from core.redis_keys import RedisKeys
 from domain.enums import UserRole
 from services.user_service import UserService
-from tests.unit._fakes import FakeCache, FakeUserRepo, make_cache_service
+from tests.unit._fakes import FakeCache, FakeUser, FakeUserRepo, make_cache_service
 
 OWNER_ID = 555
 
@@ -60,6 +60,41 @@ async def test_get_or_create_populates_cache() -> None:
     svc, _, raw_cache = _service()
     await svc.get_or_create_user(telegram_id=1001)
     assert RedisKeys.user(1001) in raw_cache.store
+
+
+async def test_get_stats_aggregates_cohorts() -> None:
+    svc, repo, _ = _service()
+    now = datetime.datetime.now(datetime.UTC)
+    old = now - datetime.timedelta(days=30)
+    this_week = now - datetime.timedelta(days=3)
+    # joined today + active today + premium, 3 downloads.
+    repo.by_tid[1] = FakeUser(
+        id=1,
+        telegram_id=1,
+        created_at=now,
+        last_activity_at=now,
+        is_premium=True,
+        total_downloads=3,
+    )
+    # joined this week (not today), inactive, 1 download.
+    repo.by_tid[2] = FakeUser(id=2, telegram_id=2, created_at=this_week, total_downloads=1)
+    # old moderator, active today.
+    repo.by_tid[3] = FakeUser(
+        id=3, telegram_id=3, role="moderator", created_at=old, last_activity_at=now
+    )
+    # old banned user.
+    repo.by_tid[4] = FakeUser(id=4, telegram_id=4, is_banned=True, created_at=old)
+
+    stats = await svc.get_stats()
+
+    assert stats.total_users == 4
+    assert stats.banned_users == 1
+    assert stats.total_downloads == 4
+    assert stats.new_today == 1  # only user 1
+    assert stats.new_this_week == 2  # users 1 and 2
+    assert stats.active_today == 2  # users 1 and 3
+    assert stats.premium_users == 1  # user 1
+    assert stats.staff_users == 1  # user 3 (moderator)
 
 
 async def test_record_activity_writes_when_never_active() -> None:

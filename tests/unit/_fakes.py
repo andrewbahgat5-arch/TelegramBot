@@ -186,6 +186,24 @@ class FakeUserRepo:
     async def sum_total_downloads(self) -> int:
         return sum(u.total_downloads for u in self.by_tid.values())
 
+    async def count_created_since(self, since: datetime.datetime) -> int:
+        return sum(
+            1 for u in self.by_tid.values() if u.created_at is not None and u.created_at >= since
+        )
+
+    async def count_active_since(self, since: datetime.datetime) -> int:
+        return sum(
+            1
+            for u in self.by_tid.values()
+            if u.last_activity_at is not None and u.last_activity_at >= since
+        )
+
+    async def count_premium(self) -> int:
+        return sum(1 for u in self.by_tid.values() if u.is_premium)
+
+    async def count_staff(self) -> int:
+        return sum(1 for u in self.by_tid.values() if u.role in ("owner", "moderator"))
+
     def _audience(self, role: str | None, language: str | None) -> list[FakeUser]:
         users = [u for u in self.by_tid.values() if not u.is_banned]
         if role is not None:

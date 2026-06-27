@@ -64,6 +64,22 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Lifetime delivered-download count across all users (admin /stats)."""
         ...
 
+    async def count_created_since(self, since: datetime.datetime) -> int:
+        """Users whose ``created_at`` is at or after ``since`` (joined-today / -week stats)."""
+        ...
+
+    async def count_active_since(self, since: datetime.datetime) -> int:
+        """Users whose ``last_activity_at`` is at or after ``since`` (active-today stat)."""
+        ...
+
+    async def count_premium(self) -> int:
+        """Users currently flagged premium (admin stats)."""
+        ...
+
+    async def count_staff(self) -> int:
+        """Users with an Owner or Moderator role (admin stats)."""
+        ...
+
     async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
         """Count the non-banned audience matching the broadcast filters (16.8)."""
         ...
