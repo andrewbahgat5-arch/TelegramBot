@@ -3227,9 +3227,14 @@ optionally, interacting unlocks extra usage per future business rules.
 > Downloads/System); Settings stepper + guided entry; Users + Ads management actions; guided
 > User Info. Sprint 9.6 then added the **unified audience engine** (D-055), **multi-placement**
 > (D-056), **internal ad metadata** (D-058), and the **registry-driven compose wizard** (D-057/
-> D-059) shared by Ads + Broadcasts. Remaining: Owner reqs #10 (direct user-id for every user
-> action) + #11 (verify daily-limit auto-reset). See the design doc
-> `DESIGN_9.6_unified_audience_wizard.md` and `PROJECT_PROGRESS.md`.
+> D-059) shared by Ads + Broadcasts. **Owner req #10 (direct user-id for every user action) —
+> DONE 2026-06-27:** the top-level Users (Ban/Unban/Premium/Admin) and Moderation (Ban/Unban)
+> buttons now arm a guided "send the Telegram ID" prompt (`PanelStates.user_action`) that
+> re-enters the same apply/confirm path the per-user detail buttons use (owner never
+> targetable); `panel_write` also routes section `m` writes. Same change enriched the
+> **Statistics** screen (joined today / last 7 days, active today, premium, staff — via new
+> `UserRepository` count queries, no schema change). Remaining: Owner req #11 (verify
+> daily-limit auto-reset). See `DESIGN_9.6_unified_audience_wizard.md` and `PROJECT_PROGRESS.md`.
 
 Owner/Admin management primarily via inline keyboards instead of memorized commands:
 a root panel (`Ads`, `Users`, `Limits`, `Broadcast`, `Channels`, `Statistics`) drilling into
