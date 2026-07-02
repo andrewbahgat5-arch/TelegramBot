@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner
 from bot.keyboards.format_select import build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
+from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
@@ -41,9 +42,6 @@ _log = get_logger("bot.handlers.download")
 AnalyzerFactory = Callable[[AsyncSession], URLAnalyzerService]
 JobServiceFactory = Callable[[AsyncSession], JobService]
 RateLimitServiceFactory = Callable[[AsyncSession], RateLimitService]
-
-_DUPLICATE_TEXT = "⏳ This is already being prepared — you'll get it shortly."
-_BUSY_TEXT = "⏳ You already have a download in progress. Please wait for it to finish."
 
 
 def _is_free(user: UserSnapshot) -> bool:
@@ -66,25 +64,27 @@ async def handle_url(
     session: AsyncSession,
     analyzer_factory: AnalyzerFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
-    ack = await message.answer("🔍 Analyzing link…")
+    ack = await message.answer(translate("download.analyzing", locale))
     analyzer = analyzer_factory(session)
     try:
         analyzed = await analyzer.analyze(message.text or "")
     except URLNotSupportedError:
-        await ack.edit_text("That link isn't supported. Please try a different one.")
+        await ack.edit_text(translate("errors.url_not_supported", locale))
         return
     except ExtractionFailedError:
-        await ack.edit_text("Sorry, I couldn't read that link. It may be private or removed.")
+        await ack.edit_text(translate("download.extraction_failed", locale))
         return
 
     if not analyzed.info.formats:
-        await ack.edit_text("No downloadable formats were found for that link.")
+        await ack.edit_text(translate("download.no_formats", locale))
         return
 
-    keyboard = build_format_keyboard(analyzed.media_id, analyzed.info, callback_signer)
-    caption = _media_caption(analyzed.info)
+    keyboard = build_format_keyboard(analyzed.media_id, analyzed.info, callback_signer, locale)
+    caption = _media_caption(analyzed.info, translate, locale)
     thumbnail = analyzed.info.thumbnail_url
     if thumbnail:
         try:
@@ -96,8 +96,12 @@ async def handle_url(
     await ack.edit_text(caption, reply_markup=keyboard)
 
 
-def _media_caption(info: MediaInfo) -> str:
-    """Title + duration + source line shown above the format keyboard."""
+def _media_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
+    """Title + duration + source line shown above the format keyboard.
+
+    ``info.title``/``info.platform`` are user/platform-generated content and are
+    interpolated verbatim, never translated (Sprint 11.5 requirement #3).
+    """
     lines = [f"🎬 <b>{escape(info.title)}</b>"]
     meta: list[str] = []
     if info.duration:
@@ -106,7 +110,7 @@ def _media_caption(info: MediaInfo) -> str:
         meta.append(f"📺 {info.platform.capitalize()}")
     if meta:
         lines.append("   ".join(meta))
-    lines.append("\nChoose a format:")
+    lines.append(f"\n{translate('download.choose_format', locale)}")
     return "\n".join(lines)
 
 
@@ -124,6 +128,8 @@ async def handle_format_choice(
     session: AsyncSession,
     analyzer_factory: AnalyzerFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "f" or parsed.format is None:
@@ -132,13 +138,15 @@ async def handle_format_choice(
 
     analyzed = await analyzer_factory(session).analyze_by_media_id(parsed.media_id)
     if analyzed is None:
-        await callback.answer("This link expired — please send it again.", show_alert=True)
+        await callback.answer(translate("download.link_expired", locale), show_alert=True)
         return
 
     keyboard = build_quality_keyboard(
-        parsed.media_id, parsed.format, analyzed.info, callback_signer
+        parsed.media_id, parsed.format, analyzed.info, callback_signer, locale
     )
-    caption = f"🎬 <b>{escape(analyzed.info.title)}</b>\nChoose a quality:"
+    caption = (
+        f"🎬 <b>{escape(analyzed.info.title)}</b>\n{translate('download.choose_quality', locale)}"
+    )
     await _edit_chooser(callback.message, caption, keyboard)
     await callback.answer()
 
@@ -149,6 +157,8 @@ async def handle_back(
     session: AsyncSession,
     analyzer_factory: AnalyzerFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "b":
@@ -157,11 +167,13 @@ async def handle_back(
 
     analyzed = await analyzer_factory(session).analyze_by_media_id(parsed.media_id)
     if analyzed is None:
-        await callback.answer("This link expired — please send it again.", show_alert=True)
+        await callback.answer(translate("download.link_expired", locale), show_alert=True)
         return
 
-    keyboard = build_format_keyboard(parsed.media_id, analyzed.info, callback_signer)
-    await _edit_chooser(callback.message, _media_caption(analyzed.info), keyboard)
+    keyboard = build_format_keyboard(parsed.media_id, analyzed.info, callback_signer, locale)
+    await _edit_chooser(
+        callback.message, _media_caption(analyzed.info, translate, locale), keyboard
+    )
     await callback.answer()
 
 
@@ -175,6 +187,8 @@ async def handle_quality_choice(
     rate_limit_service_factory: RateLimitServiceFactory,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "q" or parsed.format is None or parsed.quality is None:
@@ -183,7 +197,7 @@ async def handle_quality_choice(
 
     analyzed = await analyzer_factory(session).analyze_by_media_id(parsed.media_id)
     if analyzed is None:
-        await callback.answer("This link expired — please send it again.", show_alert=True)
+        await callback.answer(translate("download.link_expired", locale), show_alert=True)
         return
 
     # Enforce the per-user daily limit + cooldown against the authoritative DB row
@@ -191,11 +205,11 @@ async def handle_quality_choice(
     try:
         await rate_limit_service_factory(session).authorize_download(user.telegram_id)
     except UserFacingError as exc:
-        await callback.answer(str(exc), show_alert=True)
+        await callback.answer(translate(exc.translation_key, locale), show_alert=True)
         return
 
     await callback.answer()
-    progress_message_id = await notification_service.send_initial(user.telegram_id)
+    progress_message_id = await notification_service.send_initial(user.telegram_id, locale)
     correlation = get_correlation_id()
     outcome = await job_service_factory(session).request(
         user_id=user.id,
@@ -210,10 +224,12 @@ async def handle_quality_choice(
     )
     if outcome.kind is RequestKind.DUPLICATE:
         await notification_service.notify_text(
-            user.telegram_id, progress_message_id, _DUPLICATE_TEXT
+            user.telegram_id, progress_message_id, translate("download.duplicate", locale)
         )
     elif outcome.kind is RequestKind.BUSY:
-        await notification_service.notify_text(user.telegram_id, progress_message_id, _BUSY_TEXT)
+        await notification_service.notify_text(
+            user.telegram_id, progress_message_id, translate("download.busy", locale)
+        )
 
 
 async def _edit_chooser(message: object, text: str, keyboard: object) -> None:

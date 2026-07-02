@@ -932,7 +932,7 @@ AppError (base)
 All user-facing error messages are:
 
 - Written in clear, non-technical language.
-- Stored as translatable string constants (future i18n readiness).
+- Localized via `core.i18n.translate` (Sprint 11.5) — never a hardcoded literal in a handler; see §23.3.
 - Include actionable guidance where possible (e.g., "Try a different URL" or "Please wait and try again").
 - Never expose internal error details, stack traces, or system information.
 
@@ -1297,7 +1297,7 @@ jobs             1 ──── 1   active_downloads    "A job may have one acti
 
 **Design notes:**
 
-- `target_language` enables localized broadcasts (e.g., send only to Russian-speaking users). This is a foundation for the future multi-language system.
+- `target_language` enables audience-filtered broadcasts (e.g., send only to Arabic-speaking users), matched against `users.language`. Distinct from — and predates — the UI-localization system (§23.3): this filters *who* receives a broadcast, not *which language its body is written in* (broadcast bodies are always user-generated content and are never translated).
 - `target_role` enables role-targeted broadcasts (e.g., announce Premium features only to premium users).
 - `total_sent` and `total_failed` are updated as the broadcast job progresses. They provide delivery tracking without a separate delivery log table (which can be added later if per-user delivery tracking is needed).
 
@@ -1386,7 +1386,7 @@ jobs             1 ──── 1   active_downloads    "A job may have one acti
 
 **Design notes:**
 
-- `preferred_language` vs `users.language`: the `users.language` field stores the Telegram client language (auto-detected). `user_preferences.preferred_language` stores the user's explicit choice, which takes precedence when set. This supports the future multi-language system.
+- `preferred_language` vs `users.language`: **as of Sprint 11.5, this is reversed from the original design sketch below.** `users.language` is now the single field driving the bot's UI locale — set to the configured default locale when a user is created, then updated only by an explicit in-bot language pick (never from Telegram's auto-detected client language, which isn't restricted to the languages the bot actually catalogs). `user_preferences.preferred_language` remains **reserved and unused** — see §23.3 and MASTER_PLAN.md D-061.
 - `user_id` is both the PK and the FK, enforcing a strict one-to-one relationship. Created lazily on first preference change (not on `/start`).
 - Future preference fields (e.g., `default_format`, `default_quality`, `auto_download`, `theme`) can be added as columns without structural changes.
 
@@ -2443,7 +2443,7 @@ The following features are planned for future versions. The current architecture
 
 | Priority | Feature | Architecture Readiness | Database Readiness |
 |---|---|---|---|
-| **P1** | Multiple language support | `user_preferences.preferred_language` + `users.language` already exist. Translations loaded from JSON/YAML files. | ✅ Ready |
+| ~~P1~~ | ~~Multiple language support~~ | **✅ SHIPPED — V1, Sprint 11.5 (2026-07-01), pulled forward from its original V2 slot at Owner direction.** See §23.3 for the as-built design. | ✅ Live — no migration used |
 | **P1** | Payment integrations | `users.is_premium` + `premium_expire_at` built. Future `payments` + `invoices` tables (see §12.9.2). | ✅ Schema hooks built |
 | **P2** | Referral system | Future `referrals` + `referral_codes` tables + `users.referred_by` column (see §12.9.3). | ✅ Schema hooks defined |
 | **P2** | Advanced analytics | Current schema supports all basic analytics queries. Future `daily_stats` + `platform_daily_stats` for pre-aggregation (see §12.9.5). | ✅ Ready for aggregation tables |
@@ -2452,20 +2452,63 @@ The following features are planned for future versions. The current architecture
 | **P3** | Multi-engine downloads | `media_metadata.platform` already identifies the source. Adding new engines (gallery-dl, direct HTTP, etc.) requires new downloader implementations behind the existing protocol interface. | ✅ Architecture ready |
 | **P3** | Playlist downloads | Requires batch job creation from playlist URL analysis. Jobs are already individual per-media — playlists decompose into N jobs. Premium-only feature. | 🔮 Service-level addition |
 
-### 23.3 Multi-Language System Design (Future)
+### 23.3 Multi-Language System Design (IMPLEMENTED — V1 Sprint 11.5, 2026-07-01)
+
+> This replaces the earlier design sketch (retained in git history only). The system described
+> below is live: English + Arabic ship today; any further language is a content-only addition.
+> Full rationale and alternatives-rejected history: MASTER_PLAN.md decisions D-061–D-064.
 
 ```
-Language Resolution Priority:
-  1. user_preferences.preferred_language  (explicit user choice)
-  2. users.language                       (Telegram client language)
-  3. Default language from settings       (fallback)
+Locale resolution (core.i18n.resolve_locale, called fresh every update):
+  1. users.language, IF it names a currently-enabled catalog   (explicit user choice)
+  2. Settings.default_locale (env DEFAULT_LOCALE, default "en") (fallback)
 
-Implementation:
-  - Translation files: JSON/YAML per language (en.json, ru.json, ar.json, ...)
-  - TranslationService loads and caches translations
-  - All user-facing strings use translation keys
-  - Broadcasts support target_language filtering (already built)
-  - /language command lets users change preferred_language
+  Read-only: a stored value pointing at a disabled/unknown locale is NEVER
+  overwritten. Re-enabling that locale later makes it resolve correctly again
+  with zero data migration.
+
+Catalog loading (core/i18n.py, core/locales/*.json):
+  - Supported languages are DISCOVERED from disk at startup, not stored in `settings`.
+    Adding a language = one new JSON file with `_meta.enabled: true`. No code or
+    schema change.
+  - Every file carries a standardized `_meta` block:
+      {"code": "ar", "native_name": "العربية", "direction": "rtl",
+       "enabled": true, "version": 1}
+  - DEFAULT_LOCALE's catalog is the reference: every key used anywhere in the
+    codebase must exist there. Every other locale's keys must be a SUBSET of the
+    reference catalog's — an orphaned/typo'd key fails startup, naming the key.
+  - translate(key, locale, **kwargs) never raises: a miss in a non-default locale
+    falls back to the default locale's value (logged); a miss in both falls back
+    to the raw key string (logged); a bad `.format()` placeholder is caught and
+    logged rather than crashing the caller.
+
+Storage: users.language ONLY (BCP-47, D-022) — no new column, no migration.
+  user_preferences.preferred_language remains reserved/unused (see §12.3 notes).
+  A new user's users.language is set to DEFAULT_LOCALE at creation (never from
+  Telegram's auto-detected client language, which isn't restricted to the
+  languages this bot actually catalogs).
+
+Changing language — button only, no gate, no command (two rounds of Owner
+simplification during the design review superseded the original first-contact-
+picker and /language-command ideas):
+  - Regular users: a permanent "🌐 Change Language" inline button on the /start
+    screen.
+  - Owner/Moderator: a "🌐 Language" section in the admin panel.
+  - Both render the same picker and share one apply path (UserService.set_language
+    + a signed callback action). The pick takes effect on the very next message —
+    no restart, no /start re-run.
+
+Scope: only application UI is localized (menus, buttons, progress, errors,
+notifications, help, the entire admin panel). User-generated content — ad
+bodies, broadcast bodies, video titles, platform names, filenames — is never
+translated. `broadcasts.target_language` (§12.3) is unrelated: it filters WHO
+receives a broadcast, not what language the (always user-authored) body is in.
+
+RTL: Telegram clients render bidi text natively per message/button — there is no
+custom layout engine to adapt. The real engineering requirement is that every
+catalog value is a whole-sentence template with named placeholders (e.g.
+"{name}"), never built by concatenating independently-translated fragments
+(fragment concatenation breaks Arabic word order).
 ```
 
 ### 23.4 Payment Integration Design (Future)

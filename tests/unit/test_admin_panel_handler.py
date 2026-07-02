@@ -1,4 +1,4 @@
-"""Unit tests for the admin inline panel handlers (Sprint 9.6, F-2/EP-22)."""
+"""Unit tests for the admin inline panel handlers (Sprint 9.6, F-2/EP-22; Sprint 11.5 i18n)."""
 
 from __future__ import annotations
 
@@ -21,10 +21,13 @@ from bot.handlers.admin_panel import (
     panel_navigate,
     panel_write,
 )
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.settings_service import InvalidSettingValueError, SettingView
 from services.user_service import UserStats
+
+_LOCALE = "en"
 
 
 def _signer() -> CallbackSigner:
@@ -230,6 +233,8 @@ async def _navigate(
         lambda s: _FakeAdmin(),
         _FakeQueue(),
         signer,
+        translate,
+        _LOCALE,
     )
 
 
@@ -238,7 +243,7 @@ async def test_open_panel_sends_main_menu() -> None:
     signer = _signer()
     message: Any = AsyncMock(spec=Message)
     message.answer = AsyncMock()
-    await open_panel(message, _user(), signer)
+    await open_panel(message, _user(), signer, translate, _LOCALE)
     message.answer.assert_awaited_once()
     call = _call(message.answer)
     assert "Admin Panel" in call.args[0]
@@ -249,7 +254,9 @@ async def test_open_settings_lists_values() -> None:
     signer = _signer()
     message: Any = AsyncMock(spec=Message)
     message.answer = AsyncMock()
-    await open_settings(message, _session(), _user(), lambda s: _FakeSettings(), signer)
+    await open_settings(
+        message, _session(), _user(), lambda s: _FakeSettings(), signer, translate, _LOCALE
+    )
     text = _call(message.answer).args[0]
     assert "Settings" in text and "Workers" in text  # field label rendered
 
@@ -348,6 +355,8 @@ async def _write(
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _signer(),
+        translate,
+        _LOCALE,
     )
 
 
@@ -457,6 +466,8 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _signer(),
+        translate,
+        _LOCALE,
     )
 
 
@@ -549,6 +560,8 @@ async def test_user_detail_renders_via_navigation() -> None:
         lambda s: _FakeAdmin(),
         _FakeQueue(),
         signer,
+        translate,
+        _LOCALE,
     )
     assert "555" in callback.message.edit_text.await_args.args[0]
 
@@ -576,6 +589,8 @@ async def _bwrite(callback: Any, panel: ParsedPanel) -> None:
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _signer(),
+        translate,
+        _LOCALE,
     )
 
 
@@ -595,6 +610,8 @@ async def _awrite(
         lambda s: broadcasts or _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _signer(),
+        translate,
+        _LOCALE,
     )
 
 
@@ -722,6 +739,8 @@ async def test_user_lookup_resolves_to_extended_detail() -> None:
         lambda s: _FakeAdmin(),
         lambda s: _FakeSettings(),
         _signer(),
+        translate,
+        _LOCALE,
     )
     state.clear.assert_awaited_once()
     text = bot.edit_message_text.await_args.args[0]
@@ -744,6 +763,8 @@ async def test_user_lookup_non_numeric_keeps_state() -> None:
         lambda s: _FakeAdmin(),
         lambda s: _FakeSettings(),
         _signer(),
+        translate,
+        _LOCALE,
     )
     message.reply.assert_awaited_once()
     state.clear.assert_not_awaited()
@@ -765,6 +786,8 @@ async def test_user_lookup_unknown_id_reports_not_found() -> None:
         lambda s: _FakeAdmin(),
         lambda s: _FakeSettings(),
         _signer(),
+        translate,
+        _LOCALE,
     )
     assert "No user" in bot.edit_message_text.await_args.args[0]
 
@@ -786,6 +809,8 @@ async def _action_input(
         lambda s: _FakeAdmin(),
         lambda s: _FakeSettings(),
         _signer(),
+        translate,
+        _LOCALE,
     )
 
 
@@ -843,6 +868,8 @@ async def test_action_input_non_numeric_keeps_state() -> None:
         lambda s: _FakeAdmin(),
         lambda s: _FakeSettings(),
         _signer(),
+        translate,
+        _LOCALE,
     )
     message.reply.assert_awaited_once()
     state.clear.assert_not_awaited()
@@ -864,7 +891,7 @@ async def test_typed_value_shows_confirm_before_saving() -> None:
     state = _state({"field_index": 0, "chat_id": 10, "message_id": 20})
     message: Any = AsyncMock(spec=Message)
     message.text = "20"
-    await on_setting_value(message, state, bot, _signer())
+    await on_setting_value(message, state, bot, _signer(), translate, _LOCALE)
     state.clear.assert_awaited_once()
     bot.edit_message_text.assert_awaited_once()
     assert "Confirm" in bot.edit_message_text.await_args.args[0]
@@ -876,7 +903,7 @@ async def test_typed_non_numeric_keeps_state() -> None:
     message: Any = AsyncMock(spec=Message)
     message.text = "notanumber"
     message.reply = AsyncMock()
-    await on_setting_value(message, state, bot, _signer())
+    await on_setting_value(message, state, bot, _signer(), translate, _LOCALE)
     message.reply.assert_awaited_once()
     state.clear.assert_not_awaited()  # stays armed for the next attempt
     bot.edit_message_text.assert_not_awaited()
@@ -888,6 +915,6 @@ async def test_typed_out_of_range_keeps_state() -> None:
     message: Any = AsyncMock(spec=Message)
     message.text = "999"
     message.reply = AsyncMock()
-    await on_setting_value(message, state, bot, _signer())
+    await on_setting_value(message, state, bot, _signer(), translate, _LOCALE)
     message.reply.assert_awaited_once()
     state.clear.assert_not_awaited()

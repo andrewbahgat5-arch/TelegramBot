@@ -115,6 +115,13 @@ class Settings(BaseSettings):
     # --- Alerting ---
     telegram_alerts_chat_id: int | None = Field(None, alias="TELEGRAM_ALERTS_CHAT_ID")
 
+    # --- Localization (Sprint 11.5) ---
+    # Reference/fallback locale (BCP-47). Must match a discovered core/locales/*.json
+    # file with _meta.enabled=true (core/i18n.py validates this at startup). Same
+    # category as bot_parse_mode — a deploy-time rendering knob, not a per-user
+    # runtime tunable, so it lives here rather than in the `settings` table.
+    default_locale: str = Field("en", alias="DEFAULT_LOCALE")
+
     # --- Validators ---
     @field_validator("log_level", mode="before")
     @classmethod

@@ -15,10 +15,17 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks.factory import CallbackSigner
+from core.i18n import translate
 
 
 def build_history_keyboard(
-    rows: list[Any], *, page: int, has_prev: bool, has_next: bool, signer: CallbackSigner
+    rows: list[Any],
+    *,
+    page: int,
+    has_prev: bool,
+    has_next: bool,
+    signer: CallbackSigner,
+    locale: str,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for row in rows:
@@ -28,11 +35,17 @@ def build_history_keyboard(
     nav: list[InlineKeyboardButton] = []
     if has_prev:
         nav.append(
-            InlineKeyboardButton(text="⬅️ Prev", callback_data=signer.pack_history_page(page - 1))
+            InlineKeyboardButton(
+                text=translate("common.prev", locale),
+                callback_data=signer.pack_history_page(page - 1),
+            )
         )
     if has_next:
         nav.append(
-            InlineKeyboardButton(text="Next ➡️", callback_data=signer.pack_history_page(page + 1))
+            InlineKeyboardButton(
+                text=translate("common.next", locale),
+                callback_data=signer.pack_history_page(page + 1),
+            )
         )
     if nav:
         builder.row(*nav)

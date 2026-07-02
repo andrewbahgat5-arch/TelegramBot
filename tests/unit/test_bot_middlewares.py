@@ -16,10 +16,11 @@ import structlog
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.middlewares.auth import BAN_MESSAGE, AuthMiddleware
+from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import THROTTLE_MESSAGE, ThrottleMiddleware
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from services.rate_limit_service import RateLimitService
 from services.settings_service import SettingsService
@@ -113,12 +114,15 @@ def _user_service(repo: FakeUserRepo) -> UserService:
 
 
 def _tg_user(uid: int = 1) -> object:
-    return types.SimpleNamespace(id=uid, username="neo", first_name="Thomas", language_code="en")
+    # A deliberately uncataloged language_code (not "en"/"ar") — proves the
+    # created row's language comes from the configured default, never from
+    # Telegram's auto-detected code (Sprint 11.5).
+    return types.SimpleNamespace(id=uid, username="neo", first_name="Thomas", language_code="ru")
 
 
 async def test_auth_creates_user_and_attaches_snapshot() -> None:
     repo = FakeUserRepo()
-    mw = AuthMiddleware(lambda session: _user_service(repo))
+    mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
     calls: list[dict[str, Any]] = []
     data: dict[str, Any] = {"session": object(), "event_from_user": _tg_user()}
 
@@ -128,10 +132,20 @@ async def test_auth_creates_user_and_attaches_snapshot() -> None:
     assert repo.by_tid[1].telegram_id == 1
 
 
+async def test_auth_creates_user_with_configured_default_locale_not_telegram_code() -> None:
+    repo = FakeUserRepo()
+    mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
+    data: dict[str, Any] = {"session": object(), "event_from_user": _tg_user()}
+
+    await mw(_ok_handler([]), _EVENT, data)
+    assert data["user"].language == "en"
+    assert repo.by_tid[1].language == "en"
+
+
 async def test_auth_blocks_banned_user() -> None:
     repo = FakeUserRepo()
     repo.by_tid[1] = FakeUser(id=1, telegram_id=1, is_banned=True)
-    mw = AuthMiddleware(lambda session: _user_service(repo))
+    mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
     calls: list[dict[str, Any]] = []
     event = AsyncMock(spec=Message)
     event.answer = AsyncMock()
@@ -140,13 +154,13 @@ async def test_auth_blocks_banned_user() -> None:
     result = await mw(_ok_handler(calls), cast(TelegramObject, event), data)
     assert result is None
     assert calls == []  # handler skipped
-    event.answer.assert_awaited_once_with(BAN_MESSAGE)
+    event.answer.assert_awaited_once_with(translate("errors.permission_denied", "en"))
 
 
 async def test_auth_banned_callback_query_gets_alert() -> None:
     repo = FakeUserRepo()
     repo.by_tid[1] = FakeUser(id=1, telegram_id=1, is_banned=True)
-    mw = AuthMiddleware(lambda session: _user_service(repo))
+    mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
     calls: list[dict[str, Any]] = []
     event = AsyncMock(spec=CallbackQuery)
     event.answer = AsyncMock()
@@ -154,12 +168,14 @@ async def test_auth_banned_callback_query_gets_alert() -> None:
 
     result = await mw(_ok_handler(calls), cast(TelegramObject, event), data)
     assert result is None and calls == []
-    event.answer.assert_awaited_once_with(BAN_MESSAGE, show_alert=True)
+    event.answer.assert_awaited_once_with(
+        translate("errors.permission_denied", "en"), show_alert=True
+    )
 
 
 async def test_auth_passes_through_without_from_user() -> None:
     repo = FakeUserRepo()
-    mw = AuthMiddleware(lambda session: _user_service(repo))
+    mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
     calls: list[dict[str, Any]] = []
     await mw(_ok_handler(calls), _EVENT, {"session": object()})
     assert len(calls) == 1

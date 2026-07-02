@@ -1,4 +1,4 @@
-"""Unit tests for admin-panel keyboard builders (Sprint 9.6, F-2/EP-22)."""
+"""Unit tests for admin-panel keyboard builders (Sprint 9.6, F-2/EP-22; Sprint 11.5 i18n)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 
 _TODAY = datetime.date(2026, 6, 26)
+_LOCALE = "en"
 
 
 def _signer() -> CallbackSigner:
@@ -65,7 +66,7 @@ def _all_signed_and_within_limit(signer: CallbackSigner, markup: InlineKeyboardM
 # --- main menu ------------------------------------------------------------
 def test_main_menu_owner_sees_all_sections() -> None:
     signer = _signer()
-    markup = build_main_menu(UserRole.OWNER, signer)
+    markup = build_main_menu(UserRole.OWNER, signer, _LOCALE)
     sections = {_parse(signer, b).section for b in _flat(markup)}
     assert sections == {s.code for s in SECTIONS}
     _all_signed_and_within_limit(signer, markup)
@@ -73,7 +74,7 @@ def test_main_menu_owner_sees_all_sections() -> None:
 
 def test_main_menu_hides_owner_only_sections_from_moderator() -> None:
     signer = _signer()
-    markup = build_main_menu(UserRole.MODERATOR, signer)
+    markup = build_main_menu(UserRole.MODERATOR, signer, _LOCALE)
     sections = {_parse(signer, b).section for b in _flat(markup)}
     assert "b" not in sections  # Broadcast is owner_only
     assert sections == {s.code for s in SECTIONS if not s.owner_only}
@@ -81,14 +82,14 @@ def test_main_menu_hides_owner_only_sections_from_moderator() -> None:
 
 def test_main_menu_buttons_open_sections() -> None:
     signer = _signer()
-    for button in _flat(build_main_menu(UserRole.OWNER, signer)):
+    for button in _flat(build_main_menu(UserRole.OWNER, signer, _LOCALE)):
         assert _parse(signer, button).action == "op"
 
 
 # --- section menu ---------------------------------------------------------
 def test_section_menu_owner_sees_write_items() -> None:
     signer = _signer()
-    markup = build_section_menu("u", UserRole.OWNER, signer)
+    markup = build_section_menu("u", UserRole.OWNER, signer, _LOCALE)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert {"ban", "ubn", "up", "rp", "mka", "rma"} <= actions  # write items present
     assert "hm" in actions  # Home in nav row
@@ -96,7 +97,7 @@ def test_section_menu_owner_sees_write_items() -> None:
 
 def test_section_menu_hides_write_items_from_moderator() -> None:
     signer = _signer()
-    markup = build_section_menu("u", UserRole.MODERATOR, signer)
+    markup = build_section_menu("u", UserRole.MODERATOR, signer, _LOCALE)
     actions = [_parse(signer, b).action for b in _flat(markup)]
     # Only read items + nav remain; no write-tier action is rendered.
     assert not any(a not in ("ls", "inf", "bk", "hm", "op") and is_write_action(a) for a in actions)
@@ -106,7 +107,7 @@ def test_section_menu_hides_write_items_from_moderator() -> None:
 
 def test_section_menu_has_back_and_home() -> None:
     signer = _signer()
-    markup = build_section_menu("a", UserRole.OWNER, signer)
+    markup = build_section_menu("a", UserRole.OWNER, signer, _LOCALE)
     nav = markup.inline_keyboard[-1]
     parsed = [_parse(signer, b) for b in nav]
     assert any(p.section == "mn" and p.action == "op" for p in parsed)  # Back -> main
@@ -116,7 +117,7 @@ def test_section_menu_has_back_and_home() -> None:
 # --- settings menu + stepper ----------------------------------------------
 def test_settings_menu_owner_lists_every_field() -> None:
     signer = _signer()
-    markup = build_settings_menu(UserRole.OWNER, signer)
+    markup = build_settings_menu(UserRole.OWNER, signer, _LOCALE)
     edit_args = sorted(
         p.arg for b in _flat(markup) if (p := _parse(signer, b)).action == "e" and p.arg is not None
     )
@@ -125,7 +126,7 @@ def test_settings_menu_owner_lists_every_field() -> None:
 
 def test_settings_menu_moderator_has_no_edit_buttons() -> None:
     signer = _signer()
-    markup = build_settings_menu(UserRole.MODERATOR, signer)
+    markup = build_settings_menu(UserRole.MODERATOR, signer, _LOCALE)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert "e" not in actions  # no edit affordance
     assert "hm" in actions  # nav still present
@@ -135,7 +136,7 @@ def test_stepper_carries_clamped_values() -> None:
     signer = _signer()
     field = setting_field(0)  # worker_count: step 1, min 1, max 32
     assert field is not None
-    markup = build_setting_stepper(field, 1, signer)  # at min
+    markup = build_setting_stepper(field, 1, signer, _LOCALE)  # at min
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
     assert by_action["-"].value == 1  # decrement clamped at min
     assert by_action["+"].value == 2
@@ -147,7 +148,7 @@ def test_stepper_clamps_at_max() -> None:
     signer = _signer()
     field = setting_field(0)
     assert field is not None
-    markup = build_setting_stepper(field, 32, signer)
+    markup = build_setting_stepper(field, 32, signer, _LOCALE)
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
     assert by_action["+"].value == 32  # increment clamped at max
     assert by_action["-"].value == 31
@@ -157,7 +158,7 @@ def test_stepper_back_returns_to_settings_menu() -> None:
     signer = _signer()
     field = setting_field(3)
     assert field is not None
-    nav = build_setting_stepper(field, 30, signer).inline_keyboard[-1]
+    nav = build_setting_stepper(field, 30, signer, _LOCALE).inline_keyboard[-1]
     parsed = [_parse(signer, b) for b in nav]
     assert any(p.section == "s" and p.action == "op" for p in parsed)
 
@@ -165,7 +166,9 @@ def test_stepper_back_returns_to_settings_menu() -> None:
 # --- confirm + nav --------------------------------------------------------
 def test_confirm_has_confirm_and_cancel() -> None:
     signer = _signer()
-    markup = build_confirm(signer, confirm=("u", "banc", 7, None), cancel=("u", "inf", 7))
+    markup = build_confirm(
+        signer, _LOCALE, confirm=("u", "banc", 7, None), cancel=("u", "inf", 7)
+    )
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
     assert by_action["banc"].arg == 7  # confirm carries the target id
     assert by_action["inf"].arg == 7  # cancel routes back to that user's detail
@@ -173,7 +176,7 @@ def test_confirm_has_confirm_and_cancel() -> None:
 
 def test_confirm_carries_value_for_settings_save() -> None:
     signer = _signer()
-    markup = build_confirm(signer, confirm=("s", "sv", 0, 20), cancel=("s", "e", 0))
+    markup = build_confirm(signer, _LOCALE, confirm=("s", "sv", 0, 20), cancel=("s", "e", 0))
     save = next(p for b in _flat(markup) if (p := _parse(signer, b)).action == "sv")
     assert save.arg == 0 and save.value == 20  # typed value rides on the confirm button
 
@@ -182,13 +185,15 @@ def test_stepper_has_enter_value_button() -> None:
     signer = _signer()
     field = setting_field(0)
     assert field is not None
-    actions = {_parse(signer, b).action for b in _flat(build_setting_stepper(field, 3, signer))}
+    actions = {
+        _parse(signer, b).action for b in _flat(build_setting_stepper(field, 3, signer, _LOCALE))
+    }
     assert "ev" in actions  # Enter Value alongside the minus/plus/save controls
 
 
 def test_nav_row_includes_cancel_when_requested() -> None:
     signer = _signer()
-    row = nav_row(signer, back=("s", "op"), cancel=("s", "cx"))
+    row = nav_row(signer, _LOCALE, back=("s", "op"), cancel=("s", "cx"))
     actions = {_parse(signer, b).action for b in row}
     assert actions == {"op", "cx", "hm"}
 
@@ -196,7 +201,7 @@ def test_nav_row_includes_cancel_when_requested() -> None:
 # --- user list + detail ---------------------------------------------------
 def test_user_list_rows_open_details() -> None:
     signer = _signer()
-    markup = build_user_list([_snap(111), _snap(222)], signer)
+    markup = build_user_list([_snap(111), _snap(222)], signer, _LOCALE)
     opened = {p.arg for b in _flat(markup) if (p := _parse(signer, b)).action == "inf"}
     assert opened == {111, 222}  # each row carries its telegram id
     _all_signed_and_within_limit(signer, markup)
@@ -204,7 +209,9 @@ def test_user_list_rows_open_details() -> None:
 
 def test_user_detail_owner_sees_contextual_actions() -> None:
     signer = _signer()
-    markup = build_user_detail(_snap(banned=True, premium=True), UserRole.OWNER, signer)
+    markup = build_user_detail(
+        _snap(banned=True, premium=True), UserRole.OWNER, signer, _LOCALE
+    )
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert "ubn" in actions  # banned -> offer Unban (not Ban)
     assert "rp" in actions  # premium -> offer Remove Premium
@@ -214,14 +221,14 @@ def test_user_detail_owner_sees_contextual_actions() -> None:
 
 def test_user_detail_moderator_sees_no_actions() -> None:
     signer = _signer()
-    markup = build_user_detail(_snap(), UserRole.MODERATOR, signer)
+    markup = build_user_detail(_snap(), UserRole.MODERATOR, signer, _LOCALE)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert actions == {"ls", "hm"}  # only the nav row (Back to list + Home)
 
 
 def test_user_detail_no_actions_against_owner_target() -> None:
     signer = _signer()
-    markup = build_user_detail(_snap(role=UserRole.OWNER), UserRole.OWNER, signer)
+    markup = build_user_detail(_snap(role=UserRole.OWNER), UserRole.OWNER, signer, _LOCALE)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert actions == {"ls", "hm"}  # an owner can't be banned/demoted via the panel
 
@@ -233,7 +240,7 @@ def _ad(ad_id: int = 1, *, is_active: bool = True) -> SimpleNamespace:
 
 def test_ad_list_rows_open_details() -> None:
     signer = _signer()
-    markup = build_ad_list([_ad(11), _ad(22)], signer)
+    markup = build_ad_list([_ad(11), _ad(22)], signer, _LOCALE)
     opened = {p.arg for b in _flat(markup) if (p := _parse(signer, b)).action == "inf"}
     assert opened == {11, 22}
 
@@ -241,7 +248,8 @@ def test_ad_list_rows_open_details() -> None:
 def test_ad_detail_owner_sees_actions() -> None:
     signer = _signer()
     actions = {
-        _parse(signer, b).action for b in _flat(build_ad_detail(_ad(), UserRole.OWNER, signer))
+        _parse(signer, b).action
+        for b in _flat(build_ad_detail(_ad(), UserRole.OWNER, signer, _LOCALE))
     }
     assert {"di", "bc", "de"} <= actions  # active ad → Disable + Broadcast + Delete
 
@@ -249,6 +257,7 @@ def test_ad_detail_owner_sees_actions() -> None:
 def test_ad_detail_moderator_sees_no_actions() -> None:
     signer = _signer()
     actions = {
-        _parse(signer, b).action for b in _flat(build_ad_detail(_ad(), UserRole.MODERATOR, signer))
+        _parse(signer, b).action
+        for b in _flat(build_ad_detail(_ad(), UserRole.MODERATOR, signer, _LOCALE))
     }
     assert actions == {"ls", "hm"}  # only the nav row

@@ -1,4 +1,4 @@
-"""Unit tests for the ad handlers (MASTER_PLAN Sprint 9, Tasks 9.2 + 9.4)."""
+"""Unit tests for the ad handlers (MASTER_PLAN Sprint 9, Tasks 9.2 + 9.4; Sprint 11.5 i18n)."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from bot.handlers.ads import (
     handle_ad_stats,
     handle_ad_toggle,
 )
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.ad_service import AdService
@@ -56,6 +57,7 @@ from tests.unit._fakes import (
 
 _EVENT = cast(TelegramObject, object())
 _SECRET = "test-secret"
+_LOCALE = "en"
 
 
 def _session() -> AsyncSession:
@@ -122,6 +124,8 @@ async def test_ad_create_persists_and_confirms() -> None:
         _session(),
         _owner(),
         lambda s: _service(repo),
+        translate,
+        _LOCALE,
     )
     assert "Created ad #1" in _answer_text(message)
     assert repo.by_id[1].content_text == "Big sale today"
@@ -131,7 +135,13 @@ async def test_ad_create_persists_and_confirms() -> None:
 async def test_ad_create_without_args_shows_usage() -> None:
     message = _message()
     await handle_ad_create(
-        message, CommandObject(args=None), _session(), _owner(), lambda s: _service(FakeAdRepo())
+        message,
+        CommandObject(args=None),
+        _session(),
+        _owner(),
+        lambda s: _service(FakeAdRepo()),
+        translate,
+        _LOCALE,
     )
     assert "Usage" in _answer_text(message)
 
@@ -144,6 +154,8 @@ async def test_ad_create_invalid_reports_error() -> None:
         _session(),
         _owner(),
         lambda s: _service(FakeAdRepo()),
+        translate,
+        _LOCALE,
     )
     assert "Cannot create ad" in _answer_text(message)
 
@@ -151,7 +163,7 @@ async def test_ad_create_invalid_reports_error() -> None:
 # --- /ad_list -------------------------------------------------------------
 async def test_ad_list_empty() -> None:
     message = _message()
-    await handle_ad_list(message, _session(), lambda s: _service(FakeAdRepo()))
+    await handle_ad_list(message, _session(), lambda s: _service(FakeAdRepo()), translate, _LOCALE)
     assert "No ads" in _answer_text(message)
 
 
@@ -159,7 +171,7 @@ async def test_ad_list_renders_rows() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="Promo", impressions=4, clicks=1)
     message = _message()
-    await handle_ad_list(message, _session(), lambda s: _service(repo))
+    await handle_ad_list(message, _session(), lambda s: _service(repo), translate, _LOCALE)
     text = _answer_text(message)
     assert "Promo" in text and "#1" in text
 
@@ -170,7 +182,12 @@ async def test_ad_edit_updates() -> None:
     repo.by_id[1] = FakeAdRow(id=1, title="Old", content_text="hi")
     message = _message()
     await handle_ad_edit(
-        message, CommandObject(args="1 title=New"), _session(), lambda s: _service(repo)
+        message,
+        CommandObject(args="1 title=New"),
+        _session(),
+        lambda s: _service(repo),
+        translate,
+        _LOCALE,
     )
     assert "Updated ad #1" in _answer_text(message)
     assert repo.by_id[1].title == "New"
@@ -179,7 +196,12 @@ async def test_ad_edit_updates() -> None:
 async def test_ad_edit_unknown_id() -> None:
     message = _message()
     await handle_ad_edit(
-        message, CommandObject(args="9 title=New"), _session(), lambda s: _service(FakeAdRepo())
+        message,
+        CommandObject(args="9 title=New"),
+        _session(),
+        lambda s: _service(FakeAdRepo()),
+        translate,
+        _LOCALE,
     )
     assert "No ad" in _answer_text(message)
 
@@ -187,7 +209,12 @@ async def test_ad_edit_unknown_id() -> None:
 async def test_ad_edit_requires_id() -> None:
     message = _message()
     await handle_ad_edit(
-        message, CommandObject(args=None), _session(), lambda s: _service(FakeAdRepo())
+        message,
+        CommandObject(args=None),
+        _session(),
+        lambda s: _service(FakeAdRepo()),
+        translate,
+        _LOCALE,
     )
     assert "Usage" in _answer_text(message)
 
@@ -196,7 +223,9 @@ async def test_ad_toggle_flips() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi", is_active=True)
     message = _message()
-    await handle_ad_toggle(message, CommandObject(args="1"), _session(), lambda s: _service(repo))
+    await handle_ad_toggle(
+        message, CommandObject(args="1"), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     assert "disabled" in _answer_text(message)
     assert repo.by_id[1].is_active is False
 
@@ -205,7 +234,9 @@ async def test_ad_delete_removes() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi")
     message = _message()
-    await handle_ad_delete(message, CommandObject(args="1"), _session(), lambda s: _service(repo))
+    await handle_ad_delete(
+        message, CommandObject(args="1"), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     assert "Deleted ad #1" in _answer_text(message)
     assert 1 not in repo.by_id
 
@@ -215,7 +246,9 @@ async def test_ad_stats_overall() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", impressions=10, clicks=5)
     message = _message()
-    await handle_ad_stats(message, CommandObject(args=None), _session(), lambda s: _service(repo))
+    await handle_ad_stats(
+        message, CommandObject(args=None), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     text = _answer_text(message)
     assert "Ad totals" in text and "50.0%" in text  # 5/10 CTR
 
@@ -224,7 +257,9 @@ async def test_ad_stats_single() -> None:
     repo = FakeAdRepo()
     repo.by_id[2] = FakeAdRow(id=2, title="Promo", impressions=4, clicks=1)
     message = _message()
-    await handle_ad_stats(message, CommandObject(args="2"), _session(), lambda s: _service(repo))
+    await handle_ad_stats(
+        message, CommandObject(args="2"), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     text = _answer_text(message)
     assert "Ad #2" in text and "Promo" in text
 
@@ -235,7 +270,13 @@ async def test_ad_global_off() -> None:
     service = _service(repo)
     message = _message()
     await handle_ad_global(
-        message, CommandObject(args="off"), _session(), _owner(), lambda s: service
+        message,
+        CommandObject(args="off"),
+        _session(),
+        _owner(),
+        lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "OFF" in _answer_text(message)
     assert (
@@ -249,7 +290,13 @@ async def test_ad_global_off() -> None:
 async def test_ad_global_requires_on_off() -> None:
     message = _message()
     await handle_ad_global(
-        message, CommandObject(args="maybe"), _session(), _owner(), lambda s: _service(FakeAdRepo())
+        message,
+        CommandObject(args="maybe"),
+        _session(),
+        _owner(),
+        lambda s: _service(FakeAdRepo()),
+        translate,
+        _LOCALE,
     )
     assert "Usage" in _answer_text(message)
 
@@ -269,7 +316,9 @@ async def test_ad_click_records_and_delivers_link() -> None:
     repo.by_id[1] = FakeAdRow(id=1, title="A", button_text="Shop", button_url="https://x.test")
     signer = CallbackSigner(_SECRET)
     callback = _callback(signer.pack_ad_click(1))
-    await handle_ad_click(callback, _session(), _owner(), lambda s: _service(repo), signer)
+    await handle_ad_click(
+        callback, _session(), _owner(), lambda s: _service(repo), signer, translate, _LOCALE
+    )
     assert repo.by_id[1].clicks == 1
     callback.answer.assert_awaited()
     assert "x.test" in _answer_text(callback.message)
@@ -280,7 +329,13 @@ async def test_ad_click_forged_payload_is_ignored() -> None:
     repo.by_id[1] = FakeAdRow(id=1, title="A", button_url="https://x.test")
     callback = _callback("a|1|deadbeef00")  # bad signature
     await handle_ad_click(
-        callback, _session(), _owner(), lambda s: _service(repo), CallbackSigner(_SECRET)
+        callback,
+        _session(),
+        _owner(),
+        lambda s: _service(repo),
+        CallbackSigner(_SECRET),
+        translate,
+        _LOCALE,
     )
     assert repo.by_id[1].clicks == 0
     callback.message.answer.assert_not_awaited()
@@ -331,7 +386,9 @@ async def test_ad_enable_activates() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi", is_active=False)
     message = _message()
-    await handle_ad_enable(message, CommandObject(args="1"), _session(), lambda s: _service(repo))
+    await handle_ad_enable(
+        message, CommandObject(args="1"), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     assert repo.by_id[1].is_active is True
     assert "enabled" in _answer_text(message)
 
@@ -340,7 +397,9 @@ async def test_ad_disable_deactivates() -> None:
     repo = FakeAdRepo()
     repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="hi", is_active=True)
     message = _message()
-    await handle_ad_disable(message, CommandObject(args="1"), _session(), lambda s: _service(repo))
+    await handle_ad_disable(
+        message, CommandObject(args="1"), _session(), lambda s: _service(repo), translate, _LOCALE
+    )
     assert repo.by_id[1].is_active is False
     assert "disabled" in _answer_text(message)
 
@@ -353,7 +412,12 @@ async def test_ad_preview_delivers() -> None:
     message.chat = AsyncMock()
     message.chat.id = 999
     await handle_ad_preview(
-        message, CommandObject(args="1"), _session(), lambda s: _ad_service(repo, sender=sender)
+        message,
+        CommandObject(args="1"),
+        _session(),
+        lambda s: _ad_service(repo, sender=sender),
+        translate,
+        _LOCALE,
     )
     assert sender.sent and sender.sent[0]["chat_id"] == 999
 
@@ -369,6 +433,8 @@ async def test_ad_audience_sets_mode_and_rules() -> None:
         _session(),
         lambda s: _service(repo),
         lambda s: audience,
+        translate,
+        _LOCALE,
     )
     assert repo.by_id[5].audience_mode == "include"
     assert len(await rules.list_for_ad(5)) == 2
@@ -385,6 +451,8 @@ async def test_ad_button_add_creates_button() -> None:
         CommandObject(args="5 Shop now | https://x.test"),
         _session(),
         lambda s: _ad_service(repo, buttons=buttons),
+        translate,
+        _LOCALE,
     )
     rows = await buttons.list_for_ad(5)
     assert len(rows) == 1 and rows[0].text == "Shop now" and rows[0].url == "https://x.test"
@@ -397,7 +465,13 @@ async def test_ad_segment_create_then_add_member() -> None:
 
     create_msg = _message()
     await handle_ad_segment_create(
-        create_msg, CommandObject(args="vips top users"), _session(), _owner(), lambda s: audience
+        create_msg,
+        CommandObject(args="vips top users"),
+        _session(),
+        _owner(),
+        lambda s: audience,
+        translate,
+        _LOCALE,
     )
     segment = await audience.find_segment("vips")
     assert segment is not None and "Created segment" in _answer_text(create_msg)
@@ -409,6 +483,8 @@ async def test_ad_segment_create_then_add_member() -> None:
         _session(),
         lambda s: audience,
         lambda s: _user_service(users),
+        translate,
+        _LOCALE,
     )
     assert (segment.id, 7) in members.members
 
@@ -417,7 +493,7 @@ async def test_ad_segment_list_shows_counts() -> None:
     audience, _, _ = _audience()
     await audience.create_segment(name="vips", description=None, created_by=1)
     message = _message()
-    await handle_ad_segment_list(message, _session(), lambda s: audience)
+    await handle_ad_segment_list(message, _session(), lambda s: audience, translate, _LOCALE)
     assert "vips" in _answer_text(message)
 
 
@@ -436,6 +512,8 @@ async def test_ad_broadcast_queues_with_ad_link() -> None:
         _owner(),
         lambda s: _service(repo),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert broadcasts.rows[0].advertisement_id == 9
     assert "broadcast" in _answer_text(message).lower()
@@ -456,6 +534,8 @@ async def test_ad_broadcast_with_at_schedules() -> None:
         _owner(),
         lambda s: _service(repo),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert broadcasts.rows[0].advertisement_id == 9
     assert broadcasts.rows[0].scheduled_at == datetime.datetime(
@@ -474,7 +554,13 @@ async def test_ad_click_per_button_records_button() -> None:
     signer = CallbackSigner(_SECRET)
     callback = _callback(signer.pack_ad_click(1, button.id))
     await handle_ad_click(
-        callback, _session(), _owner(), lambda s: _ad_service(repo, buttons=buttons), signer
+        callback,
+        _session(),
+        _owner(),
+        lambda s: _ad_service(repo, buttons=buttons),
+        signer,
+        translate,
+        _LOCALE,
     )
     assert buttons.by_id[button.id].clicks == 1
     assert "dest" in _answer_text(callback.message)

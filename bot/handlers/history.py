@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
 from bot.keyboards.history import build_history_keyboard
+from core.i18n import Translator
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import AdPlacement
@@ -36,10 +37,6 @@ _log = get_logger("bot.handlers.history")
 HistoryServiceFactory = Callable[[AsyncSession], HistoryService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 
-_EMPTY_TEXT = "🗂 You have no downloads yet. Send me a link to get started!"
-_RELINK_TEXT = "This file is no longer available — please send the link again."
-_NOT_FOUND_TEXT = "That item is no longer in your history."
-
 
 @router.message(Command("history"))
 async def handle_history(
@@ -48,10 +45,12 @@ async def handle_history(
     user: UserSnapshot,
     history_service_factory: HistoryServiceFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
     ad_service_factory: AdServiceFactory | None = None,
 ) -> None:
     page = await history_service_factory(session).list_history(user.id, page=0)
-    text, keyboard = _render(page, callback_signer)
+    text, keyboard = _render(page, callback_signer, translate, locale)
     await message.answer(text, reply_markup=keyboard)
     if ad_service_factory is not None:  # best-effort history placement (Sprint 9.5)
         await show_placement_ad(ad_service_factory(session), user, AdPlacement.HISTORY.value)
@@ -64,13 +63,15 @@ async def handle_history_page(
     user: UserSnapshot,
     history_service_factory: HistoryServiceFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "h" or parsed.arg is None:
         await callback.answer()  # forged/garbled → ignore silently (Section 14.2)
         return
     page = await history_service_factory(session).list_history(user.id, page=parsed.arg)
-    text, keyboard = _render(page, callback_signer)
+    text, keyboard = _render(page, callback_signer, translate, locale)
     if isinstance(callback.message, Message):
         await callback.message.edit_text(text, reply_markup=keyboard)
     await callback.answer()
@@ -84,6 +85,8 @@ async def handle_resend(
     history_service_factory: HistoryServiceFactory,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "r" or parsed.arg is None:
@@ -91,7 +94,7 @@ async def handle_resend(
         return
 
     await callback.answer()
-    progress_message_id = await notification_service.send_initial(user.telegram_id)
+    progress_message_id = await notification_service.send_initial(user.telegram_id, locale)
     outcome = await history_service_factory(session).resend(
         download_id=parsed.arg,
         user_id=user.id,
@@ -99,28 +102,33 @@ async def handle_resend(
         progress_message_id=progress_message_id,
     )
     if outcome is ResendKind.RESENT:
-        await notification_service.notify_completed(user.telegram_id, progress_message_id)
+        await notification_service.notify_completed(user.telegram_id, progress_message_id, locale)
     elif outcome is ResendKind.NEEDS_RELINK:
-        await notification_service.notify_text(user.telegram_id, progress_message_id, _RELINK_TEXT)
+        await notification_service.notify_text(
+            user.telegram_id, progress_message_id, translate("history.relink", locale)
+        )
     elif outcome is ResendKind.NOT_FOUND:
         await notification_service.notify_text(
-            user.telegram_id, progress_message_id, _NOT_FOUND_TEXT
+            user.telegram_id, progress_message_id, translate("history.not_found", locale)
         )
     # REQUEUED: the worker now owns the progress message (request stashed its id),
     # editing it through the download stages to ✅/❌ — nothing more to do here.
 
 
-def _render(page: HistoryPage, signer: CallbackSigner) -> tuple[str, InlineKeyboardMarkup | None]:
+def _render(
+    page: HistoryPage, signer: CallbackSigner, translate: Translator, locale: str
+) -> tuple[str, InlineKeyboardMarkup | None]:
     if not page.rows:
-        return _EMPTY_TEXT, None
+        return translate("history.empty", locale), None
     keyboard = build_history_keyboard(
         page.rows,
         page=page.page,
         has_prev=page.has_prev,
         has_next=page.has_next,
         signer=signer,
+        locale=locale,
     )
-    header = f"🗂 <b>Your downloads</b> (page {page.page + 1})\nTap an entry to resend it."
+    header = translate("history.header", locale, page=page.page + 1)
     lines = [header, ""]
     for index, row in enumerate(page.rows, start=1):
         platform = escape((row.platform or "link").capitalize())

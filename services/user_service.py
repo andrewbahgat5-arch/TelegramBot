@@ -133,6 +133,16 @@ class UserService:
             telegram_id, lambda row: _apply(row, role=role.value), event="user_role_changed"
         )
 
+    async def set_language(self, telegram_id: int, language: str) -> UserSnapshot | None:
+        """Persist a user's explicitly chosen UI language (Sprint 11.5).
+
+        Callers validate ``language`` against ``core.i18n.list_enabled_locales()``
+        before calling this — this method just writes whatever it's given.
+        """
+        return await self._mutate(
+            telegram_id, lambda row: _apply(row, language=language), event="user_language_changed"
+        )
+
     async def ban(self, telegram_id: int, reason: str | None = None) -> UserSnapshot | None:
         """Ban a user, recording the audit fields (``banned_at``, ``ban_reason``)."""
         now = datetime.datetime.now(datetime.UTC)

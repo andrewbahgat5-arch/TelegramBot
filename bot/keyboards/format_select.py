@@ -10,18 +10,25 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks.factory import CallbackSigner
+from core.i18n import translate
 from domain.entities.media import MediaInfo
 from domain.enums import MediaFormat
 
-_LABELS = {MediaFormat.VIDEO: "🎬 Video", MediaFormat.AUDIO: "🎵 Audio"}
+_LABEL_KEYS = {
+    MediaFormat.VIDEO: "download.format.video",
+    MediaFormat.AUDIO: "download.format.audio",
+}
 
 
 def build_format_keyboard(
-    media_id: int, info: MediaInfo, signer: CallbackSigner
+    media_id: int, info: MediaInfo, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for fmt in (MediaFormat.VIDEO, MediaFormat.AUDIO):
         if any(option.format is fmt for option in info.formats):
-            builder.button(text=_LABELS[fmt], callback_data=signer.pack_format(media_id, fmt))
+            builder.button(
+                text=translate(_LABEL_KEYS[fmt], locale),
+                callback_data=signer.pack_format(media_id, fmt),
+            )
     builder.adjust(1)
     return builder.as_markup()

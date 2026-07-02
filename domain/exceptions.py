@@ -29,6 +29,17 @@ class AppError(Exception):
 class UserFacingError(AppError):
     """Base for errors whose message is safe to show the user verbatim."""
 
+    @property
+    def translation_key(self) -> str:
+        """The ``core.i18n`` catalog key for this error's user-facing text.
+
+        Derived from ``error_type`` rather than ``self.message`` — the message
+        passed at each raise site is an internal diagnostic string (for logs/
+        Sentry), not what the user sees; the catalog is the single source of
+        user-facing wording per error type (Sprint 11.5).
+        """
+        return f"errors.{self.error_type.value}"
+
 
 class URLNotSupportedError(UserFacingError):
     error_type = ErrorType.URL_NOT_SUPPORTED

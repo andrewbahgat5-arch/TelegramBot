@@ -1,4 +1,4 @@
-"""Unit tests for the compose-wizard orchestration (Sprint 9.6, D-057/D-059)."""
+"""Unit tests for the compose-wizard orchestration (Sprint 9.6, D-057/D-059; Sprint 11.5 i18n)."""
 
 from __future__ import annotations
 
@@ -18,8 +18,11 @@ from bot.panel.wizard import (
     WizardState,
     step_index,
 )
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
+
+_LOCALE = "en"
 
 
 def _signer() -> CallbackSigner:
@@ -164,6 +167,8 @@ async def _dispatch(
         ad_service_factory=lambda s: ads,
         broadcast_service_factory=lambda s: casts,
         audience_service_factory=lambda s: aud,
+        translate=translate,
+        locale=_LOCALE,
     )
 
 
@@ -175,7 +180,7 @@ def _seed(fsm: _FSM, ws: WizardState) -> None:
 # --- entry + navigation ---------------------------------------------------
 async def test_start_opens_type_step() -> None:
     fsm, cb = _FSM(), _callback()
-    await admin_wizard.start(cb, fsm, _signer(), kind="ad")  # type: ignore[arg-type]
+    await admin_wizard.start(cb, fsm, _signer(), translate, _LOCALE, kind="ad")  # type: ignore[arg-type]
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ws.kind == "ad" and ws.step == "type"
     assert "Compose" in cb.bot.edit_message_text.await_args.args[0]
@@ -260,7 +265,16 @@ async def test_typed_language_value_becomes_a_rule() -> None:
     assert fsm.state == admin_wizard.PanelStates.wizard_text
     msg: Any = AsyncMock(spec=Message)
     msg.text = "en"
-    await admin_wizard.on_text(msg, fsm, AsyncMock(), object(), _signer(), lambda s: _FakeAds())  # type: ignore[arg-type]
+    await admin_wizard.on_text(
+        msg,
+        fsm,  # type: ignore[arg-type]
+        AsyncMock(),
+        object(),  # type: ignore[arg-type]
+        _signer(),
+        lambda s: _FakeAds(),  # type: ignore[arg-type, return-value]
+        translate,
+        _LOCALE,
+    )
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ["include", "language", "en"] in ws.rules
 
@@ -272,7 +286,16 @@ async def test_content_text_sets_fields_mode() -> None:
     msg.content_type = "text"
     msg.text = "hello world"
     msg.html_text = "hello world"
-    await admin_wizard.on_content(msg, fsm, AsyncMock(), object(), _signer(), lambda s: _FakeAds())  # type: ignore[arg-type]
+    await admin_wizard.on_content(
+        msg,
+        fsm,  # type: ignore[arg-type]
+        AsyncMock(),
+        object(),  # type: ignore[arg-type]
+        _signer(),
+        lambda s: _FakeAds(),  # type: ignore[arg-type, return-value]
+        translate,
+        _LOCALE,
+    )
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ws.content_mode == "fields" and ws.content_text == "hello world"
 
@@ -285,7 +308,16 @@ async def test_content_media_sets_copy_mode() -> None:
     msg.text = None
     msg.chat = SimpleNamespace(id=555)
     msg.message_id = 4242
-    await admin_wizard.on_content(msg, fsm, AsyncMock(), object(), _signer(), lambda s: _FakeAds())  # type: ignore[arg-type]
+    await admin_wizard.on_content(
+        msg,
+        fsm,  # type: ignore[arg-type]
+        AsyncMock(),
+        object(),  # type: ignore[arg-type]
+        _signer(),
+        lambda s: _FakeAds(),  # type: ignore[arg-type, return-value]
+        translate,
+        _LOCALE,
+    )
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ws.content_mode == "copy"
     assert ws.storage_chat_id == 555 and ws.storage_message_id == 4242
@@ -420,7 +452,16 @@ async def test_start_edit_loads_ad_into_wizard() -> None:
     fsm, cb = _FSM(), _callback()
     ads, aud = _FakeAds(), _FakeAudience()
     ads.ad = _existing_ad()
-    await admin_wizard.start_edit(cb, 5, fsm, _signer(), ads=ads, audience=aud)  # type: ignore[arg-type]
+    await admin_wizard.start_edit(
+        cb,
+        5,
+        fsm,  # type: ignore[arg-type]
+        _signer(),
+        translate,
+        _LOCALE,
+        ads=ads,  # type: ignore[arg-type]
+        audience=aud,  # type: ignore[arg-type]
+    )
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ws.editing_ad_id == 5 and ws.step == STEP_PREVIEW
     assert ws.placements == ["video_delivery"]
@@ -494,7 +535,7 @@ def test_audience_keyboard_hides_the_opposite_side() -> None:
         audience_mode="include",
         rules=[["include", "plan", "premium"]],
     )
-    markup = build_wizard_audience(ws, signer)
+    markup = build_wizard_audience(ws, signer, _LOCALE)
     shown = {
         p.arg
         for row in markup.inline_keyboard

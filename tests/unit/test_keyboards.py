@@ -33,7 +33,7 @@ def _buttons(markup: InlineKeyboardMarkup) -> list[InlineKeyboardButton]:
 
 def test_format_keyboard_has_one_button_per_kind() -> None:
     signer = CallbackSigner("k")
-    buttons = _buttons(build_format_keyboard(5, _INFO, signer))
+    buttons = _buttons(build_format_keyboard(5, _INFO, signer, "en"))
     assert len(buttons) == 2  # video + audio
     parsed = signer.unpack(buttons[0].callback_data or "")
     assert parsed is not None and parsed.action == "f" and parsed.media_id == 5
@@ -41,7 +41,7 @@ def test_format_keyboard_has_one_button_per_kind() -> None:
 
 def test_quality_keyboard_lists_qualities_for_format() -> None:
     signer = CallbackSigner("k")
-    buttons = _buttons(build_quality_keyboard(5, MediaFormat.VIDEO, _INFO, signer))
+    buttons = _buttons(build_quality_keyboard(5, MediaFormat.VIDEO, _INFO, signer, "en"))
     quality_buttons = [b for b in buttons if (b.callback_data or "").startswith("q|")]
     back_buttons = [b for b in buttons if (b.callback_data or "").startswith("b|")]
     assert len(quality_buttons) == 2  # the two video qualities, not the audio
@@ -66,7 +66,9 @@ class _HistRow:
 def test_history_keyboard_has_resend_button_per_row_and_nav() -> None:
     signer = CallbackSigner("k")
     rows = [_HistRow(1), _HistRow(2)]
-    markup = build_history_keyboard(rows, page=1, has_prev=True, has_next=True, signer=signer)
+    markup = build_history_keyboard(
+        rows, page=1, has_prev=True, has_next=True, signer=signer, locale="en"
+    )
     buttons = _buttons(markup)
     resend = [b for b in buttons if (b.callback_data or "").startswith("r|")]
     nav = [b for b in buttons if (b.callback_data or "").startswith("h|")]
@@ -79,7 +81,7 @@ def test_history_keyboard_has_resend_button_per_row_and_nav() -> None:
 def test_history_keyboard_first_page_has_no_prev() -> None:
     signer = CallbackSigner("k")
     markup = build_history_keyboard(
-        [_HistRow(1)], page=0, has_prev=False, has_next=False, signer=signer
+        [_HistRow(1)], page=0, has_prev=False, has_next=False, signer=signer, locale="en"
     )
     nav = [b for b in _buttons(markup) if (b.callback_data or "").startswith("h|")]
     assert nav == []  # neither prev nor next on a single full-stop page
@@ -93,5 +95,7 @@ def test_quality_label_uses_gb_for_large_files() -> None:
         source_url="https://x/y",
         formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P2160, 3 * 1024**3, "313"),),
     )
-    buttons = _buttons(build_quality_keyboard(1, MediaFormat.VIDEO, info, CallbackSigner("k")))
+    buttons = _buttons(
+        build_quality_keyboard(1, MediaFormat.VIDEO, info, CallbackSigner("k"), "en")
+    )
     assert "GB" in buttons[0].text

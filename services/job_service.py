@@ -26,6 +26,7 @@ from typing import Any
 from core import metrics
 from core.config import Settings
 from core.constants import PRIORITY_NORMAL
+from core.i18n import resolve_locale
 from core.logging import get_logger
 from core.uuid7 import uuid7
 from domain.entities.media import MediaInfo
@@ -241,7 +242,9 @@ class JobService:
         # Invalidate the user snapshot so the next rate-limit read sees the new count
         # (otherwise the cached daily_download_count is stale for up to CACHE_USER_TTL).
         await self._cache.delete_user(telegram_id)
-        await self._notifier.notify_completed(telegram_id, progress_message_id)
+        requester = await self._users.get_by_id(user_id)
+        locale = resolve_locale(requester.language if requester is not None else None)
+        await self._notifier.notify_completed(telegram_id, progress_message_id, locale)
         _log.info("cache_hit_delivered", user_id=user_id, quality=quality.value)
         # TODO(Sprint 9, Task 9.3): AdService.maybe_show(user) after delivery.
         return True

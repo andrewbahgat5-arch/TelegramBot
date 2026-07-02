@@ -7,11 +7,13 @@ runs the bot (long-polling by default; webhook optional, selected by config).
 
 Middleware order matters (Section 9.1):
 
-    logging  →  db_session  →  auth  →  throttle  →  handler
+    logging  →  db_session  →  auth  →  i18n  →  throttle  →  handler
 
-``logging`` and ``db_session`` are cross-cutting and wrap *every* update; ``auth``
-and ``throttle`` need ``event_from_user`` and so attach to the message and
-callback-query observers.
+``logging`` and ``db_session`` are cross-cutting and wrap *every* update; ``auth``,
+``i18n``, and ``throttle`` need ``event_from_user``/``data["user"]`` and so attach
+to the message and callback-query observers. ``i18n`` (Sprint 11.5) resolves
+``data["locale"]`` from the just-loaded user and must run after ``auth`` (needs
+``data["user"]``) and before ``throttle`` (its reply is localized too).
 """
 
 from __future__ import annotations
@@ -32,8 +34,10 @@ from bot.handlers import history as history_handler
 from bot.handlers import start as start_handler
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db_session import DbSessionMiddleware
+from bot.middlewares.i18n import LocaleMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
+from core import i18n
 from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
@@ -122,13 +126,17 @@ def build_dispatcher(
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
 
+    dp["translate"] = i18n.translate
+
     dp.update.outer_middleware(LoggingMiddleware())
     dp.update.outer_middleware(DbSessionMiddleware(session_factory))
 
-    auth = AuthMiddleware(user_service_factory)
+    auth = AuthMiddleware(user_service_factory, default_locale=settings.default_locale)
+    locale = LocaleMiddleware()
     throttle = ThrottleMiddleware(rate_limit_service_factory)
     for observer in (dp.message, dp.callback_query):
         observer.outer_middleware(auth)
+        observer.outer_middleware(locale)
         observer.outer_middleware(throttle)
 
     dp.include_router(start_handler.router)
@@ -146,6 +154,7 @@ async def main() -> None:
     # cannot see that, so the no-arg constructor is annotated (as in tests).
     settings = Settings()  # type: ignore[call-arg]
     configure_logging(settings.log_level, settings.log_format)
+    i18n.configure(settings.default_locale)
     if settings.sentry_enabled:
         init_sentry(settings)
         set_component("bot")

@@ -1,4 +1,4 @@
-"""Panel action registry (Sprint 9.6, F-2 / EP-22).
+"""Panel action registry (Sprint 9.6, F-2 / EP-22; Sprint 11.5 i18n).
 
 The single source of truth for panel action codes and their authorization tier,
 so the :class:`~bot.filters.panel_filter.PanelFilter` and the keyboard builders
@@ -16,6 +16,10 @@ Action codes are short, opaque tokens carried in the signed ``P`` callback
 (``bot/callbacks/factory.py``). Read/navigation codes only *open menus, page
 lists, and view details* — never an affordance that mutates without a further
 owner-gated press (so an "open delete-confirm" screen is WRITE, not READ).
+
+Every ``label`` field below is a ``core.i18n`` translation key (a dot-named
+string looked up at render time), not literal display text — the keyboard layer
+(``bot/keyboards/admin_panel.py``) resolves it via ``translate(key, locale)``.
 """
 
 from __future__ import annotations
@@ -56,20 +60,24 @@ class Section:
     """A top-level panel section. ``code`` is the ``P`` callback section token."""
 
     code: str
-    label: str  # emoji + text shown on the main-menu button
+    label_key: str  # core.i18n key for the main-menu button text
     owner_only: bool = False  # hidden from moderators (no read-only view)
 
 
 SECTIONS: tuple[Section, ...] = (
-    Section("u", "👥 Users"),
-    Section("a", "📢 Advertisements"),
-    Section("b", "📣 Broadcast", owner_only=True),
-    Section("s", "⚙️ Settings"),
-    Section("t", "📊 Statistics"),
-    Section("h", "📂 History"),
-    Section("m", "🚫 Moderation"),
-    Section("d", "📥 Downloads"),
-    Section("y", "🔧 System"),
+    Section("u", "panel.section.users"),
+    Section("a", "panel.section.advertisements"),
+    Section("b", "panel.section.broadcast", owner_only=True),
+    Section("s", "panel.section.settings"),
+    Section("t", "panel.section.statistics"),
+    Section("h", "panel.section.history"),
+    Section("m", "panel.section.moderation"),
+    Section("d", "panel.section.downloads"),
+    Section("y", "panel.section.system"),
+    # Personal language preference (Sprint 11.5) — not an administrative mutation
+    # (zero blast radius, affects only the acting staff member's own row), so it's
+    # visible to both roles like any other read-tier section.
+    Section("l", "panel.section.language"),
 )
 
 
@@ -83,53 +91,53 @@ SECTIONS: tuple[Section, ...] = (
 class MenuItem:
     """One submenu button. Its authorization tier derives from ``action``."""
 
-    label: str
+    label_key: str
     action: str
     arg: int | None = None
 
 
 SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
     "u": (
-        MenuItem("📋 List", "ls"),
-        MenuItem("🔍 User Info", "inf"),
-        MenuItem("🚫 Ban", "ban"),
-        MenuItem("✅ Unban", "ubn"),
-        MenuItem("⭐ Upgrade Premium", "up"),
-        MenuItem("⬇️ Remove Premium", "rp"),
-        MenuItem("🛡 Make Admin", "mka"),
-        MenuItem("👤 Remove Admin", "rma"),
+        MenuItem("panel.action.list", "ls"),
+        MenuItem("panel.menu.u.userinfo", "inf"),
+        MenuItem("panel.action.ban", "ban"),
+        MenuItem("panel.action.unban", "ubn"),
+        MenuItem("panel.menu.u.upgrade_premium", "up"),
+        MenuItem("panel.menu.u.remove_premium", "rp"),
+        MenuItem("panel.menu.u.make_admin", "mka"),
+        MenuItem("panel.menu.u.remove_admin", "rma"),
     ),
     "a": (
-        MenuItem("📋 List", "ls"),
-        MenuItem("🆕 Create", "cr"),
-        MenuItem("✏️ Edit", "ed"),
-        MenuItem("✅ Enable", "en"),
-        MenuItem("⏸ Disable", "di"),
-        MenuItem("🗑 Delete", "de"),
-        MenuItem("📢 Broadcast", "bc"),
-        MenuItem("📊 Statistics", "stt"),
+        MenuItem("panel.action.list", "ls"),
+        MenuItem("panel.action.create", "cr"),
+        MenuItem("panel.action.edit", "ed"),
+        MenuItem("panel.action.enable", "en"),
+        MenuItem("panel.action.disable", "di"),
+        MenuItem("panel.action.delete", "de"),
+        MenuItem("panel.action.broadcast", "bc"),
+        MenuItem("panel.menu.a.stats", "stt"),
     ),
     "b": (
-        MenuItem("🆕 Create", "cr"),
-        MenuItem("🆓 Free Users", "bf"),
-        MenuItem("⭐ Premium Users", "bp"),
-        MenuItem("👥 All Users", "ba"),
-        MenuItem("🌐 By Language", "bl"),
+        MenuItem("panel.action.create", "cr"),
+        MenuItem("panel.menu.b.free", "bf"),
+        MenuItem("panel.menu.b.premium", "bp"),
+        MenuItem("panel.menu.b.all", "ba"),
+        MenuItem("panel.menu.b.by_language", "bl"),
     ),
-    "t": (MenuItem("🔄 Refresh", "ls"),),
-    "h": (MenuItem("📋 List", "ls"),),
+    "t": (MenuItem("panel.menu.t.refresh", "ls"),),
+    "h": (MenuItem("panel.action.list", "ls"),),
     "m": (
-        MenuItem("📋 Banned Users", "ls"),
-        MenuItem("🚫 Ban", "ban"),
-        MenuItem("✅ Unban", "ubn"),
+        MenuItem("panel.menu.m.banned_list", "ls"),
+        MenuItem("panel.action.ban", "ban"),
+        MenuItem("panel.action.unban", "ubn"),
     ),
     "d": (
-        MenuItem("📊 Queue Status", "inf"),
-        MenuItem("⏳ Active Jobs", "ls"),
+        MenuItem("panel.menu.d.queue_status", "inf"),
+        MenuItem("panel.menu.d.active_jobs", "ls"),
     ),
     "y": (
-        MenuItem("🔧 Status", "inf"),
-        MenuItem("⚠️ Errors", "ls"),
+        MenuItem("panel.menu.y.status", "inf"),
+        MenuItem("panel.menu.y.errors", "ls"),
     ),
 }
 
@@ -147,31 +155,95 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
 class SettingField:
     index: int
     key: str  # an EXISTING LOCKED settings key (§13.4) — never invented
-    label: str
+    label_key: str
     step: int
     min_value: int
     max_value: int
 
 
 SETTING_FIELDS: tuple[SettingField, ...] = (
-    SettingField(0, "worker_count", "Workers", 1, 1, 32),
-    SettingField(1, "free_daily_limit", "Free Daily Limit", 5, 0, 100_000),
-    SettingField(2, "premium_daily_limit", "Premium Daily Limit", 10, 0, 1_000_000),
-    SettingField(3, "download_cooldown_seconds", "Free Cooldown (s)", 5, 0, 3_600),
-    SettingField(4, "premium_download_cooldown_seconds", "Premium Cooldown (s)", 1, 0, 3_600),
-    SettingField(5, "max_duration", "Max Duration (s)", 600, 60, 86_400),
-    SettingField(6, "rate_limit_messages_per_minute", "Msg Rate / min", 5, 1, 600),
-    SettingField(7, "history_page_size", "History Page Size", 1, 1, 50),
-    SettingField(8, "broadcast_chunk_size", "Broadcast Chunk Size", 5, 1, 100),
-    SettingField(9, "ads_default_frequency", "Ads Frequency", 1, 1, 100),
-    SettingField(10, "error_log_retention_days", "Error Log Retention (d)", 30, 1, 3_650),
-    SettingField(11, "downloads_retention_days", "Downloads Retention (d)", 30, 1, 3_650),
-    SettingField(12, "jobs_retention_days", "Jobs Retention (d)", 30, 1, 3_650),
-    SettingField(13, "provider_cooldown_seconds", "Provider Cooldown (s)", 30, 0, 3_600),
+    SettingField(0, "worker_count", "panel.settings.field.worker_count", 1, 1, 32),
+    SettingField(1, "free_daily_limit", "panel.settings.field.free_daily_limit", 5, 0, 100_000),
     SettingField(
-        14, "provider_health_check_interval_seconds", "Provider Health Interval (s)", 30, 10, 3_600
+        2, "premium_daily_limit", "panel.settings.field.premium_daily_limit", 10, 0, 1_000_000
     ),
-    SettingField(15, "provider_failure_threshold", "Provider Failure Threshold", 1, 1, 100),
+    SettingField(
+        3,
+        "download_cooldown_seconds",
+        "panel.settings.field.download_cooldown_seconds",
+        5,
+        0,
+        3_600,
+    ),
+    SettingField(
+        4,
+        "premium_download_cooldown_seconds",
+        "panel.settings.field.premium_download_cooldown_seconds",
+        1,
+        0,
+        3_600,
+    ),
+    SettingField(5, "max_duration", "panel.settings.field.max_duration", 600, 60, 86_400),
+    SettingField(
+        6,
+        "rate_limit_messages_per_minute",
+        "panel.settings.field.rate_limit_messages_per_minute",
+        5,
+        1,
+        600,
+    ),
+    SettingField(
+        7, "history_page_size", "panel.settings.field.history_page_size", 1, 1, 50
+    ),
+    SettingField(
+        8, "broadcast_chunk_size", "panel.settings.field.broadcast_chunk_size", 5, 1, 100
+    ),
+    SettingField(
+        9, "ads_default_frequency", "panel.settings.field.ads_default_frequency", 1, 1, 100
+    ),
+    SettingField(
+        10,
+        "error_log_retention_days",
+        "panel.settings.field.error_log_retention_days",
+        30,
+        1,
+        3_650,
+    ),
+    SettingField(
+        11,
+        "downloads_retention_days",
+        "panel.settings.field.downloads_retention_days",
+        30,
+        1,
+        3_650,
+    ),
+    SettingField(
+        12, "jobs_retention_days", "panel.settings.field.jobs_retention_days", 30, 1, 3_650
+    ),
+    SettingField(
+        13,
+        "provider_cooldown_seconds",
+        "panel.settings.field.provider_cooldown_seconds",
+        30,
+        0,
+        3_600,
+    ),
+    SettingField(
+        14,
+        "provider_health_check_interval_seconds",
+        "panel.settings.field.provider_health_check_interval_seconds",
+        30,
+        10,
+        3_600,
+    ),
+    SettingField(
+        15,
+        "provider_failure_threshold",
+        "panel.settings.field.provider_failure_threshold",
+        1,
+        1,
+        100,
+    ),
 )
 
 
@@ -190,12 +262,12 @@ def setting_field(index: int) -> SettingField | None:
 @dataclass(frozen=True, slots=True)
 class InfoItem:
     index: int
-    label: str
+    label_key: str
 
 
 SETTINGS_INFO: tuple[InfoItem, ...] = (
-    InfoItem(0, "🗃 Cache"),
-    InfoItem(1, "🌐 Languages"),
+    InfoItem(0, "panel.settings.info.cache"),
+    InfoItem(1, "panel.settings.info.languages"),
 )
 
 
@@ -210,23 +282,23 @@ class AudienceOption:
     """One toggle in the audience builder. ``value=None`` ⇒ a typed sub-input."""
 
     index: int
-    label: str
+    label_key: str
     effect: str  # include | exclude
     dimension: str  # plan | role | language | user_id | segment
     value: str | None  # concrete value, or None for a typed sub-input (language/user id)
 
 
 AUDIENCE_OPTIONS: tuple[AudienceOption, ...] = (
-    AudienceOption(0, "🆓 Free", "include", "plan", "free"),
-    AudienceOption(1, "⭐ Premium", "include", "plan", "premium"),
-    AudienceOption(2, "👤 Users", "include", "role", "user"),
-    AudienceOption(3, "🌐 Language…", "include", "language", None),
-    AudienceOption(4, "🆔 User ID…", "include", "user_id", None),
-    AudienceOption(5, "🚫 Premium", "exclude", "plan", "premium"),
-    AudienceOption(6, "🚫 Free", "exclude", "plan", "free"),
-    AudienceOption(7, "🚫 Owner", "exclude", "role", "owner"),
-    AudienceOption(8, "🚫 Moderators", "exclude", "role", "moderator"),
-    AudienceOption(9, "🚫 User ID…", "exclude", "user_id", None),
+    AudienceOption(0, "panel.audience.free", "include", "plan", "free"),
+    AudienceOption(1, "panel.audience.premium", "include", "plan", "premium"),
+    AudienceOption(2, "panel.audience.users_role", "include", "role", "user"),
+    AudienceOption(3, "panel.audience.language", "include", "language", None),
+    AudienceOption(4, "panel.audience.user_id", "include", "user_id", None),
+    AudienceOption(5, "panel.audience.exclude_premium", "exclude", "plan", "premium"),
+    AudienceOption(6, "panel.audience.exclude_free", "exclude", "plan", "free"),
+    AudienceOption(7, "panel.audience.exclude_owner", "exclude", "role", "owner"),
+    AudienceOption(8, "panel.audience.exclude_moderators", "exclude", "role", "moderator"),
+    AudienceOption(9, "panel.audience.exclude_user_id", "exclude", "user_id", None),
 )
 
 
@@ -240,16 +312,16 @@ def audience_option(index: int | None) -> AudienceOption | None:
 class PlacementOption:
     index: int
     code: str  # an AdPlacement value (D-044)
-    label: str
+    label_key: str
 
 
 PLACEMENT_OPTIONS: tuple[PlacementOption, ...] = (
-    PlacementOption(0, "post_download", "📥 Post-download"),
-    PlacementOption(1, "video_delivery", "🎬 Video"),
-    PlacementOption(2, "audio_delivery", "🎵 Audio"),
-    PlacementOption(3, "quality_select", "🎚 Quality"),
-    PlacementOption(4, "home", "🏠 Home"),
-    PlacementOption(5, "history", "📂 History"),
+    PlacementOption(0, "post_download", "panel.placement.post_download"),
+    PlacementOption(1, "video_delivery", "panel.placement.video_delivery"),
+    PlacementOption(2, "audio_delivery", "panel.placement.audio_delivery"),
+    PlacementOption(3, "quality_select", "panel.placement.quality_select"),
+    PlacementOption(4, "home", "panel.placement.home"),
+    PlacementOption(5, "history", "panel.placement.history"),
 )
 
 

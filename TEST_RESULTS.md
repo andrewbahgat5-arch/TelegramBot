@@ -20,12 +20,12 @@ If you discover a past entry was wrong (e.g., a test was reported green but the 
 
 | Category | Last Run | Last Result | Coverage | Owner of Suite |
 |---|---|---|---|---|
-| Unit | 2026-06-27 | PASS | + Task 11.1: `DEPLOY_ENV` config, env safety-rule registry, `token_fingerprint` | Sprint 1–11 |
-| Integration | 2026-06-27 | PASS (~80) | (unchanged this task) | Sprint 2–11 |
+| Unit | 2026-07-01 | PASS (739) | + Sprint 11.5: `core/i18n.py` catalog loader/validation, en/ar parity, `translate()`/`resolve_locale()` fallback chain, language picker + `set_language`, fan-out per-recipient locale | Sprint 1–11.5 |
+| Integration | 2026-06-27 | PASS (~80) | **Not run 2026-07-01 — no live Postgres/Redis this session (no Docker daemon); 114 tests skipped cleanly, see below** | Sprint 2–11 |
 | Security | 2026-06-27 | PASS (45) | all 5 §25.9 categories: input_validation, authorization, abuse_protection, data_protection (+ env isolation), dependency_scan | Sprint 11 |
 | Performance (micro-benchmarks) | — | — | — | (Sprint 11) |
-| E2E (Telegram bot) | 2026-06-27 | PASS (5) + 28 SKIPPED | harness self-tests pass; flow/scenario suites skip until Phase-B sandbox (DEPLOY_ENV=test + E2E_LIVE=1) | Sprint 11 |
-| Regression | — | — | — | (each sprint adds rows) |
+| E2E (Telegram bot) | 2026-06-27 | PASS (5) + 28 SKIPPED | harness self-tests pass; flow/scenario suites skip until Phase-B sandbox (DEPLOY_ENV=test + E2E_LIVE=1). **Not re-run 2026-07-01** (same reason — no sandbox bot this session) | Sprint 11 |
+| Regression | 2026-07-01 | PASS (853 collected, 0 fail / 0 error) | Full suite re-verified after Sprint 11.5's handler-signature changes across ~30 production files | Sprint 1–11.5 |
 
 This summary is the only mutable region of this file. Update its rows whenever a new run lands below.
 
@@ -66,6 +66,23 @@ Copy and adapt for every run.
 ---
 
 ## Standing Entries
+
+### 2026-07-01 — Unit + full regression — Sprint 11.5 (Internationalization / i18n, 11.5.1–11.5.12)
+
+| Field | Value |
+|---|---|
+| Git SHA | this session (uncommitted); worktree `happy-bose-71ed46` |
+| Environment | local — **no Docker daemon running this session** (`docker ps` fails to connect), so no live Postgres/Redis/sandbox bot |
+| Suite | unit (full) + attempted integration/e2e/security (skip cleanly, no live services) |
+| Sprint | 11.5 |
+| Triggered by | Sprint 11.5 implementation — pulled forward from V2 at Owner direction |
+| Total tests | 853 | Passed | 739 | Failed | 0 | Skipped | 114 | Deselected | 0 |
+| New tests | `tests/unit/test_i18n.py` (22: catalog `_meta` validation via crafted `tmp_path` catalogs, `translate`/`resolve_locale` fallback + never-writes-back behavior, real en/ar catalog invariants incl. full key parity and the `{key}`/`{locale}` reserved-placeholder regression guard); ~5 new language-picker tests in `test_bot_handlers.py` (open-picker sentinel, pick-persists-and-confirms-in-new-locale, reject-disabled/unknown code, forged-callback rejection) |
+| Notes | Every one of the 114 skips is `tests/integration/` or `tests/e2e/` requiring a live Postgres/Redis/sandbox bot this session's environment doesn't have running — **not a regression**; these same suites passed live in the 2026-06-27 entries below. mypy --strict: 37 errors / 12 files, **all pre-existing** — verified via a clean-cache baseline mypy run against the original commit (42 errors / 13 files) and a per-file `git diff` confirming 8 of the 12 files are untouched this sprint; the remaining 4 (`test_admin_wizard.py`, `test_notification_service.py`, `test_download_handler.py`, `test_history_handler.py`) carry only previously-existing gaps (a `PanelStates` re-export note + `unpack_panel` arg-type note both present in the original committed file; `FakeMessageSender` vs `MessageSenderProtocol` missing `parse_mode`, confirmed via `git diff` on `tests/unit/_fakes.py`/`domain/protocols/file_sender.py` showing zero changes). ruff check + format clean. import-linter 7/7 contracts kept. bandit 0 (all severities). No schema/migration, no new settings key — `users.language` (existing, D-022) is the only storage used. A real bug was found and fixed mid-sprint: `translate(key, locale, **kwargs)`'s own `key` parameter collided with a catalog template using `{key}` as its own placeholder (`admin.setting_set.*`); renamed to `{setting_key}` in both catalogs + the two call sites, with a permanent regression test added. |
+
+**Failures:** None. **Skips:** 114 — all integration/e2e tests requiring live Postgres/Redis/a sandbox bot, unavailable in this session's environment (no Docker daemon). Re-run against live infra to get a true integration/e2e result for this sprint's changes (expected to pass unchanged, since no integration-layer code was touched — see the Sprint 11.5 detail in `PROJECT_PROGRESS.md` for the exact file list).
+
+---
 
 ### 2026-06-27 — Simulation framework + E2E — Sprint 11 Tasks 11.2–11.4, 11.6–11.9
 

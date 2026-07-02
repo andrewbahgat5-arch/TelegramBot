@@ -1,4 +1,4 @@
-"""NotificationService (MASTER_PLAN Component 9.2, Task 6.9 + UX follow-up).
+"""NotificationService (MASTER_PLAN Component 9.2, Task 6.9 + UX follow-up + Sprint 11.5 i18n).
 
 User-facing job messaging. The pipeline has several internal stages (download,
 transcode, upload), but the user only ever sees **one message with a single progress
@@ -9,12 +9,18 @@ request). The bar advances as the job moves through its stages and finishes at �
 Framework-agnostic: depends on ``MessageSenderProtocol`` (raw text transport),
 injected at the composition root. Progress edits are best-effort — a failed edit
 (user deleted the message, "not modified") never breaks the pipeline.
+
+``locale`` is a required argument on every method that builds its own text: the
+caller (``JobService``/``DownloadService``) resolves the *recipient's* locale — in
+a fan-out delivery, different waiters can have different languages — this service
+never guesses one on its own (Sprint 11.5).
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
 
+from core.i18n import translate
 from domain.protocols.file_sender import MessageSenderProtocol
 
 
@@ -37,9 +43,6 @@ _STAGE_PERCENT: dict[ProgressStage, int] = {
 }
 
 _BAR_WIDTH = 10
-_WORKING_LABEL = "⏳ Preparing your file…"
-_COMPLETED_TEXT = "✅ Done — here is your file."
-_FAILED_TEXT = "❌ Sorry, that download failed. Please try again."
 
 
 def _bar(percent: int) -> str:
@@ -48,28 +51,42 @@ def _bar(percent: int) -> str:
     return f"{'█' * filled}{'░' * (_BAR_WIDTH - filled)} {percent}%"
 
 
-def _progress_text(percent: int) -> str:
-    return f"{_WORKING_LABEL}\n{_bar(percent)}"
+def _progress_text(percent: int, locale: str) -> str:
+    return f"{translate('notification.preparing', locale)}\n{_bar(percent)}"
 
 
 class NotificationService:
     def __init__(self, sender: MessageSenderProtocol) -> None:
         self._sender = sender
 
-    async def send_initial(self, chat_id: int, stage: ProgressStage = ProgressStage.QUEUED) -> int:
+    async def send_initial(
+        self, chat_id: int, locale: str, stage: ProgressStage = ProgressStage.QUEUED
+    ) -> int:
         """Send the first progress message; return its id for later in-place edits."""
-        return await self._sender.send_message(chat_id, _progress_text(_STAGE_PERCENT[stage]))
+        return await self._sender.send_message(
+            chat_id, _progress_text(_STAGE_PERCENT[stage], locale)
+        )
 
-    async def notify_stage(self, chat_id: int, message_id: int, stage: ProgressStage) -> None:
-        await self._sender.edit_message(chat_id, message_id, _progress_text(_STAGE_PERCENT[stage]))
+    async def notify_stage(
+        self, chat_id: int, message_id: int, stage: ProgressStage, locale: str
+    ) -> None:
+        await self._sender.edit_message(
+            chat_id, message_id, _progress_text(_STAGE_PERCENT[stage], locale)
+        )
 
     async def notify_text(self, chat_id: int, message_id: int, text: str) -> None:
-        """Edit the progress message to an arbitrary status line (e.g. duplicate)."""
+        """Edit the progress message to an arbitrary, already-localized status line
+        (e.g. duplicate/busy) — the caller has already resolved + translated it."""
         await self._sender.edit_message(chat_id, message_id, text)
 
-    async def notify_completed(self, chat_id: int, message_id: int) -> None:
-        await self._sender.edit_message(chat_id, message_id, _COMPLETED_TEXT)
+    async def notify_completed(self, chat_id: int, message_id: int, locale: str) -> None:
+        await self._sender.edit_message(
+            chat_id, message_id, translate("notification.completed", locale)
+        )
 
-    async def notify_failed(self, chat_id: int, message_id: int, reason: str | None = None) -> None:
-        text = f"{_FAILED_TEXT}\n{reason}" if reason else _FAILED_TEXT
+    async def notify_failed(
+        self, chat_id: int, message_id: int, locale: str, reason: str | None = None
+    ) -> None:
+        failed_text = translate("notification.failed", locale)
+        text = f"{failed_text}\n{reason}" if reason else failed_text
         await self._sender.edit_message(chat_id, message_id, text)

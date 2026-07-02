@@ -1,4 +1,4 @@
-"""Admin handlers (MASTER_PLAN Component 9.1 ``AdminHandlers``, Task 8.2).
+"""Admin handlers (MASTER_PLAN Component 9.1 ``AdminHandlers``, Task 8.2; Sprint 11.5 i18n).
 
 In-bot administration for Owner and Moderator. Authorization lives in the
 ``RoleFilter`` (Section 9.1: handlers never decide authz); each command is gated by
@@ -17,7 +17,8 @@ admin commands are invisible to normal users.
 
 Handlers parse, delegate to a service, and format — no business logic (Section 9.1).
 Per-request services arrive as aiogram workflow data factories; ``queue_service`` is a
-process singleton injected directly.
+process singleton injected directly. Rendered in the viewer's own ``locale``; broadcast
+message bodies are never translated (owner-authored content, Sprint 11.5 requirement #3).
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.filters.role_filter import RoleFilter, StaffFilter
+from core.i18n import Translator
 from core.logging import get_logger
 from core.timeparse import parse_iso_datetime
 from domain.entities.user import UserSnapshot
@@ -61,15 +63,22 @@ async def handle_stats(
     session: AsyncSession,
     user_service_factory: UserServiceFactory,
     queue_service: QueueService,
+    translate: Translator,
+    locale: str,
 ) -> None:
     stats = await user_service_factory(session).get_stats()
     depth = await queue_service.depth()
     active = await queue_service.active_count()
     await message.answer(
-        "📊 <b>System stats</b>\n"
-        f"Users: <b>{stats.total_users}</b> (banned: {stats.banned_users})\n"
-        f"Lifetime downloads: <b>{stats.total_downloads}</b>\n"
-        f"Queue: <b>{depth}</b> waiting, {active} in flight"
+        translate(
+            "admin.stats.body",
+            locale,
+            total=stats.total_users,
+            banned=stats.banned_users,
+            downloads=stats.total_downloads,
+            depth=depth,
+            active=active,
+        )
     )
 
 
@@ -79,16 +88,18 @@ async def handle_userinfo(
     command: CommandObject,
     session: AsyncSession,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     telegram_id = _parse_int(command.args)
     if telegram_id is None:
-        await message.answer("Usage: <code>/userinfo &lt;telegram_id&gt;</code>")
+        await message.answer(translate("admin.userinfo.usage", locale))
         return
     snap = await user_service_factory(session).find(telegram_id)
     if snap is None:
-        await message.answer(f"No user with telegram id <code>{telegram_id}</code>.")
+        await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
-    await message.answer(_format_userinfo(snap))
+    await message.answer(_format_userinfo(snap, translate, locale))
 
 
 @router.message(Command("ban"), OwnerFilter)
@@ -97,17 +108,19 @@ async def handle_ban(
     command: CommandObject,
     session: AsyncSession,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     telegram_id, reason = _parse_id_and_rest(command.args)
     if telegram_id is None:
-        await message.answer("Usage: <code>/ban &lt;telegram_id&gt; [reason]</code>")
+        await message.answer(translate("admin.ban.usage", locale))
         return
     snap = await user_service_factory(session).ban(telegram_id, reason)
     if snap is None:
-        await message.answer(f"No user with telegram id <code>{telegram_id}</code>.")
+        await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
     suffix = f" — {escape(reason)}" if reason else ""
-    await message.answer(f"🚫 Banned <code>{telegram_id}</code>{suffix}.")
+    await message.answer(translate("admin.ban.success", locale, id=telegram_id, suffix=suffix))
 
 
 @router.message(Command("unban"), OwnerFilter)
@@ -116,16 +129,18 @@ async def handle_unban(
     command: CommandObject,
     session: AsyncSession,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     telegram_id = _parse_int(command.args)
     if telegram_id is None:
-        await message.answer("Usage: <code>/unban &lt;telegram_id&gt;</code>")
+        await message.answer(translate("admin.unban.usage", locale))
         return
     snap = await user_service_factory(session).unban(telegram_id)
     if snap is None:
-        await message.answer(f"No user with telegram id <code>{telegram_id}</code>.")
+        await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
-    await message.answer(f"✅ Unbanned <code>{telegram_id}</code>.")
+    await message.answer(translate("admin.unban.success", locale, id=telegram_id))
 
 
 @router.message(Command("setting_set"), OwnerFilter)
@@ -135,21 +150,29 @@ async def handle_setting_set(
     session: AsyncSession,
     user: UserSnapshot,
     settings_service_factory: SettingsServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     key, value = _parse_key_value(command.args)
     if key is None or value is None:
-        await message.answer("Usage: <code>/setting_set &lt;key&gt; &lt;value&gt;</code>")
+        await message.answer(translate("admin.setting_set.usage", locale))
         return
     service = settings_service_factory(session)
     try:
         await service.set_validated(key, value, updated_by=user.id)
     except SettingNotFoundError:
-        await message.answer(f"Unknown setting key: <code>{escape(key)}</code>")
+        await message.answer(
+            translate("admin.setting_set.unknown_key", locale, setting_key=escape(key))
+        )
         return
     except InvalidSettingValueError as exc:
-        await message.answer(f"Invalid value: {escape(str(exc))}")
+        await message.answer(
+            translate("admin.setting_set.invalid_value", locale, error=escape(str(exc)))
+        )
         return
-    await message.answer(f"✅ Updated <code>{escape(key)}</code> = {escape(value)}")
+    await message.answer(
+        translate("admin.setting_set.success", locale, setting_key=escape(key), value=escape(value))
+    )
 
 
 @router.message(Command("broadcast"), OwnerFilter)
@@ -159,6 +182,8 @@ async def handle_broadcast(
     session: AsyncSession,
     user: UserSnapshot,
     broadcast_service_factory: BroadcastServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     text, language, role, at_raw = _parse_broadcast_args(command.args)
     scheduled_at = None
@@ -166,10 +191,7 @@ async def handle_broadcast(
         try:
             scheduled_at = parse_iso_datetime(at_raw)
         except ValueError:
-            await message.answer(
-                "Invalid <code>--at</code> time. Use ISO-8601, e.g. "
-                "<code>--at 2026-07-01T12:00:00Z</code>."
-            )
+            await message.answer(translate("admin.broadcast.invalid_at", locale))
             return
     try:
         broadcast = await broadcast_service_factory(session).create(
@@ -182,13 +204,23 @@ async def handle_broadcast(
             scheduled_at=scheduled_at,
         )
     except InvalidBroadcastError as exc:
-        await message.answer(f"Cannot broadcast: {escape(str(exc))}")
+        await message.answer(translate("admin.broadcast.failed", locale, error=escape(str(exc))))
         return
-    target = _describe_target(language, role)
-    when = f" — scheduled {scheduled_at:%Y-%m-%d %H:%M} UTC" if scheduled_at else ""
+    target = _describe_target(language, role, translate, locale)
+    when = (
+        translate("admin.broadcast.scheduled_suffix", locale, when=f"{scheduled_at:%Y-%m-%d %H:%M}")
+        if scheduled_at
+        else ""
+    )
     await message.answer(
-        f"📢 Broadcast #{broadcast.id} queued to "
-        f"<b>{broadcast.expected_total}</b> users{target}{when}."
+        translate(
+            "admin.broadcast.queued",
+            locale,
+            id=broadcast.id,
+            count=broadcast.expected_total,
+            target=target,
+            when=when,
+        )
     )
 
 
@@ -197,22 +229,26 @@ async def handle_users(
     message: Message,
     session: AsyncSession,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     users = await user_service_factory(session).list_users(limit=_USERS_PAGE_SIZE)
     if not users:
-        await message.answer("No users registered yet.")
+        await message.answer(translate("admin.users.none", locale))
         return
-    lines = [f"👥 <b>Users</b> (first {len(users)})"]
-    lines += [_format_user_row(snap) for snap in users]
+    lines = [translate("admin.users.header", locale, count=len(users))]
+    lines += [_format_user_row(snap, translate, locale) for snap in users]
     await message.answer("\n".join(lines))
 
 
-def _format_user_row(snap: UserSnapshot) -> str:
+def _format_user_row(snap: UserSnapshot, translate: Translator, locale: str) -> str:
     """One compact line per user for ``/users``: id, @username, name, lang, role, status."""
     username = f"@{escape(snap.username)}" if snap.username else "—"
     name = escape(snap.first_name) if snap.first_name else "—"
     lang = snap.language or "—"
-    status = "🚫 banned" if snap.is_banned else "active"
+    status = translate(
+        "admin.users.status_banned" if snap.is_banned else "admin.users.status_active", locale
+    )
     return (
         f"<code>{snap.telegram_id}</code> · {username} · {name} · "
         f"{lang} · {snap.role.value} · {status}"
@@ -280,25 +316,32 @@ def _parse_broadcast_args(raw: str | None) -> tuple[str, str | None, str | None,
     return " ".join(text_tokens), language, role, at_raw
 
 
-def _describe_target(language: str | None, role: str | None) -> str:
+def _describe_target(
+    language: str | None, role: str | None, translate: Translator, locale: str
+) -> str:
     parts = []
     if role is not None:
-        parts.append(f"role={role}")
+        parts.append(translate("admin.broadcast.target_role_part", locale, role=role))
     if language is not None:
-        parts.append(f"lang={language}")
+        parts.append(translate("admin.broadcast.target_lang_part", locale, language=language))
     return f" ({', '.join(parts)})" if parts else ""
 
 
-def _format_userinfo(snap: UserSnapshot) -> str:
+def _format_userinfo(snap: UserSnapshot, translate: Translator, locale: str) -> str:
     flags = []
     if snap.is_banned:
-        flags.append("🚫 banned")
+        flags.append(translate("admin.userinfo.flag_banned", locale))
     if snap.is_premium:
-        flags.append("⭐ premium")
-    status = ", ".join(flags) if flags else "active"
+        flags.append(translate("admin.userinfo.flag_premium", locale))
+    status = ", ".join(flags) if flags else translate("admin.userinfo.status_active", locale)
     name = escape(snap.first_name) if snap.first_name else "—"
-    return (
-        f"👤 <b>{name}</b> (<code>{snap.telegram_id}</code>)\n"
-        f"Role: {snap.role.value} · {status}\n"
-        f"Downloads: {snap.total_downloads} (today: {snap.daily_download_count})"
+    return translate(
+        "admin.userinfo.body",
+        locale,
+        name=name,
+        id=snap.telegram_id,
+        role=snap.role.value,
+        status=status,
+        downloads=snap.total_downloads,
+        today=snap.daily_download_count,
     )

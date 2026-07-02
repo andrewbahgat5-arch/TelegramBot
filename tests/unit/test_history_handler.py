@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.history import handle_history, handle_history_page, handle_resend
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.history_service import HistoryPage, ResendKind
@@ -72,7 +73,9 @@ async def test_history_command_lists_rows() -> None:
     message = AsyncMock(spec=Message)
     message.answer = AsyncMock()
 
-    await handle_history(message, _session(), _user(), lambda s: history, CallbackSigner("k"))
+    await handle_history(
+        message, _session(), _user(), lambda s: history, CallbackSigner("k"), translate, "en"
+    )
 
     message.answer.assert_awaited_once()
     args = message.answer.await_args
@@ -85,7 +88,9 @@ async def test_history_command_empty_has_no_keyboard() -> None:
     message = AsyncMock(spec=Message)
     message.answer = AsyncMock()
 
-    await handle_history(message, _session(), _user(), lambda s: history, CallbackSigner("k"))
+    await handle_history(
+        message, _session(), _user(), lambda s: history, CallbackSigner("k"), translate, "en"
+    )
 
     args = message.answer.await_args
     assert args is not None and args.kwargs.get("reply_markup") is None
@@ -101,7 +106,9 @@ async def test_history_page_callback_edits_message() -> None:
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_history_page(callback, _session(), _user(), lambda s: history, signer)
+    await handle_history_page(
+        callback, _session(), _user(), lambda s: history, signer, translate, "en"
+    )
 
     callback.message.edit_text.assert_awaited_once()
     callback.answer.assert_awaited_once()
@@ -114,7 +121,9 @@ async def test_history_page_forged_ignored() -> None:
     callback.data = "h|2|deadbeef00"  # bad signature
     callback.answer = AsyncMock()
 
-    await handle_history_page(callback, _session(), _user(), lambda s: history, CallbackSigner("k"))
+    await handle_history_page(
+        callback, _session(), _user(), lambda s: history, CallbackSigner("k"), translate, "en"
+    )
 
     callback.answer.assert_awaited_once()
     assert history.list_calls == []  # forged never reaches the service
@@ -135,7 +144,14 @@ async def test_resend_callback_resent_marks_completed() -> None:
     callback = _resend_callback(signer)
 
     await handle_resend(
-        callback, _session(), _user(), lambda s: history, NotificationService(msg), signer
+        callback,
+        _session(),
+        _user(),
+        lambda s: history,
+        NotificationService(msg),
+        signer,
+        translate,
+        "en",
     )
 
     callback.answer.assert_awaited_once()
@@ -152,7 +168,14 @@ async def test_resend_callback_needs_relink_message() -> None:
     callback = _resend_callback(signer)
 
     await handle_resend(
-        callback, _session(), _user(), lambda s: history, NotificationService(msg), signer
+        callback,
+        _session(),
+        _user(),
+        lambda s: history,
+        NotificationService(msg),
+        signer,
+        translate,
+        "en",
     )
 
     assert any("send the link again" in text for _, _, text in msg.edits)
@@ -172,6 +195,8 @@ async def test_resend_forged_ignored() -> None:
         lambda s: history,
         NotificationService(msg),
         CallbackSigner("k"),
+        translate,
+        "en",
     )
 
     callback.answer.assert_awaited_once()

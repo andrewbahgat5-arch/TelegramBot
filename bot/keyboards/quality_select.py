@@ -10,12 +10,13 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks.factory import CallbackSigner
+from core.i18n import translate
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat
 
 
 def build_quality_keyboard(
-    media_id: int, format_: MediaFormat, info: MediaInfo, signer: CallbackSigner
+    media_id: int, format_: MediaFormat, info: MediaInfo, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for option in info.formats:
@@ -26,7 +27,11 @@ def build_quality_keyboard(
             )
     builder.adjust(2)
     # A Back row returns to the Video/Audio choice without resending the link.
-    builder.row(InlineKeyboardButton(text="⬅️ Back", callback_data=signer.pack_back(media_id)))
+    builder.row(
+        InlineKeyboardButton(
+            text=translate("common.back", locale), callback_data=signer.pack_back(media_id)
+        )
+    )
     return builder.as_markup()
 
 

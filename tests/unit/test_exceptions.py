@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import pytest
 
+from core.i18n import translate
 from domain.enums import ErrorType
 from domain.exceptions import (
     AppError,
     CacheConnectionError,
     CacheError,
+    CooldownActiveError,
+    DailyLimitExceededError,
     DatabaseConnectionError,
     DownloadError,
     DuplicateDownloadError,
     ExtractionFailedError,
+    FileTooLargeError,
+    FormatNotAvailableError,
     InfrastructureError,
+    MaintenanceModeError,
+    PermissionDeniedError,
+    RateLimitExceededError,
     URLNotSupportedError,
     UserFacingError,
 )
@@ -69,3 +77,30 @@ def _all_subclasses(root: type[AppError]) -> list[type[AppError]]:
         found.append(sub)
         found.extend(_all_subclasses(sub))
     return found
+
+
+# --- i18n (Sprint 11.5) -----------------------------------------------------
+def test_translation_key_derives_from_error_type() -> None:
+    assert URLNotSupportedError().translation_key == "errors.url_not_supported"
+    assert FileTooLargeError().translation_key == "errors.file_too_large"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        URLNotSupportedError(),
+        FormatNotAvailableError(),
+        FileTooLargeError(),
+        RateLimitExceededError(),
+        DailyLimitExceededError(),
+        CooldownActiveError(),
+        MaintenanceModeError(),
+        PermissionDeniedError(),
+    ],
+)
+def test_every_user_facing_error_resolves_a_real_catalog_key(exc: UserFacingError) -> None:
+    """Catches drift: a renamed/added ``UserFacingError`` subclass without a matching
+    ``errors.*`` catalog entry silently falls back to the raw key at runtime instead of
+    failing a test — this asserts the fallback path is never actually exercised."""
+    resolved = translate(exc.translation_key, "en")
+    assert resolved != exc.translation_key

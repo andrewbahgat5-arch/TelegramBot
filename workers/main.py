@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 # the bot token); the worker uses it to sign ad click buttons so the bot verifies them
 # with the same scheme (flow 16.7 W6). import-linter permits workers -> bot here.
 from bot.callbacks.factory import CallbackSigner
+from core import i18n
 from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
@@ -182,6 +183,7 @@ def make_download_service_factory(
 async def main() -> None:  # pragma: no cover - process entry; wiring covered by unit tests
     settings = Settings()  # type: ignore[call-arg]
     configure_logging(settings.log_level, settings.log_format)
+    i18n.configure(settings.default_locale)
     if settings.sentry_enabled:
         init_sentry(settings)
         set_component("worker")

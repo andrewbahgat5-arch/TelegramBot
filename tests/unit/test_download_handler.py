@@ -17,6 +17,7 @@ from bot.handlers.download import (
     handle_quality_choice,
     handle_url,
 )
+from core.i18n import translate
 from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.entities.user import UserSnapshot
 from domain.enums import MediaFormat, Quality, UserRole
@@ -94,7 +95,7 @@ async def test_url_message_shows_format_keyboard() -> None:
     analyzer = _analyzer()  # _result() has no thumbnail → ack is edited in place
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
 
     message.answer.assert_awaited_once()  # the instant "Analyzing…" ack
     ack.edit_text.assert_awaited_once()
@@ -105,7 +106,7 @@ async def test_url_message_unsupported_replies_without_keyboard() -> None:
     analyzer = _analyzer(error=URLNotSupportedError())
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
 
     ack.edit_text.assert_awaited_once()  # the ack is edited to the error text
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
@@ -114,7 +115,7 @@ async def test_url_message_unsupported_replies_without_keyboard() -> None:
 async def test_url_message_extraction_failed_replies() -> None:
     analyzer = _analyzer(error=ExtractionFailedError())
     message, ack = _message_with_ack()
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
     ack.edit_text.assert_awaited_once()
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
@@ -127,7 +128,7 @@ async def test_url_message_no_formats_replies() -> None:
     cache_service, _ = make_cache_service()
     analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
     message, ack = _message_with_ack()
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
     ack.edit_text.assert_awaited_once()
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
@@ -138,7 +139,7 @@ async def test_format_choice_expired_media_alerts() -> None:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = signer.pack_format(123, MediaFormat.VIDEO)
     callback.answer = AsyncMock()
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer)
+    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
     callback.answer.assert_awaited_once()
     args = callback.answer.await_args
     assert args is not None and args.kwargs.get("show_alert") is True
@@ -156,7 +157,7 @@ async def test_format_choice_shows_quality_keyboard() -> None:
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer)
+    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
 
     callback.message.edit_text.assert_awaited_once()
     callback.answer.assert_awaited_once()
@@ -174,7 +175,7 @@ async def test_format_choice_edits_caption_for_photo_chooser() -> None:
     callback.message.edit_caption = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer)
+    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
 
     callback.message.edit_caption.assert_awaited_once()
 
@@ -191,7 +192,7 @@ async def test_back_returns_to_format_keyboard() -> None:
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_back(callback, _session(), lambda s: analyzer, signer)
+    await handle_back(callback, _session(), lambda s: analyzer, signer, translate, "en")
 
     callback.message.edit_text.assert_awaited_once()
     call = callback.message.edit_text.await_args
@@ -204,7 +205,9 @@ async def test_back_forged_ignored() -> None:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = "b|1|deadbeef00"  # bad signature
     callback.answer = AsyncMock()
-    await handle_back(callback, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_back(
+        callback, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en"
+    )
     callback.answer.assert_awaited_once()
 
 
@@ -221,7 +224,7 @@ async def test_format_choice_forged_data_ignored() -> None:
         called = True
         return analyzer
 
-    await handle_format_choice(callback, _session(), factory, CallbackSigner("k"))
+    await handle_format_choice(callback, _session(), factory, CallbackSigner("k"), translate, "en")
 
     callback.answer.assert_awaited_once()
     assert called is False  # forged callback never reaches the analyzer
@@ -241,7 +244,7 @@ async def test_url_message_with_thumbnail_sends_photo() -> None:
     analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"))
+    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
 
     message.answer.assert_awaited_once()  # instant ack
     message.answer_photo.assert_awaited_once()  # thumbnail + keyboard
@@ -329,6 +332,8 @@ async def test_quality_choice_enqueues_job() -> None:
         lambda s: _rate_limit_service(),
         notifier,
         signer,
+        translate,
+        "en",
     )
 
     callback.answer.assert_awaited_once()
@@ -367,6 +372,8 @@ async def test_quality_choice_blocked_when_over_daily_limit() -> None:
         lambda s: _rate_limit_service_at_limit(),
         NotificationService(FakeMessageSender()),
         signer,
+        translate,
+        "en",
     )
 
     # Rejected with an alert; no job enqueued.
@@ -391,6 +398,8 @@ async def test_quality_choice_forged_ignored() -> None:
         lambda s: _rate_limit_service(),
         NotificationService(FakeMessageSender()),
         CallbackSigner("k"),
+        translate,
+        "en",
     )
     callback.answer.assert_awaited_once()
     assert await backend.depth() == 0  # forged → never enqueued

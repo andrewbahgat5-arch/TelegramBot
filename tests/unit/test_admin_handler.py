@@ -1,4 +1,4 @@
-"""Unit tests for the admin handlers (MASTER_PLAN Task 8.2)."""
+"""Unit tests for the admin handlers (MASTER_PLAN Task 8.2, Sprint 11.5 i18n)."""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from bot.handlers.admin import (
     handle_userinfo,
     handle_users,
 )
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.broadcast_service import BroadcastService
@@ -37,6 +38,7 @@ from tests.unit._fakes import (
 )
 
 _EVENT = cast(TelegramObject, object())
+_LOCALE = "en"
 
 
 def _session() -> AsyncSession:
@@ -85,7 +87,9 @@ async def test_stats_reports_user_and_queue_totals() -> None:
     queue = QueueService(FakeQueueBackend())
     message = _message()
 
-    await handle_stats(message, _session(), lambda s: _user_service(users), queue)
+    await handle_stats(
+        message, _session(), lambda s: _user_service(users), queue, translate, _LOCALE
+    )
 
     text = _answer_text(message)
     assert "Users: <b>2</b>" in text and "banned: 1" in text
@@ -99,7 +103,12 @@ async def test_userinfo_shows_user_detail() -> None:
     message = _message()
 
     await handle_userinfo(
-        message, CommandObject(args="55"), _session(), lambda s: _user_service(users)
+        message,
+        CommandObject(args="55"),
+        _session(),
+        lambda s: _user_service(users),
+        translate,
+        _LOCALE,
     )
 
     text = _answer_text(message)
@@ -109,7 +118,12 @@ async def test_userinfo_shows_user_detail() -> None:
 async def test_userinfo_missing_user_reports_not_found() -> None:
     message = _message()
     await handle_userinfo(
-        message, CommandObject(args="404"), _session(), lambda s: _user_service(FakeUserRepo())
+        message,
+        CommandObject(args="404"),
+        _session(),
+        lambda s: _user_service(FakeUserRepo()),
+        translate,
+        _LOCALE,
     )
     assert "No user" in _answer_text(message)
 
@@ -117,7 +131,12 @@ async def test_userinfo_missing_user_reports_not_found() -> None:
 async def test_userinfo_without_args_shows_usage() -> None:
     message = _message()
     await handle_userinfo(
-        message, CommandObject(args=None), _session(), lambda s: _user_service(FakeUserRepo())
+        message,
+        CommandObject(args=None),
+        _session(),
+        lambda s: _user_service(FakeUserRepo()),
+        translate,
+        _LOCALE,
     )
     assert "Usage" in _answer_text(message)
 
@@ -129,7 +148,12 @@ async def test_ban_sets_audit_fields() -> None:
     message = _message()
 
     await handle_ban(
-        message, CommandObject(args="55 spamming"), _session(), lambda s: _user_service(users)
+        message,
+        CommandObject(args="55 spamming"),
+        _session(),
+        lambda s: _user_service(users),
+        translate,
+        _LOCALE,
     )
 
     assert users.by_tid[55].is_banned is True
@@ -140,7 +164,12 @@ async def test_ban_sets_audit_fields() -> None:
 async def test_ban_unknown_user_reports_not_found() -> None:
     message = _message()
     await handle_ban(
-        message, CommandObject(args="55"), _session(), lambda s: _user_service(FakeUserRepo())
+        message,
+        CommandObject(args="55"),
+        _session(),
+        lambda s: _user_service(FakeUserRepo()),
+        translate,
+        _LOCALE,
     )
     assert "No user" in _answer_text(message)
 
@@ -151,7 +180,12 @@ async def test_unban_clears_flag() -> None:
     message = _message()
 
     await handle_unban(
-        message, CommandObject(args="55"), _session(), lambda s: _user_service(users)
+        message,
+        CommandObject(args="55"),
+        _session(),
+        lambda s: _user_service(users),
+        translate,
+        _LOCALE,
     )
 
     assert users.by_tid[55].is_banned is False
@@ -164,7 +198,13 @@ async def test_setting_set_updates_valid_value() -> None:
     store_data = {"free_daily_limit": ("10", "int")}
     service = SettingsService(FakeSettingsStore(store_data), FakeCache(), cache_ttl=60)
     await handle_setting_set(
-        message, CommandObject(args="free_daily_limit 25"), _session(), _owner(), lambda s: service
+        message,
+        CommandObject(args="free_daily_limit 25"),
+        _session(),
+        _owner(),
+        lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "Updated" in _answer_text(message)
     assert await service.get("free_daily_limit") == 25
@@ -174,7 +214,13 @@ async def test_setting_set_rejects_unknown_key() -> None:
     message = _message()
     service = _settings_service({"free_daily_limit": ("10", "int")})
     await handle_setting_set(
-        message, CommandObject(args="made_up_key 5"), _session(), _owner(), lambda s: service
+        message,
+        CommandObject(args="made_up_key 5"),
+        _session(),
+        _owner(),
+        lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "Unknown setting key" in _answer_text(message)
 
@@ -188,6 +234,8 @@ async def test_setting_set_rejects_bad_value() -> None:
         _session(),
         _owner(),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "Invalid value" in _answer_text(message)
 
@@ -207,6 +255,8 @@ async def test_broadcast_queues_and_reports_count() -> None:
         _session(),
         _owner(),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
 
     text = _answer_text(message)
@@ -230,6 +280,8 @@ async def test_broadcast_escapes_html_for_safe_delivery() -> None:
         _session(),
         _owner(),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
 
     assert broadcasts.rows[0].message_text == "5 &lt; 10 &amp; rising"
@@ -239,7 +291,13 @@ async def test_broadcast_empty_text_is_rejected() -> None:
     service = BroadcastService(broadcast_repo=FakeBroadcastRepo(), user_repo=FakeUserRepo())
     message = _message()
     await handle_broadcast(
-        message, CommandObject(args="--lang en"), _session(), _owner(), lambda s: service
+        message,
+        CommandObject(args="--lang en"),
+        _session(),
+        _owner(),
+        lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "Cannot broadcast" in _answer_text(message)
 
@@ -257,6 +315,8 @@ async def test_broadcast_with_at_schedules() -> None:
         _session(),
         _owner(),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
 
     assert "scheduled" in _answer_text(message)
@@ -276,6 +336,8 @@ async def test_broadcast_with_invalid_at_is_rejected() -> None:
         _session(),
         _owner(),
         lambda s: service,
+        translate,
+        _LOCALE,
     )
     assert "Invalid" in _answer_text(message)
     assert broadcasts.rows == []  # nothing queued
@@ -288,7 +350,7 @@ async def test_users_lists_registered_users() -> None:
     users.by_tid[2] = FakeUser(id=2, telegram_id=222, first_name="Bob", is_banned=True)
     message = _message()
 
-    await handle_users(message, _session(), lambda s: _user_service(users))
+    await handle_users(message, _session(), lambda s: _user_service(users), translate, _LOCALE)
 
     text = _answer_text(message)
     assert "alice" in text and "Alice" in text and "111" in text
@@ -297,7 +359,9 @@ async def test_users_lists_registered_users() -> None:
 
 async def test_users_empty_reports_none() -> None:
     message = _message()
-    await handle_users(message, _session(), lambda s: _user_service(FakeUserRepo()))
+    await handle_users(
+        message, _session(), lambda s: _user_service(FakeUserRepo()), translate, _LOCALE
+    )
     assert "No users" in _answer_text(message)
 
 

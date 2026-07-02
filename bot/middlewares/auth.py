@@ -7,6 +7,11 @@ runs. The resolved :class:`UserSnapshot` is attached as ``data["user"]``.
 Because repositories are bound to the per-update session, the middleware builds the
 ``UserService`` from a factory using ``data["session"]`` (set by
 ``DbSessionMiddleware``, which must run first).
+
+New users are created with the configured ``default_locale`` (Sprint 11.5), never
+Telegram's auto-detected ``language_code`` — that code isn't restricted to the
+languages this bot actually catalogs (``core/locales/*.json``), so trusting it
+verbatim could park a user on an unsupported/uncataloged value.
 """
 
 from __future__ import annotations
@@ -18,17 +23,17 @@ from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message, TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.i18n import resolve_locale, translate
 from services.user_service import UserService
 
 Handler = Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]]
 UserServiceFactory = Callable[[AsyncSession], UserService]
 
-BAN_MESSAGE = "You are banned from using this bot."
-
 
 class AuthMiddleware(BaseMiddleware):
-    def __init__(self, user_service_factory: UserServiceFactory) -> None:
+    def __init__(self, user_service_factory: UserServiceFactory, *, default_locale: str) -> None:
         self._user_service_factory = user_service_factory
+        self._default_locale = default_locale
 
     async def __call__(self, handler: Handler, event: TelegramObject, data: dict[str, Any]) -> Any:
         tg_user = data.get("event_from_user")
@@ -40,20 +45,21 @@ class AuthMiddleware(BaseMiddleware):
             telegram_id=tg_user.id,
             username=tg_user.username,
             first_name=tg_user.first_name,
-            language=tg_user.language_code,
+            language=self._default_locale,
         )
         await service.record_activity(snapshot)
 
         if snapshot.is_banned:
-            await _reply_banned(event)
+            await _reply_banned(event, resolve_locale(snapshot.language))
             return None
 
         data["user"] = snapshot
         return await handler(event, data)
 
 
-async def _reply_banned(event: TelegramObject) -> None:
+async def _reply_banned(event: TelegramObject, locale: str) -> None:
+    text = translate("errors.permission_denied", locale)
     if isinstance(event, Message):
-        await event.answer(BAN_MESSAGE)
+        await event.answer(text)
     elif isinstance(event, CallbackQuery):
-        await event.answer(BAN_MESSAGE, show_alert=True)
+        await event.answer(text, show_alert=True)

@@ -39,6 +39,7 @@ from typing import Any
 
 from core import metrics
 from core.config import Settings
+from core.i18n import resolve_locale
 from core.logging import get_logger
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaInfo
 from domain.enums import JobStatus, MediaFormat, Quality
@@ -151,12 +152,13 @@ class DownloadService:
         ctx = await self._cache.get_job_context(job_id_str) or {}
         chat_id = ctx.get("telegram_id")
         message_id = ctx.get("message_id")
+        locale = await self._locale_for(chat_id)
         dest = Path(self._settings.download_temp_dir) / job_id_str
         started = time.monotonic()
 
         try:
             await self._jobs.set_status(job_id, JobStatus.PROCESSING.value, started_at=now_utc())
-            await self._stage(chat_id, message_id, ProgressStage.DOWNLOADING)
+            await self._stage(chat_id, message_id, ProgressStage.DOWNLOADING, locale)
 
             analyzed = await self._analyzer.analyze_by_media_id(media_id)
             if analyzed is None:
@@ -164,11 +166,11 @@ class DownloadService:
             info = analyzed.info
 
             produced, file_size = await self._produce_file(
-                info, format_, quality, dest, chat_id, message_id
+                info, format_, quality, dest, chat_id, message_id, locale
             )
             await self._enforce_size_limit(file_size)
 
-            await self._stage(chat_id, message_id, ProgressStage.UPLOADING)
+            await self._stage(chat_id, message_id, ProgressStage.UPLOADING, locale)
             upload_started = time.monotonic()
             uploaded = await self._deliver(
                 job_id, ctx, produced, info, format_, quality, file_size, media_id
@@ -205,6 +207,7 @@ class DownloadService:
         dest: Path,
         chat_id: int | None,
         message_id: int | None,
+        locale: str,
     ) -> tuple[Path, int]:
         download_started = time.monotonic()
         downloaded = await self._downloader.download(info, format_, quality, dest)
@@ -220,7 +223,7 @@ class DownloadService:
         produced = downloaded.path
         target = AUDIO_TARGET_BY_QUALITY.get(quality)
         if format_ is MediaFormat.AUDIO and target is not None:
-            await self._stage(chat_id, message_id, ProgressStage.PROCESSING)
+            await self._stage(chat_id, message_id, ProgressStage.PROCESSING, locale)
             produced = await self._transcoder.transcode_audio(produced, target)
         return produced, produced.stat().st_size
 
@@ -414,7 +417,9 @@ class DownloadService:
         job_id = uuid.UUID(job_id_str)
         await self._jobs.set_status(job_id, JobStatus.RETRY_QUEUED.value, increment_retry=True)
         ctx = await self._cache.get_job_context(job_id_str) or {}
-        await self._stage(ctx.get("telegram_id"), ctx.get("message_id"), ProgressStage.QUEUED)
+        telegram_id = ctx.get("telegram_id")
+        locale = await self._locale_for(telegram_id)
+        await self._stage(telegram_id, ctx.get("message_id"), ProgressStage.QUEUED, locale)
         await self._jobs.set_status(job_id, JobStatus.QUEUED.value)
         # Re-enqueue handled by the caller's QueueService (worker owns the queue).
         _log.info("job_retry_queued", job_id=job_id_str)
@@ -438,7 +443,11 @@ class DownloadService:
 
         Uses the ``progress`` map populated by ``JobService`` (originator + fan-out
         duplicates). Falls back to the top-level originator fields for legacy contexts.
-        Each edit is best-effort — one failed edit never blocks the others.
+        Each edit is best-effort — one failed edit never blocks the others. Each
+        waiter's *own* language is resolved fresh here (Sprint 11.5) — fan-out can
+        deliver to users with different languages, and this path must be
+        self-sufficient (``mark_permanent_failure`` can call it on a retry attempt
+        with no ``_deliver`` in-memory state to reuse).
         """
         targets = list((ctx.get("progress") or {}).values())
         if not targets:
@@ -449,16 +458,28 @@ class DownloadService:
             chat_id, message_id = target.get("telegram_id"), target.get("message_id")
             if chat_id is None or message_id is None:
                 continue
+            locale = await self._locale_for(chat_id)
             if completed:
-                await self._notifier.notify_completed(chat_id, message_id)
+                await self._notifier.notify_completed(chat_id, message_id, locale)
             else:
-                await self._notifier.notify_failed(chat_id, message_id)
+                await self._notifier.notify_failed(chat_id, message_id, locale)
 
     async def _stage(
-        self, chat_id: int | None, message_id: int | None, stage: ProgressStage
+        self, chat_id: int | None, message_id: int | None, stage: ProgressStage, locale: str
     ) -> None:
         if chat_id is not None and message_id is not None:
-            await self._notifier.notify_stage(chat_id, message_id, stage)
+            await self._notifier.notify_stage(chat_id, message_id, stage, locale)
+
+    async def _locale_for(self, telegram_id: int | None) -> str:
+        """Resolve a recipient's locale by ``telegram_id`` (read-only, Sprint 11.5).
+
+        Mirrors ``LocaleMiddleware``'s resolution exactly, so behavior is identical
+        whether a message originates in the bot process or here in the worker.
+        """
+        if telegram_id is None:
+            return resolve_locale(None)
+        user = await self._users.get_by_telegram_id(telegram_id)
+        return resolve_locale(user.language if user is not None else None)
 
     async def _release_lock(self, ctx: dict[str, object]) -> None:
         token = ctx.get("lock_token")

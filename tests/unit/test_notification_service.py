@@ -10,7 +10,7 @@ async def test_send_initial_returns_id_and_shows_one_progress_bar() -> None:
     sender = FakeMessageSender()
     service = NotificationService(sender)
 
-    message_id = await service.send_initial(chat_id=10)
+    message_id = await service.send_initial(chat_id=10, locale="en")
 
     assert isinstance(message_id, int)
     assert len(sender.sent) == 1
@@ -24,7 +24,7 @@ async def test_stage_advances_the_percentage_in_place() -> None:
     service = NotificationService(sender)
 
     for stage in (ProgressStage.DOWNLOADING, ProgressStage.PROCESSING, ProgressStage.UPLOADING):
-        await service.notify_stage(chat_id=10, message_id=99, stage=stage)
+        await service.notify_stage(chat_id=10, message_id=99, stage=stage, locale="en")
 
     percents = [int(e[2].split()[-1].rstrip("%")) for e in sender.edits]
     assert percents == sorted(percents)  # monotonically increasing
@@ -37,9 +37,9 @@ async def test_completed_and_failed_edits() -> None:
     sender = FakeMessageSender()
     service = NotificationService(sender)
 
-    await service.notify_completed(chat_id=1, message_id=2)
-    await service.notify_failed(chat_id=1, message_id=2)
-    await service.notify_failed(chat_id=1, message_id=2, reason="too large")
+    await service.notify_completed(chat_id=1, message_id=2, locale="en")
+    await service.notify_failed(chat_id=1, message_id=2, locale="en")
+    await service.notify_failed(chat_id=1, message_id=2, locale="en", reason="too large")
 
     assert sender.edits[0][2].startswith("✅")
     assert sender.edits[1][2].startswith("❌")

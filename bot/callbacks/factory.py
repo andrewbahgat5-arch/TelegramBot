@@ -4,13 +4,16 @@ Inline-button callbacks carry ``(media_id, format[, quality])``. Each payload is
 HMAC-signed so a tampered callback is rejected and silently ignored (never echoed).
 The encoded form stays well within Telegram's 64-byte ``callback_data`` limit.
 
-Six actions:
+Seven actions:
 * ``f`` — format chosen (``f|<media_id>|<format>|<sig>``) → show the quality keyboard.
 * ``q`` — quality chosen (``q|<media_id>|<format>|<quality>|<sig>``) → start download.
 * ``b`` — back (``b|<media_id>|<sig>``) → return to the format (Video/Audio) keyboard.
 * ``r`` — resend (``r|<download_id>|<sig>``) → re-send a history entry (flow 16.3).
 * ``h`` — history page (``h|<page>|<sig>``) → paginate the history list.
 * ``a`` — ad click (``a|<ad_id>|<sig>``) → record the click + deliver the link (16.7 W6).
+* ``l`` — language chosen (``l|<code>|<sig>``) → persist the pick (Sprint 11.5). The
+  handler still validates ``code`` against ``core.i18n.list_enabled_locales()`` before
+  acting on it (a locale can be disabled between rendering the picker and the tap).
 
 A seventh namespace, ``P``, carries the admin inline control panel (Sprint 9.6,
 F-2 / EP-22). Its payload is a fixed five-field, signed form
@@ -38,12 +41,13 @@ _TELEGRAM_CALLBACK_LIMIT = 64  # bytes; Telegram rejects callback_data above thi
 
 @dataclass(frozen=True, slots=True)
 class ParsedCallback:
-    action: str  # "f", "q", "b", "r", "h", or "a"
-    media_id: int = 0  # the media id for f/q/b actions; 0 for r/h/a
+    action: str  # "f", "q", "b", "r", "h", "a", or "l"
+    media_id: int = 0  # the media id for f/q/b actions; 0 for r/h/a/l
     format: MediaFormat | None = None
     quality: Quality | None = None
     arg: int | None = None  # download_id for "r"; page index for "h"; ad_id for "a"
     button_id: int | None = None  # ad button id for "a" (None = legacy single button)
+    language: str | None = None  # locale code for "l"
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +93,10 @@ class CallbackSigner:
 
     def pack_history_page(self, page: int) -> str:
         payload = f"h{_SEP}{page}"
+        return f"{payload}{_SEP}{self._sig(payload)}"
+
+    def pack_language(self, code: str) -> str:
+        payload = f"l{_SEP}{code}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
     def pack_ad_click(self, ad_id: int, button_id: int | None = None) -> str:
@@ -151,6 +159,8 @@ class CallbackSigner:
                 return ParsedCallback(action="r", arg=int(parts[1]))
             if action == "h" and len(parts) == 3:
                 return ParsedCallback(action="h", arg=int(parts[1]))
+            if action == "l" and len(parts) == 3:
+                return ParsedCallback(action="l", language=parts[1])
             if action == "a" and len(parts) == 3:
                 return ParsedCallback(action="a", arg=int(parts[1]))
             if action == "a" and len(parts) == 4:

@@ -1,4 +1,4 @@
-"""Admin inline control panel keyboards (Sprint 9.6, F-2 / EP-22).
+"""Admin inline control panel keyboards (Sprint 9.6, F-2 / EP-22; Sprint 11.5 i18n).
 
 Pure presentation: functions that turn the panel *registry* (``bot.panel.registry``)
 plus the viewer's role into signed :class:`InlineKeyboardMarkup`. No business logic,
@@ -19,6 +19,8 @@ Design goals honored here:
   every destructive action routes through.
 * **Stepper:** :func:`build_setting_stepper` renders minus / plus / 💾 Save with the
   candidate value carried (signed) in the callback, clamped to the field's UI guard rails.
+* **Localized (Sprint 11.5):** every button label is a ``core.i18n`` translation key
+  resolved with the viewer's own ``locale`` — the registry stores keys, not literal text.
 
 Every ``callback_data`` is signed via :class:`CallbackSigner` (``P`` namespace) and so
 stays within Telegram's 64-byte limit.
@@ -49,6 +51,7 @@ from bot.panel.wizard import (
     prev_step,
     step_index,
 )
+from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 
@@ -74,6 +77,7 @@ def _chunk(buttons: list[InlineKeyboardButton]) -> list[list[InlineKeyboardButto
 
 def nav_row(
     signer: CallbackSigner,
+    locale: str,
     *,
     back: tuple[str, str] | None = None,
     cancel: tuple[str, str] | None = None,
@@ -82,18 +86,18 @@ def nav_row(
     """A consistent ⬅️ Back · ❌ Cancel · 🏠 Home row. ``back``/``cancel`` are (section, action)."""
     row: list[InlineKeyboardButton] = []
     if back is not None:
-        row.append(_btn(signer, "⬅️ Back", back[0], back[1]))
+        row.append(_btn(signer, translate("common.back", locale), back[0], back[1]))
     if cancel is not None:
-        row.append(_btn(signer, "❌ Cancel", cancel[0], cancel[1]))
+        row.append(_btn(signer, translate("common.cancel", locale), cancel[0], cancel[1]))
     if home:
-        row.append(_btn(signer, "🏠 Home", "mn", "hm"))
+        row.append(_btn(signer, translate("common.home", locale), "mn", "hm"))
     return row
 
 
-def build_main_menu(role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_main_menu(role: UserRole, signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
     """The root panel. Owner-only sections are dropped for moderators."""
     buttons = [
-        _btn(signer, section.label, section.code, "op")
+        _btn(signer, translate(section.label_key, locale), section.code, "op")
         for section in SECTIONS
         if not section.owner_only or role is UserRole.OWNER
     ]
@@ -101,21 +105,23 @@ def build_main_menu(role: UserRole, signer: CallbackSigner) -> InlineKeyboardMar
 
 
 def build_section_menu(
-    section: str, role: UserRole, signer: CallbackSigner
+    section: str, role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     """A section's static action menu. Write-tier items are hidden from moderators."""
     items = SUBMENUS.get(section, ())
     buttons = [
-        _btn(signer, item.label, section, item.action, item.arg)
+        _btn(signer, translate(item.label_key, locale), section, item.action, item.arg)
         for item in items
         if role is UserRole.OWNER or not is_write_action(item.action)
     ]
     rows = _chunk(buttons)
-    rows.append(nav_row(signer, back=("mn", "op")))
+    rows.append(nav_row(signer, locale, back=("mn", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_settings_menu(role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_settings_menu(
+    role: UserRole, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     """Settings list. Owner gets one edit button per stepper field; moderators get none.
 
     Current values are rendered into the message body by the handler (read-only view).
@@ -124,15 +130,21 @@ def build_settings_menu(role: UserRole, signer: CallbackSigner) -> InlineKeyboar
     """
     buttons: list[InlineKeyboardButton] = []
     if role is UserRole.OWNER:
-        buttons += [_btn(signer, field.label, "s", "e", field.index) for field in SETTING_FIELDS]
-    buttons += [_btn(signer, item.label, "s", "inf", item.index) for item in SETTINGS_INFO]
+        buttons += [
+            _btn(signer, translate(field.label_key, locale), "s", "e", field.index)
+            for field in SETTING_FIELDS
+        ]
+    buttons += [
+        _btn(signer, translate(item.label_key, locale), "s", "inf", item.index)
+        for item in SETTINGS_INFO
+    ]
     rows = _chunk(buttons)
-    rows.append(nav_row(signer, back=("mn", "op")))
+    rows.append(nav_row(signer, locale, back=("mn", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_setting_stepper(
-    field: SettingField, value: int, signer: CallbackSigner
+    field: SettingField, value: int, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     """The minus / plus / 💾 Save stepper for one numeric setting (owner-only screen).
 
@@ -146,15 +158,16 @@ def build_setting_stepper(
             _btn(signer, "➖", "s", "-", field.index, decremented),  # noqa: RUF001
             _btn(signer, "➕", "s", "+", field.index, incremented),  # noqa: RUF001
         ],
-        [_btn(signer, "💾 Save", "s", "sv", field.index, value)],
-        [_btn(signer, "✏️ Enter Value", "s", "ev", field.index)],
-        nav_row(signer, back=("s", "op")),
+        [_btn(signer, translate("common.save", locale), "s", "sv", field.index, value)],
+        [_btn(signer, translate("panel.settings.enter_value", locale), "s", "ev", field.index)],
+        nav_row(signer, locale, back=("s", "op")),
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_input_prompt(
     signer: CallbackSigner,
+    locale: str,
     *,
     back: tuple[str, str, int | None],
     cancel: tuple[str, str, int | None],
@@ -163,8 +176,8 @@ def build_input_prompt(
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                _btn(signer, "❌ Cancel", cancel[0], cancel[1], cancel[2]),
-                _btn(signer, "⬅️ Back", back[0], back[1], back[2]),
+                _btn(signer, translate("common.cancel", locale), cancel[0], cancel[1], cancel[2]),
+                _btn(signer, translate("common.back", locale), back[0], back[1], back[2]),
             ]
         ]
     )
@@ -172,6 +185,7 @@ def build_input_prompt(
 
 def build_confirm(
     signer: CallbackSigner,
+    locale: str,
     *,
     confirm: tuple[str, str, int | None, int | None],
     cancel: tuple[str, str, int | None],
@@ -185,19 +199,28 @@ def build_confirm(
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                _btn(signer, "✅ Confirm", confirm[0], confirm[1], confirm[2], confirm[3]),
-                _btn(signer, "❌ Cancel", cancel[0], cancel[1], cancel[2]),
+                _btn(
+                    signer,
+                    translate("common.confirm", locale),
+                    confirm[0],
+                    confirm[1],
+                    confirm[2],
+                    confirm[3],
+                ),
+                _btn(signer, translate("common.cancel", locale), cancel[0], cancel[1], cancel[2]),
             ]
         ]
     )
 
 
-def build_user_list(users: list[UserSnapshot], signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_user_list(
+    users: list[UserSnapshot], signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     """Tappable user rows (one per row) → each opens that user's detail screen."""
     rows = [
         [_btn(signer, _user_button_label(snap), "u", "inf", snap.telegram_id)] for snap in users
     ]
-    rows.append(nav_row(signer, back=("u", "op")))
+    rows.append(nav_row(signer, locale, back=("u", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -207,10 +230,10 @@ def _user_button_label(snap: UserSnapshot) -> str:
     return f"{marker} {snap.telegram_id} · {name}"[:60]
 
 
-def build_ad_list(ads: Sequence[Any], signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_ad_list(ads: Sequence[Any], signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
     """Tappable ad rows (one per row) → each opens that ad's detail screen."""
     rows = [[_btn(signer, _ad_button_label(ad), "a", "inf", ad.id)] for ad in ads]
-    rows.append(nav_row(signer, back=("a", "op")))
+    rows.append(nav_row(signer, locale, back=("a", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -220,7 +243,7 @@ def _ad_button_label(ad: Any) -> str:
 
 
 def build_ad_action_list(
-    ads: Sequence[Any], action: str, signer: CallbackSigner
+    ads: Sequence[Any], action: str, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     """Pick which ad a top-level Manage-Campaigns action applies to.
 
@@ -229,11 +252,13 @@ def build_ad_action_list(
     selected row re-enters the write handler fully targeted (no dead-end, Bug-fix sprint).
     """
     rows = [[_btn(signer, _ad_button_label(ad), "a", action, ad.id)] for ad in ads]
-    rows.append(nav_row(signer, back=("a", "op")))
+    rows.append(nav_row(signer, locale, back=("a", "op")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_ad_detail(ad: Any, role: UserRole, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_ad_detail(
+    ad: Any, role: UserRole, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     """An ad's detail screen with owner-only actions reflecting its current state.
 
     Enable/Disable toggle directly; Delete and Broadcast (to all users) route through a
@@ -243,19 +268,19 @@ def build_ad_detail(ad: Any, role: UserRole, signer: CallbackSigner) -> InlineKe
     if role is UserRole.OWNER:
         aid = ad.id
         actions = [
-            _btn(signer, "⏸ Disable", "a", "di", aid)
+            _btn(signer, translate("panel.action.disable", locale), "a", "di", aid)
             if ad.is_active
-            else _btn(signer, "✅ Enable", "a", "en", aid),
-            _btn(signer, "📢 Broadcast", "a", "bc", aid),
-            _btn(signer, "🗑 Delete", "a", "de", aid),
+            else _btn(signer, translate("panel.action.enable", locale), "a", "en", aid),
+            _btn(signer, translate("panel.action.broadcast", locale), "a", "bc", aid),
+            _btn(signer, translate("panel.action.delete", locale), "a", "de", aid),
         ]
         rows = _chunk(actions)
-    rows.append(nav_row(signer, back=("a", "ls")))
+    rows.append(nav_row(signer, locale, back=("a", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_user_detail(
-    snap: UserSnapshot, role: UserRole, signer: CallbackSigner
+    snap: UserSnapshot, role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
     """A user's detail screen. Contextual write actions (owner-only) reflect current state.
 
@@ -267,18 +292,18 @@ def build_user_detail(
     if role is UserRole.OWNER and snap.role is not UserRole.OWNER:
         tid = snap.telegram_id
         actions = [
-            _btn(signer, "✅ Unban", "u", "ubn", tid)
+            _btn(signer, translate("panel.action.unban", locale), "u", "ubn", tid)
             if snap.is_banned
-            else _btn(signer, "🚫 Ban", "u", "ban", tid),
-            _btn(signer, "⬇️ Remove Premium", "u", "rp", tid)
+            else _btn(signer, translate("panel.action.ban", locale), "u", "ban", tid),
+            _btn(signer, translate("panel.menu.u.remove_premium", locale), "u", "rp", tid)
             if snap.is_premium
-            else _btn(signer, "⭐ Upgrade Premium", "u", "up", tid),
-            _btn(signer, "👤 Remove Admin", "u", "rma", tid)
+            else _btn(signer, translate("panel.menu.u.upgrade_premium", locale), "u", "up", tid),
+            _btn(signer, translate("panel.menu.u.remove_admin", locale), "u", "rma", tid)
             if snap.role is UserRole.MODERATOR
-            else _btn(signer, "🛡 Make Admin", "u", "mka", tid),
+            else _btn(signer, translate("panel.menu.u.make_admin", locale), "u", "mka", tid),
         ]
         rows = _chunk(actions)
-    rows.append(nav_row(signer, back=("u", "ls")))
+    rows.append(nav_row(signer, locale, back=("u", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -301,33 +326,53 @@ def _w(
 
 
 def _wizard_controls(
-    signer: CallbackSigner, state: WizardState, step_id: str, *, can_save: bool = False
+    signer: CallbackSigner,
+    state: WizardState,
+    step_id: str,
+    locale: str,
+    *,
+    can_save: bool = False,
 ) -> list[list[InlineKeyboardButton]]:
     """Back/Next (or Save) + Cancel/Home, honouring the edit-from-preview hub."""
     rows: list[list[InlineKeyboardButton]] = []
     if state.return_to == "preview":  # reached via Edit ▸ — one button back to the hub
-        rows.append([_w(signer, "✅ Done", "go", step_index(STEP_PREVIEW))])
+        rows.append(
+            [_w(signer, translate("panel.wizard.done", locale), "go", step_index(STEP_PREVIEW))]
+        )
     else:
         advance: list[InlineKeyboardButton] = []
         nxt = prev_step(state.kind, step_id)
         if nxt is not None:
-            advance.append(_w(signer, "⬅️ Back", "go", step_index(nxt)))
+            advance.append(_w(signer, translate("common.back", locale), "go", step_index(nxt)))
         if can_save:
-            advance.append(_w(signer, "✅ Save", "sv"))
+            advance.append(_w(signer, translate("common.save", locale), "sv"))
         else:
             forward = next_step(state.kind, step_id)
             if forward is not None:
-                advance.append(_w(signer, "Next ▸", "go", step_index(forward)))
+                advance.append(
+                    _w(signer, translate("panel.wizard.next", locale), "go", step_index(forward))
+                )
         if advance:
             rows.append(advance)
-    rows.append([_w(signer, "❌ Cancel", "cx"), _btn(signer, "🏠 Home", "mn", "hm")])
+    rows.append(
+        [
+            _w(signer, translate("common.cancel", locale), "cx"),
+            _btn(signer, translate("common.home", locale), "mn", "hm"),
+        ]
+    )
     return rows
 
 
-def build_wizard_type(signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_type(signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
     rows = [
-        [_w(signer, "📢 Persistent Ad", "ty", 0), _w(signer, "📣 Broadcast", "ty", 1)],
-        [_w(signer, "❌ Cancel", "cx"), _btn(signer, "🏠 Home", "mn", "hm")],
+        [
+            _w(signer, translate("panel.wizard.persistent_ad", locale), "ty", 0),
+            _w(signer, translate("panel.wizard.broadcast_type", locale), "ty", 1),
+        ],
+        [
+            _w(signer, translate("common.cancel", locale), "cx"),
+            _btn(signer, translate("common.home", locale), "mn", "hm"),
+        ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -336,11 +381,17 @@ def _mark(active: bool) -> str:
     return "☑" if active else "☐"
 
 
-def build_wizard_audience(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_audience(
+    state: WizardState, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     from bot.panel.wizard import STEP_AUDIENCE
 
     rows: list[list[InlineKeyboardButton]] = []
-    modes = [("all", "All"), ("include", "Include"), ("exclude", "Exclude")]
+    modes = [
+        ("all", translate("panel.audience.mode.all", locale)),
+        ("include", translate("panel.audience.mode.include", locale)),
+        ("exclude", translate("panel.audience.mode.exclude", locale)),
+    ]
     rows.append(
         [
             _w(signer, f"{'•' if state.audience_mode == code else ' '} {label}", "am", idx)
@@ -350,9 +401,10 @@ def build_wizard_audience(state: WizardState, signer: CallbackSigner) -> InlineK
     taken = {(e, d, v) for e, d, v in state.rules}
     option_buttons: list[InlineKeyboardButton] = []
     for opt in AUDIENCE_OPTIONS:
+        opt_label = translate(opt.label_key, locale)
         if opt.value is None:  # typed sub-input: show how many such rules exist
             count = sum(1 for e, d, _v in state.rules if e == opt.effect and d == opt.dimension)
-            label = f"{opt.label}" + (f" ({count})" if count else "")
+            label = f"{opt_label}" + (f" ({count})" if count else "")
         else:
             # Mutual exclusivity: hide a target already chosen on the opposite side, so the
             # admin can never create an Include+Exclude conflict (Owner #1/#2/#3). It
@@ -361,33 +413,54 @@ def build_wizard_audience(state: WizardState, signer: CallbackSigner) -> InlineK
             if (opposite, opt.dimension, opt.value) in taken:
                 continue
             active = [opt.effect, opt.dimension, opt.value] in state.rules
-            label = f"{_mark(active)} {opt.label}"
+            label = f"{_mark(active)} {opt_label}"
         option_buttons.append(_w(signer, label, "atg", opt.index))
     rows.extend(_chunk(option_buttons))
-    rows.extend(_wizard_controls(signer, state, STEP_AUDIENCE))
+    rows.extend(_wizard_controls(signer, state, STEP_AUDIENCE, locale))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wizard_placement(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_placement(
+    state: WizardState, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     from bot.panel.wizard import STEP_PLACEMENT
 
     buttons = [
-        _w(signer, f"{_mark(opt.code in state.placements)} {opt.label}", "ptg", opt.index)
+        _w(
+            signer,
+            f"{_mark(opt.code in state.placements)} {translate(opt.label_key, locale)}",
+            "ptg",
+            opt.index,
+        )
         for opt in PLACEMENT_OPTIONS
     ]
     rows = _chunk(buttons)
-    rows.extend(_wizard_controls(signer, state, STEP_PLACEMENT))
+    rows.extend(_wizard_controls(signer, state, STEP_PLACEMENT, locale))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wizard_settings(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_settings(
+    state: WizardState, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     from bot.panel.wizard import STEP_SETTINGS
 
     rows: list[list[InlineKeyboardButton]] = [
-        [_w(signer, f"{_mark(state.enabled)} Enabled", "en")],
+        [
+            _w(
+                signer,
+                f"{_mark(state.enabled)} {translate('panel.wizard.enabled_toggle', locale)}",
+                "en",
+            )
+        ],
         [
             _w(signer, "➖", "pr", None, state.priority - 1),  # noqa: RUF001
-            _w(signer, f"Priority: {state.priority}", "pr", None, state.priority),
+            _w(
+                signer,
+                translate("panel.wizard.priority_label", locale, priority=state.priority),
+                "pr",
+                None,
+                state.priority,
+            ),
             _w(signer, "➕", "pr", None, state.priority + 1),  # noqa: RUF001
         ],
     ]
@@ -396,29 +469,52 @@ def build_wizard_settings(state: WizardState, signer: CallbackSigner) -> InlineK
         rows.append(
             [
                 _w(signer, "➖", "fr", None, max(1, freq - 1)),  # noqa: RUF001
-                _w(signer, f"Every: {freq}", "fr", None, freq),
+                _w(
+                    signer,
+                    translate("panel.wizard.frequency_label", locale, frequency=freq),
+                    "fr",
+                    None,
+                    freq,
+                ),
                 _w(signer, "➕", "fr", None, freq + 1),  # noqa: RUF001
             ]
         )
-    rows.append([_w(signer, "✏️ Internal name", "in"), _w(signer, "📝 Notes", "no")])
-    rows.extend(_wizard_controls(signer, state, STEP_SETTINGS))
+    rows.append(
+        [
+            _w(signer, translate("panel.wizard.internal_name", locale), "in"),
+            _w(signer, translate("panel.wizard.notes", locale), "no"),
+        ]
+    )
+    rows.extend(_wizard_controls(signer, state, STEP_SETTINGS, locale))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wizard_content(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_content(
+    state: WizardState, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     from bot.panel.wizard import STEP_CONTENT
 
-    rows: list[list[InlineKeyboardButton]] = [[_w(signer, "📩 Send content", "ct")]]
+    rows: list[list[InlineKeyboardButton]] = [
+        [_w(signer, translate("panel.wizard.send_content", locale), "ct")]
+    ]
     if state.content_mode is not None:
-        button_row = [_w(signer, "➕ Add button", "ba")]  # noqa: RUF001
+        button_row = [_w(signer, translate("panel.wizard.add_button", locale), "ba")]
         if state.buttons:
-            button_row.append(_w(signer, f"🗑 Clear buttons ({len(state.buttons)})", "bc"))
+            button_row.append(
+                _w(
+                    signer,
+                    translate("panel.wizard.clear_buttons", locale, count=len(state.buttons)),
+                    "bc",
+                )
+            )
         rows.append(button_row)
-    rows.extend(_wizard_controls(signer, state, STEP_CONTENT))
+    rows.extend(_wizard_controls(signer, state, STEP_CONTENT, locale))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wizard_preview(state: WizardState, signer: CallbackSigner) -> InlineKeyboardMarkup:
+def build_wizard_preview(
+    state: WizardState, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
     """Preview = the edit hub: jump to any section, then return here (Owner #10)."""
     from bot.panel.wizard import (
         STEP_AUDIENCE,
@@ -428,19 +524,44 @@ def build_wizard_preview(state: WizardState, signer: CallbackSigner) -> InlineKe
         has_step,
     )
 
-    edits = [_w(signer, "✏️ Audience", "ed", step_index(STEP_AUDIENCE))]
+    edits = [
+        _w(signer, translate("panel.wizard.edit_audience", locale), "ed", step_index(STEP_AUDIENCE))
+    ]
     if has_step(state.kind, STEP_PLACEMENT):
-        edits.append(_w(signer, "✏️ Placement", "ed", step_index(STEP_PLACEMENT)))
-    edits.append(_w(signer, "✏️ Settings", "ed", step_index(STEP_SETTINGS)))
-    edits.append(_w(signer, "✏️ Content", "ed", step_index(STEP_CONTENT)))
+        edits.append(
+            _w(
+                signer,
+                translate("panel.wizard.edit_placement", locale),
+                "ed",
+                step_index(STEP_PLACEMENT),
+            )
+        )
+    edits.append(
+        _w(signer, translate("panel.wizard.edit_settings", locale), "ed", step_index(STEP_SETTINGS))
+    )
+    edits.append(
+        _w(signer, translate("panel.wizard.edit_content", locale), "ed", step_index(STEP_CONTENT))
+    )
     rows = _chunk(edits)
-    rows.append([_w(signer, "✅ Save", "sv"), _w(signer, "❌ Cancel", "cx")])
-    rows.append([_btn(signer, "🏠 Home", "mn", "hm")])
+    rows.append(
+        [
+            _w(signer, translate("common.save", locale), "sv"),
+            _w(signer, translate("common.cancel", locale), "cx"),
+        ]
+    )
+    rows.append([_btn(signer, translate("common.home", locale), "mn", "hm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_wizard_input_prompt(signer: CallbackSigner, *, back_step: int) -> InlineKeyboardMarkup:
+def build_wizard_input_prompt(
+    signer: CallbackSigner, locale: str, *, back_step: int
+) -> InlineKeyboardMarkup:
     """Cancel/Back row shown while the wizard waits for typed input or content."""
     return InlineKeyboardMarkup(
-        inline_keyboard=[[_w(signer, "⬅️ Back", "go", back_step), _w(signer, "❌ Cancel", "cx")]]
+        inline_keyboard=[
+            [
+                _w(signer, translate("common.back", locale), "go", back_step),
+                _w(signer, translate("common.cancel", locale), "cx"),
+            ]
+        ]
     )

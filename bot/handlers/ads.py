@@ -1,4 +1,4 @@
-"""Ad handlers (MASTER_PLAN Sprint 9, Tasks 9.2 + 9.4).
+"""Ad handlers (MASTER_PLAN Sprint 9, Tasks 9.2 + 9.4; Sprint 11.5 i18n).
 
 Two surfaces share this router:
 
@@ -14,7 +14,9 @@ Two surfaces share this router:
   handler hands the user the link).
 
 Per-request services arrive as aiogram workflow data (``ad_service_factory``,
-``callback_signer``).
+``callback_signer``). Chrome (usage hints, confirmations, errors) is localized; ad
+titles/content and broadcast bodies are user/owner-authored content and are never
+translated (Sprint 11.5 requirement #3).
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.filters.role_filter import RoleFilter
+from core.i18n import Translator
 from core.logging import get_logger
 from core.timeparse import parse_iso_datetime
 from domain.entities.user import UserSnapshot
@@ -86,15 +89,6 @@ async def show_placement_ad(service: AdService, user: UserSnapshot, placement: s
 
 
 _FIELD_RE = re.compile(r"^([a-z_]+)=(.*)$")
-_CREATE_USAGE = (
-    "Usage: <code>/ad_create title=... type=text text=...</code>\n"
-    "Fields: title, type (text/photo/video/animation/document/audio/album), text, "
-    "file_id, button_text, button_url, target (user/premium/none), every, priority, "
-    "placement, delivery (fields/copy), audience (all/include/exclude), parse_mode.\n"
-    "For media ads, attach the media or reply to it. For a rich copy-mode ad, set "
-    "<code>delivery=copy</code> and reply to the stored message.\n"
-    "More buttons: <code>/ad_button_add</code>. Targeting: <code>/ad_audience</code>."
-)
 
 
 # --- /ad_create -----------------------------------------------------------
@@ -105,10 +99,12 @@ async def handle_ad_create(
     session: AsyncSession,
     user: UserSnapshot,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     fields = _parse_fields(command.args)
     if not fields:
-        await message.answer(_CREATE_USAGE)
+        await message.answer(translate("ads.create.usage", locale))
         return
     storage_chat_id, storage_message_id = _reply_storage(message)
     try:
@@ -120,9 +116,9 @@ async def handle_ad_create(
             storage_message_id=storage_message_id,
         )
     except InvalidAdError as exc:
-        await message.answer(f"Cannot create ad: {escape(str(exc))}")
+        await message.answer(translate("ads.create.failed", locale, error=escape(str(exc))))
         return
-    await message.answer(f"✅ Created ad #{ad.id} — <b>{escape(ad.title)}</b>.")
+    await message.answer(translate("ads.create.success", locale, id=ad.id, title=escape(ad.title)))
 
 
 # --- /ad_list -------------------------------------------------------------
@@ -131,13 +127,15 @@ async def handle_ad_list(
     message: Message,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ads = await ad_service_factory(session).list_ads()
     if not ads:
-        await message.answer("No ads configured yet. Create one with <code>/ad_create</code>.")
+        await message.answer(translate("ads.list.empty", locale))
         return
-    lines = ["📣 <b>Advertisements</b>"]
-    lines += [_format_ad_row(ad) for ad in ads]
+    lines = [translate("ads.list.header", locale)]
+    lines += [_format_ad_row(ad, translate, locale) for ad in ads]
     await message.answer("\n".join(lines))
 
 
@@ -148,10 +146,12 @@ async def handle_ad_edit(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, rest = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_edit &lt;id&gt; field=value ...</code>")
+        await message.answer(translate("ads.edit.usage", locale))
         return
     fields = _parse_fields(rest)
     try:
@@ -159,12 +159,12 @@ async def handle_ad_edit(
             ad_id, fields, media_file_id=_attached_media_file_id(message)
         )
     except InvalidAdError as exc:
-        await message.answer(f"Cannot edit ad: {escape(str(exc))}")
+        await message.answer(translate("ads.edit.failed", locale, error=escape(str(exc))))
         return
     if ad is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
-    await message.answer(f"✅ Updated ad #{ad_id}.")
+    await message.answer(translate("ads.edit.success", locale, id=ad_id))
 
 
 # --- /ad_toggle -----------------------------------------------------------
@@ -174,18 +174,20 @@ async def handle_ad_toggle(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, _ = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_toggle &lt;id&gt;</code>")
+        await message.answer(translate("ads.toggle.usage", locale))
         return
     result = await ad_service_factory(session).toggle(ad_id)
     if result is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
     _, active = result
-    state = "enabled ✅" if active else "disabled ⏸"
-    await message.answer(f"Ad #{ad_id} {state}.")
+    state = translate("ads.state_enabled" if active else "ads.state_disabled", locale)
+    await message.answer(translate("ads.toggle.result", locale, id=ad_id, state=state))
 
 
 # --- /ad_delete -----------------------------------------------------------
@@ -195,16 +197,18 @@ async def handle_ad_delete(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, _ = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_delete &lt;id&gt;</code>")
+        await message.answer(translate("ads.delete.usage", locale))
         return
     deleted = await ad_service_factory(session).delete(ad_id)
     if not deleted:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
-    await message.answer(f"🗑 Deleted ad #{ad_id}.")
+    await message.answer(translate("ads.delete.success", locale, id=ad_id))
 
 
 # --- /ad_stats ------------------------------------------------------------
@@ -214,17 +218,19 @@ async def handle_ad_stats(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     service = ad_service_factory(session)
     ad_id, _ = _split_id(command.args)
     if ad_id is not None:
         ad = await service.get(ad_id)
         if ad is None:
-            await message.answer(f"No ad with id <code>{ad_id}</code>.")
+            await message.answer(translate("ads.not_found", locale, id=ad_id))
             return
-        await message.answer(_format_ad_stats(ad))
+        await message.answer(_format_ad_stats(ad, translate, locale))
         return
-    await message.answer(_format_overall_stats(await service.overall_stats()))
+    await message.answer(_format_overall_stats(await service.overall_stats(), translate, locale))
 
 
 # --- /ad_global -----------------------------------------------------------
@@ -235,14 +241,16 @@ async def handle_ad_global(
     session: AsyncSession,
     user: UserSnapshot,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     enabled = _parse_on_off(command.args)
     if enabled is None:
-        await message.answer("Usage: <code>/ad_global &lt;on|off&gt;</code>")
+        await message.answer(translate("ads.global.usage", locale))
         return
     await ad_service_factory(session).set_global(enabled, updated_by=user.id)
-    state = "ON ✅" if enabled else "OFF ⏸"
-    await message.answer(f"📣 Ads master switch is now <b>{state}</b>.")
+    state = translate("ads.state_on" if enabled else "ads.state_off", locale)
+    await message.answer(translate("ads.global.result", locale, state=state))
 
 
 # --- /ad_enable + /ad_disable (Task 9.5.8) --------------------------------
@@ -252,8 +260,10 @@ async def handle_ad_enable(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
-    await _set_active(message, command, ad_service_factory(session), active=True)
+    await _set_active(message, command, ad_service_factory(session), translate, locale, active=True)
 
 
 @router.message(Command("ad_disable"), OwnerFilter)
@@ -262,23 +272,34 @@ async def handle_ad_disable(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
-    await _set_active(message, command, ad_service_factory(session), active=False)
+    await _set_active(
+        message, command, ad_service_factory(session), translate, locale, active=False
+    )
 
 
 async def _set_active(
-    message: Message, command: CommandObject, service: AdService, *, active: bool
+    message: Message,
+    command: CommandObject,
+    service: AdService,
+    translate: Translator,
+    locale: str,
+    *,
+    active: bool,
 ) -> None:
     ad_id, _ = _split_id(command.args)
     if ad_id is None:
         verb = "ad_enable" if active else "ad_disable"
-        await message.answer(f"Usage: <code>/{verb} &lt;id&gt;</code>")
+        await message.answer(translate("ads.enable_disable.usage", locale, verb=verb))
         return
     ad = await service.set_active(ad_id, active)
     if ad is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
-    await message.answer(f"Ad #{ad_id} {'enabled ✅' if active else 'disabled ⏸'}.")
+    state = translate("ads.state_enabled" if active else "ads.state_disabled", locale)
+    await message.answer(translate("ads.set_active.result", locale, id=ad_id, state=state))
 
 
 # --- /ad_preview (Task 9.5.2) ---------------------------------------------
@@ -288,14 +309,16 @@ async def handle_ad_preview(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, _ = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_preview &lt;id&gt;</code>")
+        await message.answer(translate("ads.preview.usage", locale))
         return
     shown = await ad_service_factory(session).preview(ad_id, message.chat.id)
     if not shown:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
 
 
 # --- /ad_button_add + /ad_button_clear (Task 9.5.2) -----------------------
@@ -305,23 +328,23 @@ async def handle_ad_button_add(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, rest = _split_id(command.args)
     text, url, row = _parse_button_spec(rest)
     if ad_id is None or text is None or url is None:
-        await message.answer(
-            "Usage: <code>/ad_button_add &lt;id&gt; &lt;text&gt; | &lt;url&gt; [| row]</code>"
-        )
+        await message.answer(translate("ads.button_add.usage", locale))
         return
     try:
         button = await ad_service_factory(session).add_button(ad_id, text=text, url=url, row=row)
     except InvalidAdError as exc:
-        await message.answer(f"Cannot add button: {escape(str(exc))}")
+        await message.answer(translate("ads.button_add.failed", locale, error=escape(str(exc))))
         return
     if button is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
-    await message.answer(f"✅ Added button to ad #{ad_id}.")
+    await message.answer(translate("ads.button_add.success", locale, id=ad_id))
 
 
 @router.message(Command("ad_button_clear"), OwnerFilter)
@@ -330,13 +353,15 @@ async def handle_ad_button_clear(
     command: CommandObject,
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, _ = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_button_clear &lt;id&gt;</code>")
+        await message.answer(translate("ads.button_clear.usage", locale))
         return
     removed = await ad_service_factory(session).clear_buttons(ad_id)
-    await message.answer(f"🗑 Removed {removed} button(s) from ad #{ad_id}.")
+    await message.answer(translate("ads.button_clear.success", locale, count=removed, id=ad_id))
 
 
 # --- /ad_audience (Task 9.5.5) --------------------------------------------
@@ -347,30 +372,29 @@ async def handle_ad_audience(
     session: AsyncSession,
     ad_service_factory: AdServiceFactory,
     audience_service_factory: AudienceServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, rest = _split_id(command.args)
     if ad_id is None:
-        await message.answer(
-            "Usage: <code>/ad_audience &lt;id&gt; &lt;all|include|exclude&gt; "
-            "[!]dim:value …</code>\nDims: role, plan, lang, user, segment. "
-            "Prefix <code>!</code> = exclude rule. Example: "
-            "<code>/ad_audience 5 include plan:premium lang:ar</code>"
-        )
+        await message.answer(translate("ads.audience.usage", locale))
         return
     try:
-        mode, rules = _parse_audience_args(rest)
+        mode, rules = _parse_audience_args(rest, translate, locale)
     except ValueError as exc:
-        await message.answer(f"Invalid audience: {escape(str(exc))}")
+        await message.answer(translate("ads.audience.invalid", locale, error=str(exc)))
         return
     ad_service = ad_service_factory(session)
     if await ad_service.edit(ad_id, {"audience": mode}) is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
     audience = audience_service_factory(session)
     await audience.clear_rules(ad_id)
     for effect, dimension, value in rules:
         await audience.add_rule(ad_id, effect=effect, dimension=dimension, value=value)
-    await message.answer(f"🎯 Ad #{ad_id} audience set to <b>{mode}</b> with {len(rules)} rule(s).")
+    await message.answer(
+        translate("ads.audience.success", locale, id=ad_id, mode=mode, count=len(rules))
+    )
 
 
 # --- /ad_broadcast (Task 9.5.7) -------------------------------------------
@@ -382,13 +406,15 @@ async def handle_ad_broadcast(
     user: UserSnapshot,
     ad_service_factory: AdServiceFactory,
     broadcast_service_factory: BroadcastServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     ad_id, rest = _split_id(command.args)
     if ad_id is None:
-        await message.answer("Usage: <code>/ad_broadcast &lt;id&gt; [--lang xx] [--role xx]</code>")
+        await message.answer(translate("ads.broadcast.usage", locale))
         return
     if await ad_service_factory(session).get(ad_id) is None:
-        await message.answer(f"No ad with id <code>{ad_id}</code>.")
+        await message.answer(translate("ads.not_found", locale, id=ad_id))
         return
     language, role, at_raw = _parse_target_flags(rest)
     scheduled_at = None
@@ -396,10 +422,7 @@ async def handle_ad_broadcast(
         try:
             scheduled_at = parse_iso_datetime(at_raw)
         except ValueError:
-            await message.answer(
-                "Invalid <code>--at</code> time. Use ISO-8601, e.g. "
-                "<code>--at 2026-07-01T12:00:00Z</code>."
-            )
+            await message.answer(translate("admin.broadcast.invalid_at", locale))
             return
     try:
         broadcast = await broadcast_service_factory(session).create_from_ad(
@@ -410,13 +433,24 @@ async def handle_ad_broadcast(
             scheduled_at=scheduled_at,
         )
     except InvalidBroadcastError as exc:
-        await message.answer(f"Cannot broadcast: {escape(str(exc))}")
+        await message.answer(translate("admin.broadcast.failed", locale, error=escape(str(exc))))
         return
-    target = _describe_target(language, role)
-    when = f" — scheduled {scheduled_at:%Y-%m-%d %H:%M} UTC" if scheduled_at else ""
+    target = _describe_target(language, role, translate, locale)
+    when = (
+        translate("admin.broadcast.scheduled_suffix", locale, when=f"{scheduled_at:%Y-%m-%d %H:%M}")
+        if scheduled_at
+        else ""
+    )
     await message.answer(
-        f"📢 Ad #{ad_id} broadcast #{broadcast.id} queued to "
-        f"<b>{broadcast.expected_total}</b> users{target}{when}."
+        translate(
+            "ads.broadcast.queued",
+            locale,
+            id=ad_id,
+            broadcast_id=broadcast.id,
+            count=broadcast.expected_total,
+            target=target,
+            when=when,
+        )
     )
 
 
@@ -428,17 +462,19 @@ async def handle_ad_segment_create(
     session: AsyncSession,
     user: UserSnapshot,
     audience_service_factory: AudienceServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     name, description = _parse_name_and_rest(command.args)
     if not name:
-        await message.answer("Usage: <code>/ad_segment_create &lt;name&gt; [description]</code>")
+        await message.answer(translate("ads.segment.create.usage", locale))
         return
     audience = audience_service_factory(session)
     if await audience.find_segment(name) is not None:
-        await message.answer(f"A segment named <code>{escape(name)}</code> already exists.")
+        await message.answer(translate("ads.segment.exists", locale, name=escape(name)))
         return
     segment = await audience.create_segment(name=name, description=description, created_by=user.id)
-    await message.answer(f"✅ Created segment #{segment.id} <b>{escape(name)}</b>.")
+    await message.answer(translate("ads.segment.created", locale, id=segment.id, name=escape(name)))
 
 
 @router.message(Command("ad_segment_add"), OwnerFilter)
@@ -448,9 +484,17 @@ async def handle_ad_segment_add(
     session: AsyncSession,
     audience_service_factory: AudienceServiceFactory,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     await _segment_membership(
-        message, command, audience_service_factory(session), user_service_factory(session), add=True
+        message,
+        command,
+        audience_service_factory(session),
+        user_service_factory(session),
+        translate,
+        locale,
+        add=True,
     )
 
 
@@ -461,12 +505,16 @@ async def handle_ad_segment_remove(
     session: AsyncSession,
     audience_service_factory: AudienceServiceFactory,
     user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     await _segment_membership(
         message,
         command,
         audience_service_factory(session),
         user_service_factory(session),
+        translate,
+        locale,
         add=False,
     )
 
@@ -476,16 +524,20 @@ async def handle_ad_segment_list(
     message: Message,
     session: AsyncSession,
     audience_service_factory: AudienceServiceFactory,
+    translate: Translator,
+    locale: str,
 ) -> None:
     audience = audience_service_factory(session)
     segments = await audience.list_segments()
     if not segments:
-        await message.answer("No segments yet. Create one with <code>/ad_segment_create</code>.")
+        await message.answer(translate("ads.segment.list.empty", locale))
         return
-    lines = ["👥 <b>Audience segments</b>"]
+    lines = [translate("ads.segment.list.header", locale)]
     for seg in segments:
         count = await audience.count_members(seg.id)
-        lines.append(f"<b>#{seg.id}</b> {escape(seg.name)} · {count} member(s)")
+        lines.append(
+            translate("ads.segment.list.row", locale, id=seg.id, name=escape(seg.name), count=count)
+        )
     await message.answer("\n".join(lines))
 
 
@@ -494,28 +546,34 @@ async def _segment_membership(
     command: CommandObject,
     audience: AudienceService,
     users: UserService,
+    translate: Translator,
+    locale: str,
     *,
     add: bool,
 ) -> None:
     name, telegram_id = _parse_name_and_id(command.args)
     if name is None or telegram_id is None:
         verb = "ad_segment_add" if add else "ad_segment_remove"
-        await message.answer(f"Usage: <code>/{verb} &lt;segment&gt; &lt;telegram_id&gt;</code>")
+        await message.answer(translate("ads.segment.membership.usage", locale, verb=verb))
         return
     segment = await audience.find_segment(name)
     if segment is None:
-        await message.answer(f"No segment named <code>{escape(name)}</code>.")
+        await message.answer(translate("ads.segment.not_found", locale, name=escape(name)))
         return
     snap = await users.find(telegram_id)
     if snap is None:
-        await message.answer(f"No user with telegram id <code>{telegram_id}</code>.")
+        await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
     if add:
         await audience.add_member(segment_id=segment.id, user_row_id=snap.id)
-        await message.answer(f"✅ Added <code>{telegram_id}</code> to <b>{escape(name)}</b>.")
+        await message.answer(
+            translate("ads.segment.added", locale, id=telegram_id, name=escape(name))
+        )
     else:
         await audience.remove_member(segment_id=segment.id, user_row_id=snap.id)
-        await message.answer(f"Removed <code>{telegram_id}</code> from <b>{escape(name)}</b>.")
+        await message.answer(
+            translate("ads.segment.removed", locale, id=telegram_id, name=escape(name))
+        )
 
 
 # --- ad-click callback (Task 9.4, flow 16.7 W6) ---------------------------
@@ -526,6 +584,8 @@ async def handle_ad_click(
     user: UserSnapshot,
     ad_service_factory: AdServiceFactory,
     callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "a" or parsed.arg is None:
@@ -536,7 +596,7 @@ async def handle_ad_click(
         parsed.arg, parsed.button_id, user_row_id=user.id
     )
     if url and isinstance(callback.message, Message):
-        await callback.message.answer(f'🔗 <a href="{escape(url)}">Open the link</a>')
+        await callback.message.answer(translate("ads.click.open_link", locale, url=escape(url)))
 
 
 # --- parsing helpers ------------------------------------------------------
@@ -598,7 +658,9 @@ def _parse_button_spec(raw: str | None) -> tuple[str | None, str | None, int]:
     return parts[0], parts[1], row
 
 
-def _parse_audience_args(raw: str | None) -> tuple[str, list[tuple[str, str, str]]]:
+def _parse_audience_args(
+    raw: str | None, translate: Translator, locale: str
+) -> tuple[str, list[tuple[str, str, str]]]:
     """Parse ``<mode> [!]dim:value …`` → (audience_mode, [(effect, dimension, value)]).
 
     A ``!`` prefix marks an exclude rule; otherwise the rule is an include rule. Raises
@@ -606,10 +668,11 @@ def _parse_audience_args(raw: str | None) -> tuple[str, list[tuple[str, str, str
     """
     tokens = (raw or "").split()
     if not tokens:
-        raise ValueError("provide a mode (all/include/exclude).")
+        raise ValueError(translate("ads.audience.error_need_mode", locale))
     mode = tokens[0].lower()
     if mode not in (m.value for m in AudienceMode):
-        raise ValueError(f"mode must be one of: {', '.join(m.value for m in AudienceMode)}.")
+        modes = ", ".join(m.value for m in AudienceMode)
+        raise ValueError(translate("ads.audience.error_bad_mode", locale, modes=modes))
     rules: list[tuple[str, str, str]] = []
     for token in tokens[1:]:
         effect = AudienceEffect.INCLUDE.value
@@ -618,13 +681,13 @@ def _parse_audience_args(raw: str | None) -> tuple[str, list[tuple[str, str, str
             effect = AudienceEffect.EXCLUDE.value
             body = body[1:]
         if ":" not in body:
-            raise ValueError(f"rule {token!r} must be dim:value.")
+            raise ValueError(translate("ads.audience.error_bad_rule", locale, rule=token))
         dim_raw, value = body.split(":", 1)
         dimension = _DIMENSION_ALIASES.get(dim_raw.lower())
         if dimension is None:
-            raise ValueError(f"unknown dimension {dim_raw!r}.")
+            raise ValueError(translate("ads.audience.error_bad_dimension", locale, dim=dim_raw))
         if not value:
-            raise ValueError(f"rule {token!r} needs a value.")
+            raise ValueError(translate("ads.audience.error_need_value", locale, rule=token))
         rules.append((effect, dimension, value))
     return mode, rules
 
@@ -672,12 +735,14 @@ def _parse_name_and_rest(raw: str | None) -> tuple[str | None, str | None]:
     return name, rest
 
 
-def _describe_target(language: str | None, role: str | None) -> str:
+def _describe_target(
+    language: str | None, role: str | None, translate: Translator, locale: str
+) -> str:
     parts = []
     if role is not None:
-        parts.append(f"role={role}")
+        parts.append(translate("admin.broadcast.target_role_part", locale, role=role))
     if language is not None:
-        parts.append(f"lang={language}")
+        parts.append(translate("admin.broadcast.target_lang_part", locale, language=language))
     return f" ({', '.join(parts)})" if parts else ""
 
 
@@ -707,32 +772,45 @@ def _attached_media_file_id(message: Message) -> str | None:
 
 
 # --- formatting helpers ---------------------------------------------------
-def _format_ad_row(ad: Any) -> str:
+def _format_ad_row(ad: Any, translate: Translator, locale: str) -> str:
     state = "✅" if ad.is_active else "⏸"
-    target = ad.target_role or "all"
-    return (
-        f"{state} <b>#{ad.id}</b> {escape(ad.title)} "
-        f"[{ad.type}] p{ad.priority} every {ad.show_every_n_downloads} · "
-        f"target={target} · 👁 {ad.impressions} · 🖱 {ad.clicks}"
+    target = ad.target_role or translate("panel.ads.target_all", locale)
+    return translate(
+        "ads.row.format",
+        locale,
+        state=state,
+        id=ad.id,
+        title=escape(ad.title),
+        type=ad.type,
+        priority=ad.priority,
+        frequency=ad.show_every_n_downloads,
+        target=target,
+        impressions=ad.impressions,
+        clicks=ad.clicks,
     )
 
 
-def _format_ad_stats(ad: Any) -> str:
-    return (
-        f"📊 <b>Ad #{ad.id}</b> — {escape(ad.title)}\n"
-        f"Impressions: <b>{ad.impressions}</b>\n"
-        f"Clicks: <b>{ad.clicks}</b>\n"
-        f"CTR: <b>{_ctr(ad.impressions, ad.clicks)}</b>"
+def _format_ad_stats(ad: Any, translate: Translator, locale: str) -> str:
+    return translate(
+        "ads.stats.row",
+        locale,
+        id=ad.id,
+        title=escape(ad.title),
+        impressions=ad.impressions,
+        clicks=ad.clicks,
+        ctr=_ctr(ad.impressions, ad.clicks),
     )
 
 
-def _format_overall_stats(stats: AdStats) -> str:
-    return (
-        "📊 <b>Ad totals</b>\n"
-        f"Ads: <b>{stats.total_ads}</b> ({stats.active_ads} active)\n"
-        f"Impressions: <b>{stats.impressions}</b>\n"
-        f"Clicks: <b>{stats.clicks}</b>\n"
-        f"CTR: <b>{_ctr(stats.impressions, stats.clicks)}</b>"
+def _format_overall_stats(stats: AdStats, translate: Translator, locale: str) -> str:
+    return translate(
+        "ads.stats.overall",
+        locale,
+        total=stats.total_ads,
+        active=stats.active_ads,
+        impressions=stats.impressions,
+        clicks=stats.clicks,
+        ctr=_ctr(stats.impressions, stats.clicks),
     )
 
 

@@ -275,7 +275,7 @@ Build a production-grade Telegram SaaS download platform capable of scaling from
 | Capability | Reserved For |
 |---|---|
 | Premium subscription enforcement | V2 |
-| Multi-language interface | V2 |
+| Multi-language interface | ~~V2~~ **Shipped in V1, Sprint 11.5** (D-061–D-063) — see §23 Sprint 11.5. |
 | Multiple links in one request | V2 |
 | Web dashboard | V3 |
 | Payment integration (Stripe, YooKassa, crypto, Telegram Stars) | V4 |
@@ -319,7 +319,7 @@ The version sequence is defined by the project brief and is binding on architect
 | Version | Theme | Headline Features |
 |---|---|---|
 | **V1** | Production foundation | Core download flow, queue, cache, history, admin panel, statistics, broadcasts, error tracking, monitoring. |
-| **V2** | Monetization base + global reach | Premium subscription tier (priority queue, larger limits, ad-free), multi-language UI, multiple links per single request. |
+| **V2** | Monetization base + global reach | Premium subscription tier (priority queue, larger limits, ad-free), ~~multi-language UI~~ (shipped early — see below), multiple links per single request. |
 | **V3** | Operator UX | Full web dashboard (admin and analytics) over the FastAPI layer. |
 | **V4** | Revenue | Payment integration: Stripe (international), YooKassa (RU/CIS), crypto (TON/USDT), Telegram Stars. |
 | **V5** | Growth | Referral system with codes, bonuses, tracking. |
@@ -327,6 +327,8 @@ The version sequence is defined by the project brief and is binding on architect
 | **Post-V6** | TBD | Group support, advanced analytics, possibly federation. |
 
 Each version is a separate release. No version may begin until the previous version's sprints are accepted by the Owner.
+
+**V2 footnote (2026-07-01):** the multi-language UI line item shipped ahead of schedule, in V1 Sprint 11.5, at the Owner's explicit direction (English + Arabic, unlimited future languages via catalog files — D-061–D-063). V2 may still add further languages or a self-serve translation workflow; the localization *architecture* itself is not V2 scope any more.
 
 The Owner reserves the right to publish a dedicated Version Roadmap document at any time. When that document arrives, this section is updated to reference it, and the new document takes precedence over this section. Architecture decisions made before the new roadmap arrives must hold up against it; if they do not, they are revisited per Section 1.11.
 
@@ -433,6 +435,10 @@ Every non-obvious decision is recorded here with date, rationale, and (if applic
 | D-052 | 2026-06-25 | **(Task 9.5.9)** The `ad_events` per-event analytics table (impressions/clicks, monthly RANGE-partitioned like `error_logs`) is written **off the delivery hot path** by an injected `AdEventRecorderProtocol`. The port's `record_impression`/`record_click` are **synchronous, non-blocking** (they schedule a background write and return), so an `ad_events` INSERT never adds latency to ad delivery; the `advertisements`/`ad_buttons` counters stay the source of truth (D-045). The concrete `AdEventRecorder` (infrastructure) is a process singleton owning its **own** session factory — it writes on a fresh session in a fire-and-forget `asyncio` task, swallowing+logging failures (analytics is best-effort). `ad_events` is created by migration `202606250001` (`down_revision=202606240001`) with **no FKs** (cheap writes; a deleted ad's rows age out with their partition). It is added to `RUNTIME_PARTITIONED_TABLES` (not the baseline-migration `PARTITIONED_TABLES`, which must stay frozen) so the cleanup worker keeps its partitions rolling; it has no retention settings key, so partitions are not auto-dropped (acceptable for V1 analytics; a key can be added later). | "Must not slow delivery": a synchronous same-session INSERT per impression would be a hot-path change (D-045 forbids it). A sync-signature port + fire-and-forget adapter enforces non-blocking at the type level and keeps the recorder out of the request session's unit of work. No FKs avoids write contention with ad CRUD. The frozen baseline `PARTITIONED_TABLES` keeps the already-merged `202606230001` migration correct on fresh databases. | Same-session synchronous INSERT (slows delivery, hot-path change); a Redis-buffered queue + a new drain worker (more infrastructure for a scaffold); FK to `advertisements` (write contention + blocks ad delete); adding `ad_events` to `PARTITIONED_TABLES` (breaks the baseline migration's seed on a fresh DB). |
 | D-060 | 2026-06-27 | **(Sprint 11, Task 11.1)** Add `DEPLOY_ENV` (`development`/`test`/`production`, default `development`) and `PROD_BOT_TOKEN_FINGERPRINT` (SHA-256 hex of the production bot token) to the LOCKED §13.2 set. A self-enforcing `Settings` model-validator (`_enforce_environment_safety`) runs an **extensible registry** of environment safety rules (`core/environment.py::ENVIRONMENT_SAFETY_RULES`); the first rule refuses to boot when `DEPLOY_ENV=test` and `sha256(BOT_TOKEN)==PROD_BOT_TOKEN_FINGERPRINT`, realizing D-032's isolation guarantee. Violations raise `EnvironmentMisconfiguredError` (a non-`ValueError` so it propagates out of `Settings()` unchanged). `token_fingerprint` lives in `core/security.py`. | D-032 mandated `DEPLOY_ENV=test` + a production-fingerprint boot assertion but neither key was ever added to §13.2. A one-way hash lets a test deployment detect the production token without storing a secret (Hard Rule 6). The registry (not a hardcoded check) lets future isolation rules — test must not use a production DB/Redis/storage/webhook — drop in without changing the startup architecture (Owner directive). The model-validator makes the guard self-enforcing across all current and future entry points. | Comparing raw tokens (stores a secret); comparing bot-id prefixes only (weaker); an explicit call in each `main()` (forgettable); a single hardcoded fingerprint check (not extensible). |
 | D-051 | 2026-06-25 | **(Task 8.3)** The deferred `/v1/admin/*` HTTP API is implemented on the existing Sprint-10 FastAPI process, gated by a new `ADMIN_API_KEY` env var **added to the LOCKED §13.2 set** — resolving the conflict where §20.3 named the key but §13.2 omitted it (Owner-approved 2026-06-25). All 11 §20.2 endpoints are exposed. The key travels in the `X-API-Key` header (constant-time compare). When the key is **unset** the admin router is not mounted (paths 404 — "silently ignored", mirroring the bot's owner-only-commands behavior); when set, a missing/wrong key → 401. With a single shared key there is no per-request HTTP identity in V1, so §20.2's "(owner only)" markers collapse to "valid-key-only" (the key is the owner's; JWT identity is V3). Routes carry no business logic: they delegate to `UserService` (stats/users/ban/unban), `SettingsService` (settings list/update), `QueueService` (queue summary), and a new lightweight `AdminService` (jobs listing + error-log browse — the two reads no existing service owned). `AdminService` depends on narrow read protocols (`JobReadRepository`/`ErrorReadRepository`), so it avoids the heavy `JobService` transport deps; new repo reads `JobRepository.list_recent` + `ErrorLogRepository.list_recent`. `api/routes/admin.py` imports services/domain/core only (import-linter clean); the composition root `api/main.py` wires the concretes. | The Owner approved the env var + the full surface (the three §13.2-vs-§20.3 reconciliation questions). Reusing the Sprint-10 api process avoids a second HTTP server; delegating to existing services keeps the routes thin and honors "no business logic in handlers" (§1.5.1). `AdminService` is justified by the two reads with no owner; narrow protocols avoid a new abstraction's blast radius. 404-when-disabled keeps the surface invisible until configured. | A whole new admin process (duplicate HTTP stack); putting jobs/error queries in `JobService` (drags in file-sender/notifier deps); adding the read methods to the broad shared repo protocols (forces every fake to implement them); enforcing per-role HTTP auth in V1 (no identity model until V3 JWT). |
+| D-061 | 2026-07-01 | **(Sprint 11.5)** Multi-language UI is pulled forward from V2 into V1 at explicit Owner direction. The user's UI locale reuses the existing `users.language` column (BCP-47, D-022) exclusively; `user_preferences.preferred_language` (EP-3) stays reserved/unused. `AuthMiddleware` no longer seeds `users.language` from Telegram's auto-detected `language_code` — a new user's row is created with a new `Settings.default_locale` (env `DEFAULT_LOCALE`, default `"en"`) instead, and the field is thereafter only ever written by an explicit in-bot language pick (`UserService.set_language`). `DEFAULT_LOCALE` is a deploy-time rendering knob, the same category as the existing `BOT_PARSE_MODE` — not a per-user runtime tunable — so it lives in `core/config.py`/§13.2, not the `settings` table. No migration: `users.language` already exists and is nullable. | Telegram's auto-detected `language_code` is not restricted to the languages this bot actually catalogs, so treating it as a trustworthy UI locale would silently mis-set the field for most non-English clients. `user_preferences.preferred_language` was reserved for "V2 i18n" under a design that assumed a `user_preferences`-based settings model; the simpler path the Owner approved reuses a column that already existed and was already read by ad audience targeting (`dimension='language'`), so no schema change was needed at all. | Seeding from `tg_user.language_code` (untrustworthy); using `user_preferences.preferred_language` per the original EP-3 sketch (would need a preferences-row-on-first-write dance for a value needed on literally every update); a hardcoded `"en"` literal instead of an env var (fails the "no hardcoded default" requirement). |
+| D-062 | 2026-07-01 | **(Sprint 11.5)** Supported languages are **discovered from `core/locales/*.json` at startup** (`core/i18n.py::configure`), never stored in the `settings` table — adding a language is "drop in one file with `_meta.enabled: true`," no DB/code change. Every catalog carries a standardized `_meta` block (`code`/`native_name`/`direction` ∈ `{ltr, rtl}`/`enabled`/`version`); `_` is reserved for metadata only, and any other underscore-prefixed top-level key fails validation. The configured default locale (`DEFAULT_LOCALE`, D-061) is the **reference catalog**: every other discovered locale's keys must be a subset of the default's (an orphaned/typo'd key fails startup, naming the offending key), while the default itself must contain every key the codebase uses. `translate(key, locale, **kwargs)` falls back non-default → default → the raw key string on a miss (each fallback logged), and catches a bad `.format()` placeholder rather than raising (Hard Rule 10) — no caller-facing crash path exists. Flat, dot-named keys (`"errors.file_too_large"`) in plain JSON, loaded via `pathlib`/`json`, no new Python dependency. | Filesystem discovery (rather than a `settings`-table list) means the Owner's explicit ask — "adding a language is only a translation file" — is literally true, with zero coupling to a DB write. The default-locale-as-reference-catalog invariant catches a typo'd key in a non-default catalog at deploy time instead of a silent runtime fallback discovered by a user report. Flat JSON over gettext/Babel/`.po` files matches D-023's precedent (no new dependency where a stdlib-only solution suffices) and keeps lookup a single dict access. | Storing the supported-language list in `settings` (couples a filesystem asset to a DB row, needs a migration to seed); nested/namespaced JSON objects (lookup requires a path-walk, no benefit over flat keys); gettext/Babel (new dependency, `.po`/`.mo` tooling this project doesn't otherwise need); silently ignoring orphaned keys (masks a typo until a user hits it in the non-default locale). |
+| D-063 | 2026-07-01 | **(Sprint 11.5)** Language is changed via a **permanent button only** — no first-contact picker gate (a new user starts in `DEFAULT_LOCALE` immediately) and no `/language` command (two rounds of Owner simplification superseding the original plan). Regular users get a "🌐 Change Language" inline button attached to the `/start` screen (this bot has no persistent reply-keyboard menu; this is the closest existing equivalent — flagged as an interpretation call); Owner/Moderator get a new "🌐 Language" section in the existing admin-panel `SECTIONS` registry. Both entry points render the same picker and share one pick-persistence path (`UserService.set_language` + a new signed callback action `l`, parsed by `bot/callbacks/factory.py::CallbackSigner`); an empty-string sentinel payload means "open the picker," a real code means "apply this pick." A pick takes effect immediately (confirmation renders in the newly-picked locale, not the pre-pick one) with no restart, and `LocaleMiddleware` (new; runs after `AuthMiddleware`, before `ThrottleMiddleware`) re-resolves `data["locale"]` fresh on every update — a stored locale that becomes disabled silently falls back to the default and **recovers automatically**, with no data migration, the moment the locale is re-enabled. Because one in-flight download can have several waiters (`job_waiters`) with different languages, `DownloadService._notify_waiters`/`JobService._try_deliver_cached` each resolve the **recipient's own** locale fresh per delivery rather than reusing one "job locale." This realizes EP-3 and EP-11 (both reserved for V2) ahead of schedule — though EP-3's literal `user_preferences.preferred_language` column is still untouched (D-061); the mechanism took the simpler `users.language` path instead, so EP-3 is superseded rather than literally implemented. | Owner directive, delivered in two explicit simplification passes during this sprint's design review: first replacing a first-contact gate with an always-English default, then dropping the `/language` command in favor of a button-only surface. Sharing one signed action + one apply path across both entry points avoids duplicating the picker or the persistence logic. Per-recipient fan-out locale resolution is required correctness, not an enhancement — a job's waiters are not guaranteed to share a language. | A first-run forced picker (rejected — Owner #1/#2); a `/language` command (initially approved, then explicitly dropped — Owner simplification #2); writing a fallback locale back to `users.language` on read (would prevent automatic recovery when a locale is re-enabled); reusing one job-level locale for every waiter in a fan-out (wrong whenever waiters differ in language). |
+| D-064 | 2026-07-01 | **(Sprint 11.5)** `UserFacingError` gains a `translation_key` property (`f"errors.{self.error_type.value}"`) instead of a generic `params: dict[str, Any]` on `AppError`. Every `ErrorType` member maps 1:1 to a catalog key; the one `except UserFacingError` catch site (`bot/handlers/download.py`) calls `translate(exc.translation_key, locale)` with no dynamic interpolation. | Traced every `UserFacingError` raise site before deciding: none of the four subclasses reachable from that catch site (`PermissionDeniedError`, `MaintenanceModeError`, `DailyLimitExceededError`, `CooldownActiveError`) ever needed a dynamic value in their user-facing message. Adding a `params` dict "for future use" with no current caller would be dead code the moment it shipped (Hard Rule 1.5.6 — no unused future-proofing). | A generic `params: dict[str, Any] | None` on `AppError` (would ship unused); a `to_translation_kwargs()` method per subclass (same problem, more surface). |
 
 ---
 
@@ -716,7 +722,7 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Dependencies:** `URLAnalyzerService`, `JobService`, `HistoryService`, `NotificationService`, keyboards.
 - **Files/Folders:** `bot/handlers/download.py`, `bot/keyboards/format_select.py`, `bot/keyboards/quality_select.py`, `bot/callbacks/factory.py`
 - **Related Services:** All download-related services.
-- **Can Modify:** Telegram-facing copy (subject to i18n in V2), keyboard layouts.
+- **Can Modify:** Catalog copy in `core/locales/*.json` (Sprint 11.5 — never a hardcoded string in the handler itself), keyboard layouts.
 - **Must Never Modify:** Business rules; database access; Telegram file uploads (those are in `infrastructure/telegram/file_sender.py`).
 
 #### Component: `HistoryHandlers`
@@ -753,7 +759,16 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Files/Folders:** `bot/middlewares/auth.py`
 - **Related Services:** `UserService`, `CacheService` indirectly.
 - **Can Modify:** Cache hit/miss telemetry.
-- **Must Never Modify:** Ban message text outside i18n; the user-resolution rules.
+- **Must Never Modify:** Ban message text as a hardcoded literal (must go through `core.i18n.translate`, Sprint 11.5); the user-resolution rules; must seed a new user's `users.language` from `Settings.default_locale`, never from Telegram's auto-detected `language_code` (D-061).
+
+#### Component: `LocaleMiddleware` (Sprint 11.5)
+- **Purpose:** Resolve the effective UI locale for the current update and inject it into handler context.
+- **Responsibilities:** Read `data["user"].language` (populated upstream by `AuthMiddleware`) and call `core.i18n.resolve_locale()`, injecting the result as `data["locale"]`. Recomputed fresh on every update — never caches or writes back to the DB, so a since-disabled locale automatically recovers the moment it is re-enabled (D-063).
+- **Dependencies:** `core/i18n.py`.
+- **Files/Folders:** `bot/middlewares/i18n.py`
+- **Related Services:** None directly; every handler downstream consumes `data["locale"]`.
+- **Can Modify:** Nothing configurable here by design.
+- **Must Never Modify:** Must run after `AuthMiddleware` (needs `data["user"]`) and before `ThrottleMiddleware` (its own message needs a resolved locale); must never write to `users.language`.
 
 #### Component: `ThrottleMiddleware`
 - **Purpose:** Enforce per-user message rate limits.
@@ -849,12 +864,12 @@ If a component is not listed here, it does not exist yet. Adding a component req
 
 #### Component: `NotificationService`
 - **Purpose:** Send user-facing messages tied to jobs (progress, completion, failure).
-- **Responsibilities:** Localized messages (V1: single language; i18n hooks reserved for V2); routing via the Telegram client.
-- **Dependencies:** `domain/protocols/file_sender.py` for files; raw Telegram message API via an injected `MessageSender` protocol.
+- **Responsibilities:** Localized messages — every send method takes a required `locale: str` and routes copy through `core.i18n.translate` (Sprint 11.5; en/ar shipped, extensible to more); routing via the Telegram client.
+- **Dependencies:** `domain/protocols/file_sender.py` for files; raw Telegram message API via an injected `MessageSender` protocol; `core/i18n.py`.
 - **Files/Folders:** `services/notification_service.py`
 - **Related Services:** `DownloadService`, `JobService`.
-- **Can Modify:** Message templates (subject to i18n in V2).
-- **Must Never Modify:** Notification delivery transport.
+- **Can Modify:** Catalog copy in `core/locales/*.json`.
+- **Must Never Modify:** Notification delivery transport; must resolve each fan-out recipient's own locale rather than reusing one job-level locale (D-063).
 
 #### Component: `AdService`
 - **Purpose:** Decide whether to show an ad after a download; pick the ad; record the impression.
@@ -1057,6 +1072,15 @@ If a component is not listed here, it does not exist yet. Adding a component req
 - **Can Modify:** Add new primitives; tune timeout/debounce constants.
 - **Must Never Modify:** Priority band base scores without a Section 12.2 update; the secret-key list without a Section 14.3 update. No enums here — those live in `domain/enums/`.
 
+#### Component: `I18n` (Sprint 11.5)
+- **Purpose:** Load, validate, and look up localized UI strings for every discovered locale.
+- **Responsibilities:** Discover `core/locales/*.json` at `configure()` time (called once from each composition root); validate every catalog's `_meta` block and enforce the default-locale-is-reference-catalog invariant (D-062); expose `translate(key, locale, **kwargs)` (never raises — falls back and logs on any miss); expose `resolve_locale(stored)` (read-only, never writes back to the DB) and `list_enabled_locales()` for the picker keyboard.
+- **Dependencies:** `core/logging.py` only (framework-free, no `Settings` import — mirrors `core/logging.py`'s explicit `configure()` pattern).
+- **Files/Folders:** `core/i18n.py`, `core/locales/*.json`
+- **Related Services:** Every handler/keyboard/service that renders user-facing text; `LocaleMiddleware`.
+- **Can Modify:** Add catalog keys; add a new locale file.
+- **Must Never Modify:** The `_meta` contract (D-062); the default-locale-as-reference-catalog invariant; must never raise out of `translate()` (Hard Rule 10).
+
 ---
 
 ## 10. Locked Database Schema
@@ -1088,7 +1112,7 @@ If a component is not listed here, it does not exist yet. Adding a component req
 | `telegram_id` | BIGINT | NOT NULL, UNIQUE | — | External identity. |
 | `username` | VARCHAR(255) | NULLABLE | NULL | |
 | `first_name` | VARCHAR(255) | NULLABLE | NULL | |
-| `language` | VARCHAR(10) | NULLABLE | NULL | BCP-47 (D-022). |
+| `language` | VARCHAR(10) | NULLABLE | NULL | BCP-47 (D-022). **The user's UI locale (Sprint 11.5, D-061)** — set to `Settings.default_locale` at creation, thereafter only by an explicit in-bot language pick. Also read by ad audience targeting (`dimension='language'`). |
 | `role` | VARCHAR(20) | NOT NULL | `'user'` | `owner` / `moderator` / `user`. |
 | `is_premium` | BOOLEAN | NOT NULL | `false` | |
 | `premium_expires_at` | TIMESTAMPTZ | NULLABLE | NULL | D-001. |
@@ -1104,7 +1128,7 @@ If a component is not listed here, it does not exist yet. Adding a component req
 
 **Indexes:** `users_pkey(id)`, `uq_users_telegram_id(telegram_id)`, `ix_users_role(role)`, `ix_users_is_premium(is_premium)`, `ix_users_is_banned(is_banned)`, `ix_users_last_activity(last_activity_at)`, `ix_users_created_at(created_at)`.
 
-**Reserved extension points:** `referred_by BIGINT NULL FK → users.id` (V5); `stripe_customer_id VARCHAR(255) NULL` (V4); `default_locale_override` already covered by `user_preferences.preferred_language` (V2).
+**Reserved extension points:** `referred_by BIGINT NULL FK → users.id` (V5); `stripe_customer_id VARCHAR(255) NULL` (V4). ~~`default_locale_override` already covered by `user_preferences.preferred_language` (V2)~~ — superseded: UI locale is `users.language` itself (D-061); `user_preferences.preferred_language` remains reserved/unused.
 
 ### 10.3 Table: `media_metadata`
 
@@ -1298,7 +1322,7 @@ On job completion, `DownloadService` reads all waiters for the job, inserts one 
 | `id` | BIGINT | PK, GENERATED ALWAYS AS IDENTITY | — | D-002. |
 | `user_id` | BIGINT | NOT NULL, UNIQUE, FK → `users.id` ON DELETE CASCADE | — | One-to-one. |
 | `notifications_enabled` | BOOLEAN | NOT NULL | `true` | D-024. |
-| `preferred_language` | VARCHAR(10) | NULLABLE | NULL | BCP-47. |
+| `preferred_language` | VARCHAR(10) | NULLABLE | NULL | BCP-47. **Reserved/unused** — the UI locale lives in `users.language` instead (Sprint 11.5, D-061). Left here for a possible future distinct purpose (e.g., a content-language preference separate from UI language), not touched by i18n. |
 | `created_at` | TIMESTAMPTZ | NOT NULL | `NOW()` | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | `NOW()` | |
 
@@ -1649,6 +1673,7 @@ Env vars are for things that must be available before the database (DB credentia
 | `API_BIND_PORT` | int | no | `8080` | |
 | `ADMIN_API_KEY` | str | no | — | Secret. Gates the `/v1/admin/*` HTTP surface (§20.2/§20.3). Empty → the admin router is **not mounted** (those paths 404); set → requests need the key in the `X-API-Key` header or get 401. Added 2026-06-25 (D-051), reconciling §20.3 (which named it) with §13.2 (which omitted it). |
 | `TELEGRAM_ALERTS_CHAT_ID` | int | no | — | Owner-monitored alert channel. |
+| `DEFAULT_LOCALE` | str | no | `en` | The reference-catalog locale (D-061/D-062) — must match an enabled `core/locales/*.json` `_meta.code`; startup fails otherwise. Same category as `BOT_PARSE_MODE` (a deploy-time rendering knob). Added 2026-07-01 (Sprint 11.5). |
 
 ### 13.3 Adding an env var
 
@@ -2045,14 +2070,14 @@ For each V1 architectural decision, this section states: (a) why it is right for
 | 2 | One PostgreSQL primary | Adequate for 20k DAU. Connection pool + PgBouncer. | V3: add read replica for dashboard reads. V4 onward: route reads. | ~50k writes/min sustained | Logical replication to a second primary in another region. |
 | 3 | Monthly RANGE partitioning of `downloads`, `jobs`, `error_logs` | Future-proof for 18M rows/year/table. Retention is a partition drop. | Same scheme through V6. | ~24 months without sub-partitioning | Sub-partition by `user_id` HASH if a tenant becomes hot. |
 | 4 | `users` row holds counters and ban fields | One-row hot-path read | V2: add `referral_count` column. V4: add `stripe_customer_id`. | Row still narrow at 30+ cols | Move analytic counters to a side table if updates collide. |
-| 5 | Settings as key/value with `value_type` | Simple, dynamic | V2 i18n config; V3 web edit. | ~1k keys (still fits in a single PG row scan) | Switch to JSONB document per category. |
+| 5 | Settings as key/value with `value_type` | Simple, dynamic | V3 web edit. (i18n did **not** end up using `settings` — Sprint 11.5 discovers locales from `core/locales/*.json` instead, D-062.) | ~1k keys (still fits in a single PG row scan) | Switch to JSONB document per category. |
 | 6 | `DownloaderRegistry` + `DownloaderProtocol` shipped in V1 even though V1 has one provider | Builds the abstraction before it is forced. ~200 LOC up front prevents a V6 refactor that would touch every service. | V6 only adds provider implementations; registry, failover, health, and settings already exist. Zero changes to services or handlers. | unchanged | None — already in place. |
 | 7 | Per-process composition root | Easy to reason about | V3 splits API into its own service; V4 may split payment webhook into a dedicated process | unchanged | Same pattern in new processes. |
 | 8 | Redis as cache + queue + locks (one cluster) | Operationally simple | V2 split logical DBs already done. V3+: separate Redis instances for queue vs. cache when workloads diverge. | ~20k qps per instance | Move queue to its own Redis. |
 | 9 | UUIDv7 for `jobs.id` | Time-ordered; non-enumerable | All later versions inherit | unchanged | n/a |
 | 10 | `target_role` enum on ads | Extends to V2 premium tier with zero schema change | unchanged | unchanged | Widen enum. |
 | 11 | API versioned under `/v1/` | Cheapest path to V2 dashboard | V3 introduces `/v2/` with breaking changes; old endpoints stay until deprecated | unchanged | Maintain two prefixes during deprecation window. |
-| 12 | i18n strings centralized but unused in V1 | Single canonical message catalog, English only | V2: load locale-specific catalog | unchanged | None. |
+| 12 | ~~i18n strings centralized but unused in V1~~ **Superseded (Sprint 11.5):** i18n shipped in V1 — en/ar catalogs, both live. | Single canonical message catalog **is the reference locale** (D-062); every other locale is validated as a subset of it at startup. | Additional locales: drop in one more `core/locales/*.json` file. | unchanged | None. |
 | 13 | `job_waiters` table | Durable fan-out from day one | V2 "multiple links per request" still uses fan-out at media-id level; one user → many `job_waiters` rows | unchanged | None. |
 | 14 | `engine_used` column reserved on `media_metadata` | V6 fallback | V6: write per-attempt rows in a future `download_attempts` log; engine tag travels | unchanged | Add the attempts log table. |
 | 15 | `correlation_id` propagated to DB rows | Tracing from message to job to error | All versions improve on this | unchanged | None. |
@@ -2065,7 +2090,7 @@ Each row is a place V1 leaves intentionally open for a future version. V1 must *
 |---|---|---|---|
 | EP-1 | `users.referred_by BIGINT NULL FK → users.id` (not yet added) | `users` | V5 Referrals. Migration adds the column + index. |
 | EP-2 | `users.stripe_customer_id VARCHAR(255) NULL` (not yet added) | `users` | V4 Stripe. |
-| EP-3 | `user_preferences.preferred_language` | `user_preferences` | V2 i18n. |
+| EP-3 | `user_preferences.preferred_language` | `user_preferences` | **Superseded, not consumed (Sprint 11.5).** i18n shipped in V1 via `users.language` instead (D-061); this column remains reserved/unused for a possible distinct future purpose. |
 | EP-4 | Settings `premium_*` keys seeded | `settings` | V2 reads. |
 | EP-5 | `target_role` on ads supports `'premium'` value | `advertisements` | V2 ad targeting. |
 | EP-6 | Priority `HIGH` band reserved | queue | V2 premium queue. |
@@ -2073,7 +2098,7 @@ Each row is a place V1 leaves intentionally open for a future version. V1 must *
 | EP-8 | Single FastAPI app with `/v1/` prefix | `api/` | V3 web dashboard; V4 payment webhooks. |
 | EP-9 | `worker_kind` column on `jobs` | `jobs` | V2 (broadcast workers), V6 (multi-engine). |
 | EP-10 | `job_waiters` table | new | V2 multi-link batched requests. |
-| EP-11 | i18n loader in `NotificationService` accepts a `locale` arg, even though V1 always passes `en` | `services/notification_service.py` | V2. |
+| EP-11 | ~~i18n loader in `NotificationService` accepts a `locale` arg, even though V1 always passes `en`~~ **Realized (Sprint 11.5).** `locale` is now a required param, resolved per-recipient (D-063), and every send routes through `core.i18n.translate`. | `services/notification_service.py` | Closed — further languages are additive catalog files, not code changes. |
 | EP-12 | `advertisements.button_url` | ads | V4/V5 promotional links. |
 | EP-13 | `value_type` on settings | settings | V3 web UI form generation. |
 | EP-14 | `jobs.correlation_id` | jobs | All versions; basis for V3 dashboard "see this job's whole story". |
@@ -3146,6 +3171,93 @@ Agent stops. Owner reviews all three report files. Approval required to begin Sp
 
 ---
 
+### Sprint 11.5 — Internationalization (i18n)
+
+> **Status: IMPLEMENTED (2026-07-01).** Tasks 11.5.1–11.5.12 are built, tested, and merged: English + Arabic catalogs are live, every handler/keyboard/service renders through `core.i18n.translate`, and the full regression suite (unit + security + e2e-scaffold + i18n-specific) passes with ruff/mypy --strict clean. Decisions D-061 through D-064. Pulled forward from V2 (§2.4) into V1 at explicit Owner direction, ahead of the remaining Sprint 12 launch-ops work. No database migration — see D-061/D-062.
+
+**Goal:** Every piece of bot UI copy — welcome/menus/buttons/progress/errors/notifications/help/admin panel — renders in the user's own language, with English and Arabic shipping now and any future language addable by dropping in one catalog file, with zero business-logic change.
+
+**Why it was pulled forward:** The Owner supplied a complete localization spec mid-Sprint-11, ahead of the originally-planned V2 slot (§2.4 previously locked "Multi-language interface" as out-of-scope for V1). Asked directly, the Owner chose to build it now rather than wait for V2. The design went through three rounds of Owner simplification during review — captured in full in D-061–D-064 — converging on: no first-contact gate (new users default to English immediately), no `/language` command (a permanent button only), and supported languages discovered from the filesystem rather than stored in the database.
+
+#### Scope
+
+1. **Core catalog loader** (`core/i18n.py`) — discovers, validates, and looks up locale catalogs; never raises out of `translate()`.
+2. **Two shipped locales** — `core/locales/en.json` (the reference/default catalog) and `core/locales/ar.json` (RTL), ~250+ keys each, covering every user-facing surface including the admin panel.
+3. **`users.language` as the single locale field** — no new column, no migration; reused from its existing BCP-47 definition (D-022).
+4. **A permanent, button-only language-change UX** — no gate, no slash command (D-063).
+5. **Full handler/keyboard/service migration** — every hardcoded English string, in both the regular-user surface and the entire admin panel (registry, keyboards, handlers, compose wizard), becomes a `translate(key, locale, **kwargs)` call.
+6. **RTL correctness** — every catalog value is a whole-sentence template with named placeholders; Telegram clients render bidi text natively, so there is no custom layout engine to build.
+
+#### Design goals (LOCKED for this sprint)
+
+- **No business logic ever depends on a specific language.** Language only ever selects which string is rendered.
+- **Adding a language is a content-only change** — one new `core/locales/<code>.json` file with a valid `_meta` block. No code change, no schema change, no settings-table entry (D-062).
+- **User-generated content is never translated** — ad bodies, broadcast bodies, video titles, platform names, filenames pass through untouched; only application chrome is localized.
+- **No hardcoded default-locale string anywhere in code** — sourced from `Settings.default_locale` / `DEFAULT_LOCALE` only (D-061).
+- **Every fallback path is logged, never crashes the caller** (Hard Rule 10) — a missing key, a missing locale, or a bad `.format()` placeholder all degrade gracefully.
+
+#### Tasks
+
+- **11.5.1** `core/i18n.py` (catalog discovery, `_meta` validation, default-locale-as-reference-catalog invariant, `translate`/`resolve_locale`/`list_enabled_locales`) + `core/locales/en.json` + `ar.json` + `Settings.default_locale` (`DEFAULT_LOCALE` env var, §13.2). D-061, D-062.
+- **11.5.2** `UserFacingError.translation_key` property on the domain exception hierarchy (D-064) — no generic `params` dict; traced every raise site first and added only what a real call site consumes.
+- **11.5.3** `UserService.set_language(telegram_id, language)`, mirroring the existing `ban`/`unban`/`set_premium` mutation pattern.
+- **11.5.4** `AuthMiddleware` seeds a new user's `users.language` from `Settings.default_locale` (never Telegram's auto-detected `language_code`); new `LocaleMiddleware` (`bot/middlewares/i18n.py`) resolves `data["locale"]` fresh on every update, positioned after `auth`, before `throttle`.
+- **11.5.5** Composition-root wiring: `dp["translate"] = core.i18n.translate` (static factory, once) in `bot/main.py`; both `bot/main.py` and `workers/main.py` call `i18n.configure(settings.default_locale)` at their own startup.
+- **11.5.6** `bot/keyboards/language_select.py` (picker keyboard) + a new signed callback action `l` (`CallbackSigner.pack_language`/`ParsedCallback.language`) + both entry points (the `/start` "🌐 Change Language" button for regular users; a new "🌐 Language" admin-panel section for Owner/Moderator) sharing one apply path in `bot/handlers/start.py`. D-063.
+- **11.5.7** `NotificationService` (`send_initial`/`notify_stage`/`notify_completed`/`notify_failed`) takes a required `locale`; `DownloadService._notify_waiters` and `JobService._try_deliver_cached` resolve each fan-out recipient's **own** locale fresh rather than reusing one job-level locale.
+- **11.5.8** Migrate the regular-user surface: `bot/handlers/{start,help,download,history}.py`, `bot/keyboards/{format_select,quality_select,history}.py`, `bot/middlewares/{throttle,auth}.py`.
+- **11.5.9** Migrate `bot/panel/registry.py` — all six registries (`Section`/`MenuItem`/`SettingField`/`InfoItem`/`AudienceOption`/`PlacementOption`) swap `label` → `label_key`; new `Section("l", "panel.section.language")` added.
+- **11.5.10** Migrate `bot/keyboards/admin_panel.py`'s own literals (every builder function, ~40+ labels including the compose-wizard screens).
+- **11.5.11** Migrate `bot/handlers/{admin,ads,admin_panel,admin_wizard}.py` — the full admin/ads command surface and the FSM compose wizard.
+- **11.5.12** New `tests/unit/test_i18n.py` (catalog validation, fallback behavior, real-catalog invariants including a regression test for the `translate(key, locale, **kwargs)`/`{key}`-placeholder collision found during this sprint); every existing test touched by a handler signature change updated; full suite + ruff + mypy --strict verified clean.
+
+#### Validation Checklist
+
+- [x] Every catalog (`en.json`, `ar.json`) loads cleanly; `_meta` validated; no orphaned keys vs. the default/reference catalog.
+- [x] A new user's `users.language` is `DEFAULT_LOCALE` immediately — no forced picker.
+- [x] "🌐 Change Language" is reachable from `/start` (regular users) and the admin panel (Owner/Moderator); both render the same picker.
+- [x] Picking a language updates `users.language` and the very next message renders in the new locale — no restart, no `/start` re-run required.
+- [x] A disabled (or removed) locale falls back to `DEFAULT_LOCALE` on read without ever overwriting the stored value; re-enabling it makes the original pick resolve correctly again with zero data migration.
+- [x] Ad bodies, broadcast bodies, video titles, platform names, and filenames are never translated.
+- [x] Every `ErrorType` and every `ProgressStage`-equivalent notification resolves to a real key in both catalogs (drift-checked by test).
+- [x] Fan-out to multiple waiters with different languages delivers each recipient's own locale correctly.
+- [x] Full regression suite green; ruff clean; mypy --strict clean on all touched production and test files.
+
+#### Exit Criteria
+
+1. Validation checklist passes.
+2. Both catalogs are complete (no missing keys reachable from any handler) and the en/ar key-parity test passes.
+3. A manual `translate()` sweep over every key in both locales succeeds with no `.format()` placeholder or encoding errors.
+
+#### Human Verification Required
+
+Live-bot walkthrough (parked for Sprint 11 Phase B, which needs the sandbox bot per §11.1 — not possible in this session): pick Arabic from `/start`, confirm the very next message is RTL and correctly formatted; pick a language from the admin panel as Owner and confirm only the panel chrome changes, never ad/broadcast content; confirm a fan-out (two users, two languages, one shared download) delivers each in their own language.
+
+#### Stop Point
+
+Agent stops after this sprint's tasks per the standard per-task DoD; the live-bot verification above is explicitly deferred to Sprint 11 Phase B, not a blocker for marking 11.5 code-complete.
+
+#### Risks
+
+| Risk | Mitigation |
+|---|---|
+| A future catalog edit introduces a typo'd key in a non-default locale. | Startup validation fails loudly, naming the offending key (D-062); a unit test asserts the same invariant against the real shipped catalogs. |
+| A handler interpolates an untrusted value (username, title) without escaping. | Unchanged existing convention — callers escape before calling `translate()`; `translate()` never auto-escapes. |
+| A new catalog key accidentally collides with a `translate()` parameter name (`key`, `locale`). | Found and fixed once already this sprint (`{key}` → `{setting_key}`); a permanent regression test scans every real catalog value for the reserved names. |
+| Fan-out delivers the wrong recipient's locale. | Locale is resolved fresh per-recipient at delivery time, not cached from a single job-level value (D-063). |
+
+#### Testing Requirements
+
+- Catalog discovery + `_meta` validation unit tests (malformed `code`/`direction`/`version`/stray-underscore-key all fail loudly).
+- Default-locale-as-reference-catalog invariant, asserted both as a fast unit test and as the real startup check.
+- Fallback-chain tests (missing key in non-default locale → default; missing from both → raw key; bad `.format()` placeholder → logged, not raised).
+- `resolve_locale` never-writes-back / auto-recovery test.
+- `ErrorType` / notification-stage key-drift tests against both catalogs.
+- Picker / `set_language` / default-from-config behavior tests for both entry points.
+- Regression: the entire pre-existing suite stays green with `locale`/`translate` fixtures added where a handler/service is now constructed directly in a test.
+
+---
+
 ### Sprint 12 — Launch Readiness
 
 **Goal:** Bot is ready for public traffic.
@@ -3412,7 +3524,7 @@ The harness (`tests/e2e/harness.py`) wraps the sandbox-bot client and a pool of 
 - Owner Telegram ID gets `role='owner'`.
 - Moderator promotion via owner-only command works.
 - Banned user receives only the ban message.
-- (V2) Language selection persists per `user_preferences.preferred_language`.
+- **(Sprint 11.5, shipped V1 — not V2)** New user defaults to `DEFAULT_LOCALE`; tapping "🌐 Change Language" (on `/start`, or the admin-panel Language section for staff) shows the picker; picking a language persists to `users.language` and the very next message renders in the new locale with no restart. Parked for Phase B (needs the sandbox bot, §11.1): the live-bot round-trip of this flow, plus a disabled-then-re-enabled-locale recovery check.
 
 #### 25.7.2 Download Flow
 - URL submission → format keyboard within 3 s p95.
@@ -3779,7 +3891,7 @@ These are unresolved at the time of writing. Each must be answered before the sp
 | OQ-7 | V2 roadmap document: when expected? | Pre-V2 |
 | OQ-8 | Approved list of supported platforms (URL allowlist)? | S5 |
 | OQ-9 | yt-dlp update cadence: monthly cron acceptable? | S5 |
-| OQ-10 | i18n keys for V1 (English only) — copy approved by whom? | S4 |
+| OQ-10 | ~~i18n keys for V1 (English only) — copy approved by whom?~~ **Resolved 2026-07-01 (Sprint 11.5).** English + Arabic, ~250+ keys; content specified directly by the Owner's own design session for this sprint (see D-061–D-064). | S4 |
 
 ## 28. Glossary
 
