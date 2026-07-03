@@ -2,7 +2,7 @@
 
 > **Document Status:** LIVE · Append-only security-validation SSOT
 > **Companion Documents:** `MASTER_PLAN.md` (Sections 14, 25.9, 25.13), `PROJECT_PROGRESS.md`, `TEST_RESULTS.md`
-> **Last Updated:** 2026-06-23
+> **Last Updated:** 2026-07-03
 >
 > Append a new entry on every security validation run, dependency advisory, incident, or mitigation. Never edit past entries.
 
@@ -24,12 +24,12 @@ Entries are append-only. A correction adds a new entry that references the prior
 
 | Category | Last Run | Last Result | Open Findings |
 |---|---|---|---|
-| Input Validation | 2026-06-27 | PASS (11) | 0 |
-| Authentication & Authorization | 2026-06-27 | PASS (9) | 0 |
-| Abuse Protection | 2026-06-27 | PASS (7) | 0 |
-| Data Security | 2026-06-27 | PASS (11) | 0 |
-| Dependency Security (`pip-audit`) | — (CI gate; not run locally this task) | — | 0 |
-| Dependency Security (`bandit`) | 2026-06-27 | clean (0) | 0 |
+| Input Validation | 2026-07-03 | PASS | 0 |
+| Authentication & Authorization | 2026-07-03 | PASS | 0 |
+| Abuse Protection | 2026-07-03 | PASS (incl. Abuse-profile sim: 0 successful downloads) | 0 |
+| Data Security | 2026-07-03 | PASS | 0 |
+| Dependency Security (`pip-audit`) | 2026-07-03 | 1 finding (F-2026-01, starlette) — **FIXED same day (D-065)**; clean post-bump | 0 |
+| Dependency Security (`bandit`) | 2026-07-03 | clean (0) | 0 |
 | Incidents (since launch) | — | — | 0 |
 
 This summary is the only mutable region. Update its rows after each new entry.
@@ -137,6 +137,25 @@ For after-launch security events.
 ---
 
 ## Standing Entries
+
+### 2026-07-03 — Security Validation Run — Owner-requested full re-run + dependency finding F-2026-01 (FIXED same day)
+
+| Field | Value |
+|---|---|
+| Git SHA | follows `f39ed4c`; worktree `happy-bose-71ed46` (this commit) |
+| Environment | local |
+| Sprint | post-11.5 / pre-Sprint-12-Phase-A-remainder (Owner-requested re-run) |
+| Triggered by | Owner: re-run Sprint 11 security checks against current code (incl. Sprint 11.5 i18n) |
+| Suites run | `tests/security/` all five §25.9 categories + isolation — **45 / 45 passed**; abuse simulation stub (`--level=L2 --profile=Abuse`): 9,050 attempts → **0 successful downloads**, 8,250 blocked (M-22 holds) |
+| pip-audit | **RUN LOCALLY — 1 finding (F-2026-01, below), remediated in this same commit; clean after bump** |
+| bandit | clean (0 findings, all app packages) |
+| Other gates after remediation | unit suite green; mypy --strict clean (164 app files); import-linter 7/7; ruff + format clean (drift in 2 files from 11.5 fixed in `f39ed4c`); `pip check` clean |
+
+**Findings raised this run**
+
+- **F-2026-01 — starlette 0.41.3: 7 known vulnerabilities.** Severity: **High at launch** (starlette is the request-parsing layer of the one internet-facing HTTP surface; prod compose publishes the api port) / **not yet exposed** (no production deploy has occurred). Advisories: PYSEC-2026-161, PYSEC-2026-248, PYSEC-2026-249, GHSA-2c2j-9gv5-cj73, GHSA-7f5h-v6xp-fcq8, GHSA-wqp7-x3pw-xc5r, GHSA-x746-7m8f-x49c. Two are fixed by starlette 0.47.2/0.49.1; full remediation requires **1.3.1**. **Status: FIXED** — `fastapi` 0.115.6 → 0.139.0, `starlette` pinned explicitly at 1.3.1 (new durable security floor in `pyproject.toml`), Owner-approved, decision **D-065**. `pip-audit` clean post-bump; all gates green. Root cause of late detection: pip-audit runs in CI, and the advisories postdate the 2026-06-27 run — recurring-task cadence (below) is the control that caught it here.
+
+---
 
 ### 2026-06-27 — Gate G-5 (Security configuration) — ✅ APPROVED by Owner
 

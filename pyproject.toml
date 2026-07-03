@@ -32,7 +32,12 @@ dependencies = [
     # Sprint 10 (Observability) — HTTP layer for /v1/health, /v1/ready, /v1/metrics
     # (MASTER_PLAN Section 6.1, EP-8, D-049) and the Prometheus metrics registry
     # (Section 15.3, D-050). Owner-approved 2026-06-25.
-    "fastapi==0.115.6",
+    "fastapi==0.139.0",
+    # starlette is fastapi's transitive dep, pinned explicitly as a security floor:
+    # 0.41.3 carried 7 known CVEs (PYSEC-2026-161/248/249, GHSA-2c2j-9gv5-cj73,
+    # GHSA-7f5h-v6xp-fcq8, GHSA-wqp7-x3pw-xc5r, GHSA-x746-7m8f-x49c), all fixed by 1.3.1.
+    # Owner-approved 2026-07-03 (D-065).
+    "starlette==1.3.1",
     "uvicorn==0.34.0",
     "prometheus-client==0.21.1",
 ]
