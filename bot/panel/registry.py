@@ -192,12 +192,8 @@ SETTING_FIELDS: tuple[SettingField, ...] = (
         1,
         600,
     ),
-    SettingField(
-        7, "history_page_size", "panel.settings.field.history_page_size", 1, 1, 50
-    ),
-    SettingField(
-        8, "broadcast_chunk_size", "panel.settings.field.broadcast_chunk_size", 5, 1, 100
-    ),
+    SettingField(7, "history_page_size", "panel.settings.field.history_page_size", 1, 1, 50),
+    SettingField(8, "broadcast_chunk_size", "panel.settings.field.broadcast_chunk_size", 5, 1, 100),
     SettingField(
         9, "ads_default_frequency", "panel.settings.field.ads_default_frequency", 1, 1, 100
     ),

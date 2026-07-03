@@ -166,9 +166,7 @@ def test_stepper_back_returns_to_settings_menu() -> None:
 # --- confirm + nav --------------------------------------------------------
 def test_confirm_has_confirm_and_cancel() -> None:
     signer = _signer()
-    markup = build_confirm(
-        signer, _LOCALE, confirm=("u", "banc", 7, None), cancel=("u", "inf", 7)
-    )
+    markup = build_confirm(signer, _LOCALE, confirm=("u", "banc", 7, None), cancel=("u", "inf", 7))
     by_action = {_parse(signer, b).action: _parse(signer, b) for b in _flat(markup)}
     assert by_action["banc"].arg == 7  # confirm carries the target id
     assert by_action["inf"].arg == 7  # cancel routes back to that user's detail
@@ -209,9 +207,7 @@ def test_user_list_rows_open_details() -> None:
 
 def test_user_detail_owner_sees_contextual_actions() -> None:
     signer = _signer()
-    markup = build_user_detail(
-        _snap(banned=True, premium=True), UserRole.OWNER, signer, _LOCALE
-    )
+    markup = build_user_detail(_snap(banned=True, premium=True), UserRole.OWNER, signer, _LOCALE)
     actions = {_parse(signer, b).action for b in _flat(markup)}
     assert "ubn" in actions  # banned -> offer Unban (not Ban)
     assert "rp" in actions  # premium -> offer Remove Premium
