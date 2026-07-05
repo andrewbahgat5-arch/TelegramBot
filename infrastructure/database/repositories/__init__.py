@@ -19,6 +19,7 @@ from infrastructure.database.repositories.error_log import ErrorLogRepository
 from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
+from infrastructure.database.repositories.message_template import MessageTemplateRepository
 from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
@@ -40,6 +41,7 @@ __all__ = [
     "JobRepository",
     "JobWaiterRepository",
     "MediaRepository",
+    "MessageTemplateRepository",
     "ReferralRepository",
     "SettingsRepository",
     "UserPreferenceRepository",

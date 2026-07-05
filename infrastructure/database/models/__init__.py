@@ -18,6 +18,7 @@ from infrastructure.database.models.error_log import ErrorLog
 from infrastructure.database.models.job import Job
 from infrastructure.database.models.job_waiter import JobWaiter
 from infrastructure.database.models.media_metadata import MediaMetadata
+from infrastructure.database.models.message_template import MessageTemplate
 from infrastructure.database.models.referral import Referral
 from infrastructure.database.models.setting import Setting
 from infrastructure.database.models.user import User
@@ -42,6 +43,7 @@ __all__ = [
     "Job",
     "JobWaiter",
     "MediaMetadata",
+    "MessageTemplate",
     "Referral",
     "Setting",
     "User",

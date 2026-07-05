@@ -62,11 +62,38 @@ class _State:
 
 _state: _State | None = None
 
+# Admin-editable message-template overrides (Sprint 13.8): ``(locale, key) -> template``.
+# Consulted by :func:`translate` before the on-disk catalog, so a custom template
+# transparently overrides the shipped default for the same key. Populated at startup
+# (and on every edit) by ``services.template_service.TemplateService`` — a read-heavy,
+# write-rare in-memory map, never a per-call DB query.
+_overrides: dict[tuple[str, str], str] = {}
+
+
+def set_template_overrides(overrides: dict[tuple[str, str], str]) -> None:
+    """Replace the custom message-template overrides (Sprint 13.8). Idempotent."""
+    _overrides.clear()
+    _overrides.update(overrides)
+
+
+def catalog_template(key: str, locale: str) -> str | None:
+    """The raw on-disk template for ``key`` (ignoring overrides), or None.
+
+    Used by the templates admin screen to preview the *shipped default* even when a
+    custom override is active. Falls back to the default locale like :func:`translate`.
+    """
+    state = _require_state()
+    template = state.catalogs.get(locale, {}).get(key)
+    if template is None:
+        template = state.catalogs[state.default_locale].get(key)
+    return template
+
 
 def configure(default_locale: str, *, locales_dir: Path | None = None) -> None:
     """Discover, parse, and validate every locale catalog. Call once at startup.
 
-    Idempotent — safe to call again (e.g. once per test) to reconfigure.
+    Idempotent — safe to call again (e.g. once per test) to reconfigure. Clears any
+    message-template overrides so a fresh catalog never carries stale custom text.
     """
     directory = locales_dir or _DEFAULT_LOCALES_DIR
     if not directory.is_dir():
@@ -93,6 +120,7 @@ def configure(default_locale: str, *, locales_dir: Path | None = None) -> None:
 
     global _state
     _state = _State(catalogs=catalogs, metas=metas, default_locale=default_locale)
+    _overrides.clear()
 
 
 def translate(key: str, locale: str, **kwargs: object) -> str:
@@ -100,7 +128,9 @@ def translate(key: str, locale: str, **kwargs: object) -> str:
     key itself. Every fallback is logged; a bad ``.format()`` placeholder is caught
     and logged rather than raised (no path here may crash the caller)."""
     state = _require_state()
-    template = state.catalogs.get(locale, {}).get(key)
+    template = _overrides.get((locale, key))
+    if template is None:
+        template = state.catalogs.get(locale, {}).get(key)
     if template is None:
         if locale != state.default_locale:
             _log.warning("i18n_key_fallback_to_default", key=key, locale=locale)
