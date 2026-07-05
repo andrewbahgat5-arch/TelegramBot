@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from collections.abc import Sequence
 
 from sqlalchemy import func, select
@@ -44,6 +45,28 @@ class DownloadRepository(SqlAlchemyRepository[Download]):
             select(Download).where(Download.id == download_id, Download.user_id == user_id)
         )
         return result.scalar_one_or_none()
+
+    async def count_by_platform(
+        self, *, since: datetime.datetime | None = None
+    ) -> list[tuple[str, int]]:
+        """``(platform, count)`` pairs, most downloads first (Sprint 13.3 analytics).
+
+        Optionally restricted to rows created at/after ``since`` (a period filter).
+        """
+        stmt = select(Download.platform, func.count()).select_from(Download)
+        if since is not None:
+            stmt = stmt.where(Download.created_at >= since)
+        stmt = stmt.group_by(Download.platform).order_by(func.count().desc())
+        result = await self.session.execute(stmt)
+        return [(str(platform), int(count)) for platform, count in result.all()]
+
+    async def total_count(self, *, since: datetime.datetime | None = None) -> int:
+        """Total download rows, optionally restricted to ``since`` (Sprint 13.3)."""
+        stmt = select(func.count()).select_from(Download)
+        if since is not None:
+            stmt = stmt.where(Download.created_at >= since)
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one())
 
     async def create_completed(
         self,

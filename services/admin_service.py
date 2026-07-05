@@ -44,9 +44,15 @@ class ErrorReadRepository(Protocol):
 
 
 class DownloadReadRepository(Protocol):
-    """The slice of the downloads repository the admin User Info view needs."""
+    """The slice of the downloads repository the admin reads (User Info + analytics)."""
 
     async def count_for_user(self, user_id: int) -> int: ...
+
+    async def count_by_platform(
+        self, *, since: datetime.datetime | None = None
+    ) -> list[tuple[str, int]]: ...
+
+    async def total_count(self, *, since: datetime.datetime | None = None) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +71,48 @@ class JobView:
     created_at: datetime.datetime
     started_at: datetime.datetime | None
     finished_at: datetime.datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformCount:
+    """One platform's download tally and its share of the period total (13.3)."""
+
+    platform: str
+    count: int
+    share_pct: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformStatsView:
+    """Per-platform download breakdown for one period, sorted by count DESC (13.3)."""
+
+    platforms: list[PlatformCount]
+    total: int
+    period: str
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformReportRow:
+    """One platform's counts across all periods for the CSV export (13.3)."""
+
+    platform: str
+    today: int
+    week: int
+    month: int
+    all_time: int
+    share_pct: float
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformReport:
+    """The multi-period per-platform report backing the CSV export (13.3)."""
+
+    rows: list[PlatformReportRow]
+    total_all_time: int
+
+
+# Period tokens accepted by get_platform_stats (SPRINT_13_PLAN §13.3).
+_VALID_PERIODS: frozenset[str] = frozenset({"today", "week", "month", "all"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +161,59 @@ class AdminService:
     async def count_user_active_jobs(self, user_id: int) -> int:
         """In-flight job count for one user (admin User Info, Sprint 9.6)."""
         return await self._jobs.count_active_for_user(user_id)
+
+    async def get_platform_stats(self, *, period: str = "all") -> PlatformStatsView:
+        """Per-platform download breakdown for a period (13.3).
+
+        ``period`` is ``today`` | ``week`` | ``month`` | ``all``; an unknown value is
+        treated as ``all`` (fail-open to the widest, non-destructive view).
+        """
+        if period not in _VALID_PERIODS:
+            period = "all"
+        pairs = await self._downloads.count_by_platform(since=_since_for_period(period))
+        total = sum(count for _, count in pairs)
+        platforms = [
+            PlatformCount(
+                platform=platform,
+                count=count,
+                share_pct=(count / total * 100.0) if total else 0.0,
+            )
+            for platform, count in pairs
+        ]
+        return PlatformStatsView(platforms=platforms, total=total, period=period)
+
+    async def get_platform_report(self) -> PlatformReport:
+        """Per-platform counts across today/week/month/all-time for CSV export (13.3)."""
+        by_period = {
+            name: dict(await self._downloads.count_by_platform(since=_since_for_period(name)))
+            for name in ("today", "week", "month", "all")
+        }
+        all_time = by_period["all"]
+        total = sum(all_time.values())
+        rows = [
+            PlatformReportRow(
+                platform=platform,
+                today=by_period["today"].get(platform, 0),
+                week=by_period["week"].get(platform, 0),
+                month=by_period["month"].get(platform, 0),
+                all_time=count,
+                share_pct=(count / total * 100.0) if total else 0.0,
+            )
+            for platform, count in sorted(all_time.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+        return PlatformReport(rows=rows, total_all_time=total)
+
+
+def _since_for_period(period: str) -> datetime.datetime | None:
+    """Map a period token to its inclusive lower bound (``None`` = all time)."""
+    now = datetime.datetime.now(datetime.UTC)
+    if period == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "week":
+        return now - datetime.timedelta(days=7)
+    if period == "month":
+        return now - datetime.timedelta(days=30)
+    return None
 
 
 def _job_view(row: Any) -> JobView:

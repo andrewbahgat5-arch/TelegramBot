@@ -52,11 +52,43 @@ class _FakeErrorRepo:
 
 
 class _FakeDownloadRepo:
-    def __init__(self, count: int = 0) -> None:
+    def __init__(
+        self,
+        count: int = 0,
+        *,
+        by_platform: dict[str | None, list[tuple[str, int]]] | None = None,
+    ) -> None:
         self.count = count
+        # Maps a period marker to its (platform, count) pairs. Keyed by a coarse
+        # marker ("today"/"week"/"month"/None) derived from the `since` argument.
+        self.by_platform = by_platform or {}
+        self.since_calls: list[datetime.datetime | None] = []
 
     async def count_for_user(self, user_id: int) -> int:
         return self.count
+
+    async def count_by_platform(
+        self, *, since: datetime.datetime | None = None
+    ) -> list[tuple[str, int]]:
+        self.since_calls.append(since)
+        marker = _period_marker(since)
+        return self.by_platform.get(marker, self.by_platform.get(None, []))
+
+    async def total_count(self, *, since: datetime.datetime | None = None) -> int:
+        return sum(c for _, c in await self.count_by_platform(since=since))
+
+
+def _period_marker(since: datetime.datetime | None) -> str | None:
+    """Classify a `since` bound the way get_platform_report's periods produce them."""
+    if since is None:
+        return None
+    now = datetime.datetime.now(datetime.UTC)
+    delta = now - since
+    if since.hour == 0 and since.minute == 0 and delta < datetime.timedelta(days=1, hours=1):
+        return "today"
+    if delta < datetime.timedelta(days=8):
+        return "week"
+    return "month"
 
 
 def _admin(
@@ -131,3 +163,54 @@ async def test_count_user_downloads_and_active_jobs() -> None:
     service = _admin(job_repo=_FakeJobRepo([], active=2), download_repo=_FakeDownloadRepo(count=37))
     assert await service.count_user_downloads(7) == 37
     assert await service.count_user_active_jobs(7) == 2
+
+
+async def test_get_platform_stats_computes_shares_sorted_desc() -> None:
+    repo = _FakeDownloadRepo(by_platform={None: [("tiktok", 451), ("instagram", 197), ("x", 2)]})
+    service = _admin(download_repo=repo)
+
+    view = await service.get_platform_stats(period="all")
+
+    assert view.total == 650
+    assert view.period == "all"
+    assert [p.platform for p in view.platforms] == ["tiktok", "instagram", "x"]
+    assert view.platforms[0].share_pct == pytest.approx(451 / 650 * 100)
+    assert repo.since_calls == [None]  # "all" => no lower bound
+
+
+async def test_get_platform_stats_empty_is_zero_total_no_div_by_zero() -> None:
+    view = await _admin(download_repo=_FakeDownloadRepo()).get_platform_stats(period="all")
+    assert view.total == 0
+    assert view.platforms == []
+
+
+async def test_get_platform_stats_unknown_period_falls_back_to_all() -> None:
+    repo = _FakeDownloadRepo(by_platform={None: [("tiktok", 5)]})
+    view = await _admin(download_repo=repo).get_platform_stats(period="decade")
+    assert view.period == "all"
+    assert view.total == 5
+
+
+async def test_get_platform_stats_today_applies_lower_bound() -> None:
+    repo = _FakeDownloadRepo(by_platform={"today": [("tiktok", 3)], None: [("tiktok", 99)]})
+    view = await _admin(download_repo=repo).get_platform_stats(period="today")
+    assert view.total == 3
+    assert repo.since_calls[0] is not None
+
+
+async def test_get_platform_report_merges_periods() -> None:
+    repo = _FakeDownloadRepo(
+        by_platform={
+            "today": [("tiktok", 3)],
+            "week": [("tiktok", 10), ("x", 1)],
+            "month": [("tiktok", 40), ("x", 5)],
+            None: [("tiktok", 100), ("x", 20)],
+        }
+    )
+    report = await _admin(download_repo=repo).get_platform_report()
+
+    assert report.total_all_time == 120
+    top = report.rows[0]
+    assert top.platform == "tiktok"
+    assert (top.today, top.week, top.month, top.all_time) == (3, 10, 40, 100)
+    assert top.share_pct == pytest.approx(100 / 120 * 100)
