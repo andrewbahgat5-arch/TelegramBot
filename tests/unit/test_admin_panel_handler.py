@@ -995,7 +995,7 @@ async def test_user_lookup_resolves_to_extended_detail() -> None:
     )
     state.clear.assert_awaited_once()
     text = bot.edit_message_text.await_args.args[0]
-    assert "User ID" in text and "555" in text and "History entries: 7" in text
+    assert "User Profile" in text and "555" in text and "7" in text  # id + history count
 
 
 async def test_user_lookup_non_numeric_keeps_state() -> None:

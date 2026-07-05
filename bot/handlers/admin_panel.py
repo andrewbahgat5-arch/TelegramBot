@@ -583,11 +583,13 @@ def _user_detail_text(
     translate: Translator,
     locale: str,
 ) -> str:
-    name = escape(snap.first_name) if snap.first_name else "—"
-    username = f"@{escape(snap.username)}" if snap.username else "—"
+    # Values are passed RAW: ui.card / ui.metric HTML-escape internally.
+    def lbl(name: str) -> str:
+        return translate(f"panel.users.detail.label.{name}", locale)
+
     if snap.is_banned:
         status = translate("panel.users.detail.banned_status", locale) + (
-            f" — {escape(snap.ban_reason)}" if snap.ban_reason else ""
+            f" — {snap.ban_reason}" if snap.ban_reason else ""
         )
     else:
         status = translate("panel.users.detail.active_status", locale)
@@ -599,30 +601,34 @@ def _user_detail_text(
         premium += translate(
             "panel.users.detail.premium_until", locale, date=f"{snap.premium_expires_at:%Y-%m-%d}"
         )
-    active_job = translate(
-        "panel.users.detail.active_job_yes"
-        if active_jobs > 0
-        else "panel.users.detail.active_job_none",
-        locale,
+    profile = ui.card(
+        translate("panel.users.detail.title", locale),
+        [
+            (lbl("name"), snap.first_name or "—"),
+            (lbl("username"), f"@{snap.username}" if snap.username else "—"),
+            (lbl("id"), str(snap.telegram_id)),
+            (lbl("role"), f"{ui.role_icon(snap.role.value)} {snap.role.value}"),
+            (lbl("status"), status),
+            (lbl("premium"), premium),
+            (lbl("language"), snap.language or "—"),
+        ],
+        icon=ui.role_icon(snap.role.value),
     )
-    return translate(
-        "panel.users.detail.body",
-        locale,
-        name=name,
-        id=snap.telegram_id,
-        username=username,
-        language=snap.language or "—",
-        role=snap.role.value,
-        status=status,
-        premium=premium,
-        joined=_fmt_dt(snap.created_at),
-        last_activity=_fmt_dt(snap.last_activity_at),
-        total_downloads=snap.total_downloads,
-        today=snap.daily_download_count,
-        limit=daily_limit,
-        history=history_count,
-        active_job=active_job,
+    activity = "\n".join(
+        [
+            ui.divider(),
+            "",
+            ui.metric(ui.emoji("download"), lbl("downloads"), snap.total_downloads),
+            ui.metric(
+                ui.emoji("new"), lbl("today"), f"{snap.daily_download_count} / {daily_limit}"
+            ),
+            ui.metric(ui.emoji("chart"), lbl("history"), history_count),
+            ui.metric(ui.emoji("queue"), lbl("active_job"), active_jobs),
+            ui.metric(ui.emoji("calendar"), lbl("joined"), _fmt_dt(snap.created_at)),
+            ui.metric(ui.emoji("clock"), lbl("last_seen"), _fmt_dt(snap.last_activity_at)),
+        ]
     )
+    return f"{profile}\n\n{activity}"
 
 
 def _fmt_dt(value: datetime.datetime | None) -> str:
