@@ -1790,7 +1790,16 @@ async def _errors_text(admin: AdminService, translate: Translator, locale: str) 
 
 async def _queue_text(queue: QueueService, translate: Translator, locale: str) -> str:
     depth, active = await queue.depth(), await queue.active_count()
-    return translate("panel.downloads.body", locale, depth=depth, active=active)
+    return "\n".join(
+        [
+            ui.header(translate("panel.downloads.title", locale), icon=ui.emoji("download")),
+            "",
+            ui.metric(ui.emoji("queue"), translate("panel.downloads.depth", locale), depth),
+            ui.metric(ui.emoji("active"), translate("panel.downloads.active", locale), active),
+            "",
+            ui.footer(),
+        ]
+    )
 
 
 async def _system_text(
@@ -1803,12 +1812,32 @@ async def _system_text(
     stats = await users.get_stats()
     depth, active = await queue.depth(), await queue.active_count()
     maintenance = await settings.get_view("maintenance_mode")
-    return translate(
-        "panel.system.body",
-        locale,
-        maintenance=escape(maintenance.value if maintenance else "—"),
-        users=stats.total_users,
-        downloads=stats.total_downloads,
-        depth=depth,
-        active=active,
+    on = maintenance is not None and maintenance.value.strip().lower() in ("true", "1", "yes", "on")
+    return "\n".join(
+        [
+            ui.header(translate("panel.system.title", locale), icon=ui.emoji("system")),
+            "",
+            ui.metric(
+                ui.status_dot(on),
+                translate("panel.system.maintenance", locale),
+                translate(f"panel.system.{'on' if on else 'off'}", locale),
+            ),
+            ui.metric(
+                ui.emoji("members"),
+                translate("panel.stats.label.members", locale),
+                stats.total_users,
+            ),
+            ui.metric(
+                ui.emoji("download"),
+                translate("panel.stats.label.downloads", locale),
+                stats.total_downloads,
+            ),
+            ui.metric(
+                ui.emoji("queue"),
+                translate("panel.stats.label.queue", locale),
+                f"{depth} / {active}",
+            ),
+            "",
+            ui.footer(),
+        ]
     )
