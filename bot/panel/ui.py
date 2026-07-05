@@ -46,27 +46,99 @@ _METRIC_VALUE_WIDTH = 6
 _SPARK_LABEL_WIDTH = 12
 _CARD_LABEL_WIDTH = 11
 
-# Semantic colour dots (SPRINT_13_PLAN §2.3). Unknown states fall back to ⚪.
-_BADGES = {
-    "active": "🟢",
-    "banned": "🔴",
-    "disabled": "🔴",
-    "pending": "🟡",
-    "warning": "🟡",
-    "inactive": "⚪",
-    "empty": "⚪",
+# --- Semantic emoji registry (animation-ready, Sprint 13) -----------------
+# Every icon the panel uses is named by a semantic code with a Unicode fallback.
+# Routing all icons through emoji(code) lets a single map — CUSTOM_EMOJI_IDS —
+# switch the whole panel to *animated* Telegram custom emoji the moment the bot
+# has a Fragment-purchased username and the custom_emoji_ids are known (custom
+# emoji entities are otherwise rejected by the Bot API). Until then every code
+# renders as its plain Unicode fallback, so nothing changes for a normal bot.
+_EMOJI: dict[str, str] = {
+    # dashboard / metrics
+    "members": "👥",
+    "new": "🆕",
+    "active": "⚡",
+    "fire": "🔥",
+    "sleep": "💤",
+    "download": "📥",
+    "queue": "⚡",
+    "clock": "⏱",
+    "calendar": "📅",
+    "chart": "📊",
+    # roles / status
     "premium": "⭐",
     "owner": "👑",
     "moderator": "🛡",
+    "user": "👤",
     "blocked": "🚫",
     "deleted": "💀",
+    # colour dots
+    "dot_green": "🟢",
+    "dot_red": "🔴",
+    "dot_yellow": "🟡",
+    "dot_white": "⚪",
+    "dot_blue": "🔵",
+    # section icons
+    "users": "👥",
+    "stats": "📊",
+    "broadcast": "📢",
+    "ads": "🎯",
+    "referral": "🔗",
+    "moderation": "🛡",
+    "settings": "⚙️",
+    "templates": "📝",
+    "system": "🖥",
+    "language": "🌐",
+    "history": "🗂",
+    "queue_section": "💾",
+    # action icons
+    "back": "⬅️",
+    "close": "❌",
+    "refresh": "🔄",
+    "export": "📤",
+    "import": "📥",
+    "edit": "✏️",
+    "trash": "🗑",
+    "check": "✅",
+    "cross": "❌",
+    "search": "🔍",
+    "gift": "🎁",
+    "trophy": "🏆",
+    "party": "🎉",
+    "hourglass": "⏳",
+    "doc": "📄",
+    "note": "📝",
+    "warn": "⚠️",
+    "link": "🔗",
+    "share": "📤",
+    "recycle": "♻️",
 }
 
-_ROLE_ICONS = {
-    "owner": "👑",
-    "moderator": "🛡",
-    "premium": "⭐",
-    "user": "👤",
+# code -> Telegram custom_emoji_id. EMPTY until the bot has a Fragment username
+# and the animated custom-emoji ids are known; fill this to switch on animation.
+CUSTOM_EMOJI_IDS: dict[str, str] = {}
+
+# Semantic state -> emoji code for badges (SPRINT_13_PLAN §2.3). Unknown → ⚪.
+_BADGE_CODES = {
+    "active": "dot_green",
+    "banned": "dot_red",
+    "disabled": "dot_red",
+    "pending": "dot_yellow",
+    "warning": "dot_yellow",
+    "inactive": "dot_white",
+    "empty": "dot_white",
+    "premium": "premium",
+    "owner": "owner",
+    "moderator": "moderator",
+    "blocked": "blocked",
+    "deleted": "deleted",
+}
+
+_ROLE_CODES = {
+    "owner": "owner",
+    "moderator": "moderator",
+    "premium": "premium",
+    "user": "user",
 }
 
 _NUMERIC_CELL = re.compile(r"^\d[\d,.%-]*$")  # digit-led: digits, comma, dot, %, minus
@@ -105,6 +177,21 @@ def _fmt_value(value: int | str) -> str:
 
 
 # --- Public primitives -----------------------------------------------------
+
+
+def emoji(code: str) -> str:
+    """Render a semantic emoji code (SPRINT_13 animation-ready layer).
+
+    Returns an animated ``<tg-emoji>`` custom emoji when the code has an entry in
+    :data:`CUSTOM_EMOJI_IDS`, otherwise the plain Unicode fallback. An unknown
+    code yields an empty string (never raises), so a typo degrades quietly rather
+    than crashing a screen render.
+    """
+    fallback = _EMOJI.get(code, "")
+    custom_id = CUSTOM_EMOJI_IDS.get(code)
+    if custom_id and fallback:
+        return f'<tg-emoji emoji-id="{_esc(custom_id)}">{_esc(fallback)}</tg-emoji>'
+    return fallback
 
 
 def header(title: str, icon: str | None = None) -> str:
@@ -167,8 +254,8 @@ def sparkline(label: str, value: int, max_value: int, width: int = 10) -> str:
 
 
 def badge(state: str) -> str:
-    """Map a semantic state name to a colour dot (unknown → ⚪)."""
-    return _BADGES.get(state.lower(), "⚪")
+    """Map a semantic state name to a colour-dot emoji (unknown → ⚪)."""
+    return emoji(_BADGE_CODES.get(state.lower(), "dot_white"))
 
 
 def card(title: str, fields: list[tuple[str, str]], icon: str = "◆") -> str:
@@ -234,12 +321,12 @@ def footer(timestamp: datetime | None = None) -> str:
 
 def status_dot(enabled: bool) -> str:
     """Boolean state as a colour dot: 🟢 enabled / 🔴 disabled."""
-    return "🟢" if enabled else "🔴"
+    return emoji("dot_green") if enabled else emoji("dot_red")
 
 
 def role_icon(role: str) -> str:
     """Map a role name to its icon (owner 👑, moderator 🛡, premium ⭐, user 👤)."""
-    return _ROLE_ICONS.get(role.lower(), "👤")
+    return emoji(_ROLE_CODES.get(role.lower(), "user"))
 
 
 def number_fmt(n: int) -> str:

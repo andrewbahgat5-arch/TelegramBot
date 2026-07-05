@@ -191,6 +191,35 @@ def test_footer_none_returns_a_line() -> None:
     assert "Updated" in ui.footer()
 
 
+# --- emoji (animation-ready layer) ---------------------------------------
+
+
+def test_emoji_returns_unicode_fallback_by_default() -> None:
+    assert ui.emoji("fire") == "🔥"
+    assert ui.emoji("members") == "👥"
+
+
+def test_emoji_unknown_code_is_empty_string() -> None:
+    assert ui.emoji("does_not_exist") == ""
+
+
+def test_emoji_renders_custom_tg_emoji_when_id_configured() -> None:
+    ui.CUSTOM_EMOJI_IDS["fire"] = "5789012345678901234"
+    try:
+        out = ui.emoji("fire")
+        assert out == '<tg-emoji emoji-id="5789012345678901234">🔥</tg-emoji>'
+    finally:
+        ui.CUSTOM_EMOJI_IDS.pop("fire", None)
+
+
+def test_badge_uses_animation_layer_when_configured() -> None:
+    ui.CUSTOM_EMOJI_IDS["dot_green"] = "111"
+    try:
+        assert ui.badge("active") == '<tg-emoji emoji-id="111">🟢</tg-emoji>'
+    finally:
+        ui.CUSTOM_EMOJI_IDS.pop("dot_green", None)
+
+
 # --- status_dot / role_icon ----------------------------------------------
 
 
