@@ -108,6 +108,9 @@ class FakeUser:
     bot_blocked: bool = False
     is_deleted: bool = False
     status_checked_at: datetime.datetime | None = None
+    referred_by_id: int | None = None
+    referral_code: str | None = None
+    referral_bonus_downloads: int = 0
 
 
 class FakeUserRepo:
@@ -295,6 +298,25 @@ class FakeUserRepo:
         for tid in victims:
             del self.by_tid[tid]
         return len(victims)
+
+    # Referral system (Sprint 13.7).
+    async def get_by_referral_code(self, code: str) -> FakeUser | None:
+        return next((u for u in self.by_tid.values() if u.referral_code == code), None)
+
+    async def set_referral_code(self, user_id: int, code: str) -> None:
+        user = next((u for u in self.by_tid.values() if u.id == user_id), None)
+        if user is not None:
+            user.referral_code = code
+
+    async def set_referred_by(self, user_id: int, referrer_id: int) -> None:
+        user = next((u for u in self.by_tid.values() if u.id == user_id), None)
+        if user is not None:
+            user.referred_by_id = referrer_id
+
+    async def add_referral_bonus(self, user_id: int, amount: int) -> None:
+        user = next((u for u in self.by_tid.values() if u.id == user_id), None)
+        if user is not None:
+            user.referral_bonus_downloads += amount
 
     def _audience(self, role: str | None, language: str | None) -> list[FakeUser]:
         users = [u for u in self.by_tid.values() if not u.is_banned]

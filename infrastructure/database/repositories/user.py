@@ -252,6 +252,33 @@ class UserRepository(SqlAlchemyRepository[User]):
         result = await self.session.execute(delete(User).where(User.is_deleted.is_(True)))
         return int(result.rowcount or 0)
 
+    # --- Referral system (Sprint 13.7) ------------------------------------
+
+    async def get_by_referral_code(self, code: str) -> User | None:
+        result = await self.session.execute(select(User).where(User.referral_code == code))
+        return result.scalar_one_or_none()
+
+    async def set_referral_code(self, user_id: int, code: str) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(referral_code=code)
+        )
+        await self.session.flush()
+
+    async def set_referred_by(self, user_id: int, referrer_id: int) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(referred_by_id=referrer_id)
+        )
+        await self.session.flush()
+
+    async def add_referral_bonus(self, user_id: int, amount: int) -> None:
+        """Atomically add ``amount`` permanent bonus downloads to a user (13.7)."""
+        await self.session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(referral_bonus_downloads=User.referral_bonus_downloads + amount)
+        )
+        await self.session.flush()
+
     @staticmethod
     def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:
         """Broadcast audience filters (16.8, item #14).

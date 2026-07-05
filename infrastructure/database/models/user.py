@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     DateTime,
+    ForeignKey,
     Identity,
     Integer,
     String,
@@ -43,6 +44,14 @@ class User(Base):
     bot_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     status_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Referral system (Sprint 13.7).
+    referred_by_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    referral_code: Mapped[str | None] = mapped_column(String(20), unique=True)
+    referral_bonus_downloads: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
