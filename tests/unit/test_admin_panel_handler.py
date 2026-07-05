@@ -184,6 +184,13 @@ class _FakeTemplates:
         self.custom.pop((key, locale), None)
 
 
+class _FakeHealthChecker:
+    async def check_all(self, *, batch_size: int = 25, progress_callback: Any = None) -> Any:
+        return SimpleNamespace(
+            total_checked=10, active=7, blocked=2, deleted=1, errors=0, duration_seconds=1.5
+        )
+
+
 class _FakeAd:
     def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
         self.id = ad_id
@@ -437,6 +444,7 @@ async def _write(
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _FakeTemplates(),
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,
@@ -538,6 +546,14 @@ class _FakeUsersRW:
         self.calls.append(("export", fmt))
         return b"telegram_id\n555\n", f"subscribers_2026-07-05.{fmt}"
 
+    async def purge_blocked(self) -> int:
+        self.calls.append(("purge_blocked",))
+        return 3
+
+    async def purge_deleted(self) -> int:
+        self.calls.append(("purge_deleted",))
+        return 2
+
 
 async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> None:
     await panel_write(
@@ -553,6 +569,7 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _FakeTemplates(),
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,
@@ -565,6 +582,23 @@ async def test_platform_csv_export_sends_document() -> None:
     await _uwrite(callback, ParsedPanel("t", "csv"), _FakeUsersRW())
     callback.bot.send_document.assert_awaited_once()
     callback.answer.assert_awaited()
+
+
+async def test_health_check_status_runs_sweep() -> None:
+    signer = _signer()
+    callback = _callback(signer, "m", "chk")
+    await _twrite(callback, ParsedPanel("m", "chk"), _FakeTemplates())
+    # last edit is the report (first edit is the "checking…" placeholder)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Blocked" in text and "7" in text  # active=7 from the fake report
+
+
+async def test_health_purge_blocked_confirmed() -> None:
+    signer = _signer()
+    callback = _callback(signer, "m", "pgbc")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("m", "pgbc"), users)
+    assert users.calls == [("purge_blocked",)]
 
 
 async def test_navigate_templates_list() -> None:
@@ -589,6 +623,7 @@ async def _twrite(callback: Any, panel: ParsedPanel, templates: _FakeTemplates) 
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         templates,
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,
@@ -612,6 +647,7 @@ async def test_template_edit_arms_fsm() -> None:
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         templates,
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,
@@ -662,6 +698,7 @@ async def test_subscribers_import_arms_upload_state() -> None:
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _FakeTemplates(),
+        lambda bot: _FakeHealthChecker(),
         signer,
         translate,
         _LOCALE,
@@ -790,6 +827,7 @@ async def _bwrite(callback: Any, panel: ParsedPanel) -> None:
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _FakeTemplates(),
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,
@@ -812,6 +850,7 @@ async def _awrite(
         lambda s: broadcasts or _FakeBroadcasts(),
         lambda s: _FakeAudience(),
         _FakeTemplates(),
+        lambda bot: _FakeHealthChecker(),
         _signer(),
         translate,
         _LOCALE,

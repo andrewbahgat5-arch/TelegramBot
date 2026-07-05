@@ -236,6 +236,28 @@ class UserService:
         rows = await self._repo.list_paginated(limit=limit, offset=offset)
         return [UserSnapshot.from_row(row) for row in rows]
 
+    async def list_blocked(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:
+        """A page of users flagged as having blocked the bot (Sprint 13.5)."""
+        rows = await self._repo.list_blocked(limit=limit, offset=offset)
+        return [UserSnapshot.from_row(row) for row in rows]
+
+    async def list_deleted(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:
+        """A page of users whose Telegram account is flagged deleted (Sprint 13.5)."""
+        rows = await self._repo.list_deleted(limit=limit, offset=offset)
+        return [UserSnapshot.from_row(row) for row in rows]
+
+    async def purge_blocked(self) -> int:
+        """Delete every blocked user; returns the number removed (Sprint 13.5)."""
+        removed = await self._repo.purge_blocked()
+        _log.info("users_purged", kind="blocked", count=removed)
+        return removed
+
+    async def purge_deleted(self) -> int:
+        """Delete every deleted-account user; returns the number removed (Sprint 13.5)."""
+        removed = await self._repo.purge_deleted()
+        _log.info("users_purged", kind="deleted", count=removed)
+        return removed
+
     async def set_role(self, telegram_id: int, role: UserRole) -> UserSnapshot | None:
         """Assign ``role`` to a user. Returns the updated snapshot, or None if absent."""
         return await self._mutate(

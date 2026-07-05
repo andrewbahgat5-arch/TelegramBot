@@ -37,6 +37,8 @@ READ_ACTIONS: frozenset[str] = frozenset(
         "inf",  # view an entity detail (user info, queue/system status, …)
         "stt",  # view statistics (ad stats, totals)
         "cx",  # cancel / abort a wizard (non-mutating; returns to a menu)
+        "lsb",  # list blocked-bot users (Sprint 13.5, read-only)
+        "lsd",  # list deleted-account users (Sprint 13.5, read-only)
     }
 )
 
@@ -140,6 +142,12 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
         MenuItem("panel.menu.m.banned_list", "ls"),
         MenuItem("panel.action.ban", "ban"),
         MenuItem("panel.action.unban", "ubn"),
+        # User-health detection (Sprint 13.5).
+        MenuItem("panel.menu.m.check_status", "chk"),
+        MenuItem("panel.menu.m.blocked_list", "lsb"),
+        MenuItem("panel.menu.m.deleted_list", "lsd"),
+        MenuItem("panel.menu.m.purge_blocked", "pgb"),
+        MenuItem("panel.menu.m.purge_deleted", "pgd"),
     ),
     "d": (
         MenuItem("panel.menu.d.queue_status", "inf"),

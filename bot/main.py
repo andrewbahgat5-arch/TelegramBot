@@ -25,6 +25,7 @@ from aiogram import Bot, Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
+from bot.chat_prober import AiogramChatProber
 from bot.handlers import admin as admin_handler
 from bot.handlers import admin_panel as admin_panel_handler
 from bot.handlers import ads as ads_handler
@@ -65,6 +66,7 @@ from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.session import create_session_factory
+from infrastructure.database.user_health_store import UserHealthStoreAdapter
 from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
 from infrastructure.downloader.providers.ytdlp_provider import YtdlpProvider
 from infrastructure.downloader.registry import DownloaderRegistry
@@ -90,6 +92,7 @@ from services.referral_service import ReferralService
 from services.settings_service import SettingsService
 from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
+from services.user_health import UserHealthChecker
 from services.user_service import UserService
 
 _log = get_logger("bot.main")
@@ -110,6 +113,7 @@ def build_dispatcher(
     admin_service_factory: Callable[[AsyncSession], AdminService],
     referral_service_factory: Callable[[AsyncSession], ReferralService],
     template_service: TemplateService,
+    health_checker_factory: Callable[[Bot], UserHealthChecker],
     queue_service: QueueService,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
@@ -130,6 +134,7 @@ def build_dispatcher(
     dp["admin_service_factory"] = admin_service_factory
     dp["referral_service_factory"] = referral_service_factory
     dp["template_service"] = template_service
+    dp["health_checker_factory"] = health_checker_factory
     dp["queue_service"] = queue_service
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
@@ -275,6 +280,14 @@ async def main() -> None:
             download_repo=DownloadRepository(session),
         )
 
+    def make_health_checker(probe_bot: Bot) -> UserHealthChecker:
+        # On-demand sweep (Sprint 13.5): probes via Telegram and persists outcomes on its
+        # own committed sessions, so it never holds the request transaction open.
+        return UserHealthChecker(
+            prober=AiogramChatProber(probe_bot),
+            store=UserHealthStoreAdapter(session_factory),
+        )
+
     def make_referral_service(session: AsyncSession) -> ReferralService:
         return ReferralService(
             user_repo=UserRepository(session),
@@ -308,6 +321,7 @@ async def main() -> None:
         admin_service_factory=make_admin_service,
         referral_service_factory=make_referral_service,
         template_service=template_service,
+        health_checker_factory=make_health_checker,
         queue_service=queue_service,
         notification_service=notification_service,
         callback_signer=callback_signer,

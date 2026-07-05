@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from aiogram import Dispatcher
+from aiogram import Bot, Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
@@ -27,6 +27,7 @@ from services.referral_service import ReferralService
 from services.settings_service import SettingsService
 from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
+from services.user_health import UserHealthChecker
 from services.user_service import UserService
 from tests.unit._fakes import FakeMessageSender, FakeQueueBackend, load_settings
 
@@ -75,6 +76,10 @@ def _referral_factory(session: AsyncSession) -> ReferralService:
     return cast(ReferralService, None)
 
 
+def _health_checker_factory(bot: Bot) -> UserHealthChecker:
+    return cast(UserHealthChecker, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
@@ -90,6 +95,7 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         admin_service_factory=_admin_factory,
         referral_service_factory=_referral_factory,
         template_service=cast(TemplateService, None),
+        health_checker_factory=_health_checker_factory,
         queue_service=QueueService(FakeQueueBackend()),
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),

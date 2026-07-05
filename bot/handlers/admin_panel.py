@@ -82,6 +82,7 @@ from services.settings_service import (
     SettingsService,
 )
 from services.template_service import TEMPLATE_DEFS, TemplateService
+from services.user_health import UserHealthChecker
 from services.user_service import UserService
 
 router = Router(name="admin_panel")
@@ -91,6 +92,7 @@ UserServiceFactory = Callable[[AsyncSession], UserService]
 SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
 AdminServiceFactory = Callable[[AsyncSession], AdminService]
 ReferralServiceFactory = Callable[[AsyncSession], ReferralService]
+HealthCheckerFactory = Callable[[Bot], UserHealthChecker]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
@@ -197,6 +199,7 @@ async def panel_write(
     broadcast_service_factory: BroadcastServiceFactory,
     audience_service_factory: AudienceServiceFactory,
     template_service: TemplateService,
+    health_checker_factory: HealthCheckerFactory,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
@@ -247,6 +250,17 @@ async def panel_write(
             user,
             callback_signer,
             state,
+            translate,
+            locale,
+        )
+        return
+    if panel.section == "m" and panel.action in ("chk", "pgb", "pgd", "pgbc", "pgdc"):  # 13.5
+        await _moderation_health_write(
+            callback,
+            panel,
+            user_service_factory(session),
+            health_checker_factory,
+            callback_signer,
             translate,
             locale,
         )
@@ -979,8 +993,19 @@ async def _render(
             "b", role, signer, locale
         )
     if section == "m":
+        users_svc = user_factory(session)
+        if action == "lsb":  # blocked-bot list (Sprint 13.5)
+            rows = await users_svc.list_blocked(limit=_LIST_LIMIT)
+            return _health_list_text(
+                rows, "panel.health.blocked_title", "panel.health.blocked_empty", translate, locale
+            ), build_section_menu("m", role, signer, locale)
+        if action == "lsd":  # deleted-account list (Sprint 13.5)
+            rows = await users_svc.list_deleted(limit=_LIST_LIMIT)
+            return _health_list_text(
+                rows, "panel.health.deleted_title", "panel.health.deleted_empty", translate, locale
+            ), build_section_menu("m", role, signer, locale)
         return await _users_text(
-            user_factory(session), banned_only=True, translate=translate, locale=locale
+            users_svc, banned_only=True, translate=translate, locale=locale
         ), build_section_menu("m", role, signer, locale)
     if section == "h":
         return await _jobs_text(admin_factory(session), translate=translate, locale=locale), (
@@ -1150,6 +1175,74 @@ async def _referral_dashboard_text(
             lines.append(f"  {rank}. {ui.sparkline(handle, entry.invite_count, max_invites)}")
     lines += ["", ui.footer()]
     return "\n".join(lines)
+
+
+def _health_list_text(
+    rows: list[UserSnapshot], title_key: str, empty_key: str, translate: Translator, locale: str
+) -> str:
+    """Render a blocked / deleted user list with the ui.py header + tappable-free rows (13.5)."""
+    header = ui.header(translate(title_key, locale, count=len(rows)), icon=ui.emoji("moderation"))
+    if not rows:
+        return f"{header}\n\n{translate(empty_key, locale)}"
+    return "\n".join([header, "", *(_user_row(snap) for snap in rows)])
+
+
+async def _moderation_health_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    users: UserService,
+    checker_factory: HealthCheckerFactory,
+    signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Check-status sweep and blocked/deleted purges (destructive → confirm) (13.5)."""
+    menu = build_section_menu("m", UserRole.OWNER, signer, locale)
+    if panel.action == "chk":  # run the Telegram-API status sweep
+        if callback.bot is None or not isinstance(callback.message, Message):
+            await callback.answer()
+            return
+        await _safe_edit(callback.message, translate("panel.health.checking", locale), menu)
+        await callback.answer()
+        report = await checker_factory(callback.bot).check_all()
+        await _safe_edit(
+            callback.message,
+            translate(
+                "panel.health.result",
+                locale,
+                checked=report.total_checked,
+                active=report.active,
+                blocked=report.blocked,
+                deleted=report.deleted,
+                errors=report.errors,
+                seconds=f"{report.duration_seconds:.1f}",
+            ),
+            menu,
+        )
+        return
+    if panel.action in ("pgb", "pgd"):  # destructive → confirm screen
+        confirmed = "pgbc" if panel.action == "pgb" else "pgdc"
+        verb_key = (
+            "panel.health.purge_blocked_verb"
+            if panel.action == "pgb"
+            else "panel.health.purge_deleted_verb"
+        )
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.health.purge_confirm", locale, what=translate(verb_key, locale)),
+                build_confirm(
+                    signer, locale, confirm=("m", confirmed, None, None), cancel=("m", "op", None)
+                ),
+            )
+        await callback.answer()
+        return
+    # confirmed purge
+    removed = await (users.purge_blocked() if panel.action == "pgbc" else users.purge_deleted())
+    toast = translate("panel.health.purged", locale, count=removed)
+    if isinstance(callback.message, Message):
+        await _safe_edit(callback.message, toast, menu)
+    await callback.answer(toast)
 
 
 def _templates_list_text(translate: Translator, locale: str) -> str:
