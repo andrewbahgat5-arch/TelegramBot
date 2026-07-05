@@ -23,6 +23,7 @@ from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
+from services.referral_service import ReferralService
 from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
@@ -69,6 +70,10 @@ def _admin_factory(session: AsyncSession) -> AdminService:
     return cast(AdminService, None)
 
 
+def _referral_factory(session: AsyncSession) -> ReferralService:
+    return cast(ReferralService, None)
+
+
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
@@ -82,6 +87,7 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         ad_service_factory=_ad_factory,
         audience_service_factory=_audience_factory,
         admin_service_factory=_admin_factory,
+        referral_service_factory=_referral_factory,
         queue_service=QueueService(FakeQueueBackend()),
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),

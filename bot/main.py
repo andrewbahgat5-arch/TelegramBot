@@ -60,6 +60,7 @@ from infrastructure.database.repositories.error_log import ErrorLogRepository
 from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
+from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.session import create_session_factory
@@ -84,6 +85,7 @@ from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
+from services.referral_service import ReferralService
 from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
@@ -104,6 +106,7 @@ def build_dispatcher(
     ad_service_factory: Callable[[AsyncSession], AdService],
     audience_service_factory: Callable[[AsyncSession], AudienceService],
     admin_service_factory: Callable[[AsyncSession], AdminService],
+    referral_service_factory: Callable[[AsyncSession], ReferralService],
     queue_service: QueueService,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
@@ -122,6 +125,7 @@ def build_dispatcher(
     dp["ad_service_factory"] = ad_service_factory
     dp["audience_service_factory"] = audience_service_factory
     dp["admin_service_factory"] = admin_service_factory
+    dp["referral_service_factory"] = referral_service_factory
     dp["queue_service"] = queue_service
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
@@ -178,6 +182,8 @@ async def main() -> None:
     callback_signer = CallbackSigner(settings.bot_token.get_secret_value())
 
     bot = build_bot(settings)
+    # The referral deep-link (?start=ref_CODE) needs the bot's @username (Sprint 13.7).
+    bot_username = (await bot.get_me()).username or ""
     file_sender = TelegramFileSender(bot)
     ad_sender = TelegramAdSender(bot)
     notification_service = NotificationService(TelegramMessageSender(bot))
@@ -260,6 +266,14 @@ async def main() -> None:
             download_repo=DownloadRepository(session),
         )
 
+    def make_referral_service(session: AsyncSession) -> ReferralService:
+        return ReferralService(
+            user_repo=UserRepository(session),
+            referral_repo=ReferralRepository(session),
+            settings=make_settings_service(session),
+            bot_username=bot_username,
+        )
+
     def make_ad_service(session: AsyncSession) -> AdService:
         return AdService(
             ad_repo=AdRepository(session),
@@ -283,6 +297,7 @@ async def main() -> None:
         ad_service_factory=make_ad_service,
         audience_service_factory=make_audience_service,
         admin_service_factory=make_admin_service,
+        referral_service_factory=make_referral_service,
         queue_service=queue_service,
         notification_service=notification_service,
         callback_signer=callback_signer,

@@ -17,7 +17,8 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from aiogram import F, Router
-from aiogram.filters import CommandStart
+from aiogram.exceptions import TelegramAPIError
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,25 +26,34 @@ from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
 from bot.keyboards.language_select import build_change_language_button, build_language_picker
 from core.i18n import Translator, list_enabled_locales
+from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import AdPlacement
 from services.ad_service import AdService
+from services.referral_service import ReferralService
+from services.settings_service import SettingsService
 from services.user_service import UserService
 
 router = Router(name="start")
+_log = get_logger("bot.handlers.start")
 
 UserServiceFactory = Callable[[AsyncSession], UserService]
+ReferralServiceFactory = Callable[[AsyncSession], ReferralService]
+SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
+_REFERRAL_PREFIX = "ref_"
 
 
 @router.message(CommandStart())
 async def handle_start(
     message: Message,
+    command: CommandObject,
     translate: Translator,
     locale: str,
     callback_signer: CallbackSigner,
     user: UserSnapshot | None = None,
     session: AsyncSession | None = None,
     ad_service_factory: Callable[[AsyncSession], AdService] | None = None,
+    referral_service_factory: ReferralServiceFactory | None = None,
 ) -> None:
     name = user.first_name if user and user.first_name else None
     text = (
@@ -52,8 +62,83 @@ async def handle_start(
         else translate("start.welcome_anonymous", locale)
     )
     await message.answer(text, reply_markup=build_change_language_button(callback_signer, locale))
+    if (
+        command.args
+        and command.args.startswith(_REFERRAL_PREFIX)
+        and user is not None
+        and session is not None
+        and referral_service_factory is not None
+    ):
+        await _process_referral_deeplink(
+            message,
+            code=command.args[len(_REFERRAL_PREFIX) :],
+            new_user_id=user.id,
+            referral=referral_service_factory(session),
+            translate=translate,
+            locale=locale,
+        )
     if user is not None and session is not None and ad_service_factory is not None:
         await show_placement_ad(ad_service_factory(session), user, AdPlacement.HOME.value)
+
+
+async def _process_referral_deeplink(
+    message: Message,
+    *,
+    code: str,
+    new_user_id: int,
+    referral: ReferralService,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Apply a ``?start=ref_CODE`` referral and best-effort notify the referrer (13.7)."""
+    result = await referral.process_referral(code, new_user_id)
+    if not result.success or result.referrer_telegram_id is None or message.bot is None:
+        return
+    try:
+        await message.bot.send_message(
+            result.referrer_telegram_id,
+            translate(
+                "referral.notify",
+                locale,
+                reward=result.reward_downloads,
+                total=result.referrer_total_referrals,
+            ),
+        )
+    except TelegramAPIError as exc:  # referrer blocked the bot / deleted account
+        _log.info("referral_notify_failed", referrer=result.referrer_telegram_id, error=str(exc))
+
+
+@router.message(Command("referral"))
+async def handle_referral(
+    message: Message,
+    translate: Translator,
+    locale: str,
+    user: UserSnapshot | None = None,
+    session: AsyncSession | None = None,
+    referral_service_factory: ReferralServiceFactory | None = None,
+    settings_service_factory: SettingsServiceFactory | None = None,
+) -> None:
+    """Show the caller their personal referral link, invite count, and bonus (13.7)."""
+    if user is None or session is None or referral_service_factory is None:
+        return
+    reward = 0
+    if settings_service_factory is not None:
+        settings = settings_service_factory(session)
+        if not bool(await settings.get("referral_enabled")):
+            await message.answer(translate("referral.disabled", locale))
+            return
+        reward = int(await settings.get("referral_reward_downloads"))
+    stats = await referral_service_factory(session).get_user_referral_stats(user.id)
+    await message.answer(
+        translate(
+            "referral.screen",
+            locale,
+            link=stats.referral_link,
+            reward=reward,
+            invited=stats.total_invited,
+            bonus=stats.total_bonus_downloads,
+        )
+    )
 
 
 @router.callback_query(F.data.startswith("l|"))

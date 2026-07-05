@@ -1,0 +1,20 @@
+{
+  "0": "admin_panel.py",
+  "1": "Any",
+  "2": "_signer",
+  "3": "admin_panel.py",
+  "4": "_render",
+  "5": "test_admin_panel_handler.py",
+  "6": "_settings_write",
+  "7": "panel_write",
+  "8": "on_user_lookup",
+  "9": "UserSnapshot",
+  "10": "_write",
+  "11": "_user_detail_view",
+  "12": "SettingView",
+  "13": "_call",
+  "14": "states.py",
+  "15": "_FakeAd",
+  "16": "_FakeQueue",
+  "17": "CLAUDE.md"
+}
