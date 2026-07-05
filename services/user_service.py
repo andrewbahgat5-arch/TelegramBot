@@ -12,8 +12,11 @@ layer extracts identity primitives from the Telegram update and passes them in.
 
 from __future__ import annotations
 
+import csv
 import datetime
-from dataclasses import dataclass
+import io
+import json
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.constants import LAST_ACTIVITY_DEBOUNCE_SECONDS
@@ -24,6 +27,24 @@ from domain.protocols.repositories import UserRepositoryProtocol
 from services.cache_service import CacheService
 
 _log = get_logger("services.user_service")
+
+# Subscriber export/import column order (SPRINT_13_PLAN §13.6).
+_EXPORT_FIELDS: tuple[str, ...] = (
+    "telegram_id",
+    "username",
+    "first_name",
+    "language",
+    "role",
+    "is_premium",
+    "is_banned",
+    "bot_blocked",
+    "total_downloads",
+    "daily_download_count",
+    "referred_by",
+    "created_at",
+    "last_activity_at",
+)
+_EXPORT_PAGE = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +77,16 @@ class UserStats:
     # User-health counts (Sprint 13.5).
     blocked_users: int = 0
     deleted_users: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ImportResult:
+    """Outcome of a subscriber import (SPRINT_13_PLAN §13.6)."""
+
+    created: int
+    skipped: int
+    failed: int
+    errors: list[str] = field(default_factory=list)
 
 
 class UserService:
@@ -145,6 +176,61 @@ class UserService:
             deleted_users=await self._repo.count_deleted(),
         )
 
+    async def export_users(self, fmt: str = "csv") -> tuple[bytes, str]:
+        """Serialize every user to CSV or JSON. Returns ``(file_bytes, filename)`` (13.6)."""
+        rows = await self._collect_all_rows()
+        date = datetime.datetime.now(datetime.UTC).date().isoformat()
+        if fmt == "json":
+            payload = {
+                "exported_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                "total_users": len(rows),
+                "users": [_export_row(row) for row in rows],
+            }
+            data = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+            return data, f"subscribers_{date}.json"
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=_EXPORT_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(_export_csv_row(row))
+        return buffer.getvalue().encode("utf-8"), f"subscribers_{date}.csv"
+
+    async def import_users(self, data: list[dict[str, Any]]) -> ImportResult:
+        """Bulk-create users from parsed rows. Create-only: never overwrite existing (13.6)."""
+        created = skipped = failed = 0
+        errors: list[str] = []
+        for index, raw in enumerate(data):
+            telegram_id = _parse_telegram_id(raw.get("telegram_id"))
+            if telegram_id is None:
+                failed += 1
+                errors.append(f"row {index + 1}: invalid telegram_id {raw.get('telegram_id')!r}")
+                continue
+            if await self._repo.get_by_telegram_id(telegram_id) is not None:
+                skipped += 1
+                continue
+            await self._repo.create_user(
+                telegram_id=telegram_id,
+                username=_clean_str(raw.get("username")),
+                first_name=_clean_str(raw.get("first_name")),
+                language=_clean_str(raw.get("language")),
+                role=UserRole.USER.value,
+            )
+            await self._cache.delete_user(telegram_id)
+            created += 1
+        _log.info("users_imported", created=created, skipped=skipped, failed=failed)
+        return ImportResult(created=created, skipped=skipped, failed=failed, errors=errors)
+
+    async def _collect_all_rows(self) -> list[Any]:
+        """Page through every user row for export (bounded page size)."""
+        rows: list[Any] = []
+        offset = 0
+        while True:
+            page = await self._repo.list_paginated(limit=_EXPORT_PAGE, offset=offset)
+            rows.extend(page)
+            if len(page) < _EXPORT_PAGE:
+                return rows
+            offset += len(page)
+
     async def list_users(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:
         """A page of users for the owner ``/users`` listing (Task 8.2 follow-up #19)."""
         rows = await self._repo.list_paginated(limit=limit, offset=offset)
@@ -226,3 +312,57 @@ class UserService:
 def _apply(row: Any, **fields: Any) -> None:
     for name, value in fields.items():
         setattr(row, name, value)
+
+
+def _iso_or_none(value: datetime.datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+def _export_row(row: Any) -> dict[str, Any]:
+    """Native-typed export dict (booleans/ints/None preserved) for JSON output."""
+    return {
+        "telegram_id": row.telegram_id,
+        "username": row.username,
+        "first_name": row.first_name,
+        "language": row.language,
+        "role": row.role,
+        "is_premium": bool(row.is_premium),
+        "is_banned": bool(row.is_banned),
+        "bot_blocked": bool(getattr(row, "bot_blocked", False)),
+        "total_downloads": row.total_downloads,
+        "daily_download_count": row.daily_download_count,
+        "referred_by": getattr(row, "referred_by_id", None),
+        "created_at": _iso_or_none(getattr(row, "created_at", None)),
+        "last_activity_at": _iso_or_none(getattr(row, "last_activity_at", None)),
+    }
+
+
+def _export_csv_row(row: Any) -> dict[str, str]:
+    """String-ified export dict for CSV (bools lowercased, None → empty string)."""
+    out: dict[str, str] = {}
+    for key, value in _export_row(row).items():
+        if value is None:
+            out[key] = ""
+        elif isinstance(value, bool):
+            out[key] = "true" if value else "false"
+        else:
+            out[key] = str(value)
+    return out
+
+
+def _parse_telegram_id(value: Any) -> int | None:
+    """Coerce an imported telegram_id to int, or None if missing/invalid."""
+    if isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean_str(value: Any) -> str | None:
+    """Normalize an optional imported string field (blank/empty → None)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

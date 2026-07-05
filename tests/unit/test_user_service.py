@@ -113,6 +113,69 @@ async def test_record_activity_writes_when_never_active() -> None:
     assert repo.touch_calls and repo.touch_calls[0][0] == 1001
 
 
+# --- Export / import (Sprint 13.6) ----------------------------------------
+
+
+async def test_export_users_csv() -> None:
+    svc, repo, _ = _service()
+    repo.by_tid[1] = FakeUser(
+        id=1, telegram_id=100, username="ahmed", first_name="Ahmed", is_premium=True
+    )
+    repo.by_tid[2] = FakeUser(id=2, telegram_id=200, bot_blocked=True)
+
+    data, filename = await svc.export_users("csv")
+    text = data.decode("utf-8")
+
+    assert filename.startswith("subscribers_") and filename.endswith(".csv")
+    lines = text.strip().splitlines()
+    assert lines[0].startswith("telegram_id,username,first_name")
+    assert "100,ahmed,Ahmed" in text
+    assert "true" in text and "false" in text  # booleans lowercased
+
+
+async def test_export_users_json() -> None:
+    import json as _json
+
+    svc, repo, _ = _service()
+    repo.by_tid[1] = FakeUser(id=1, telegram_id=100, username="ahmed", total_downloads=42)
+
+    data, filename = await svc.export_users("json")
+    payload = _json.loads(data)
+
+    assert filename.endswith(".json")
+    assert payload["total_users"] == 1
+    assert payload["users"][0]["telegram_id"] == 100
+    assert payload["users"][0]["referred_by"] is None
+    assert payload["users"][0]["is_premium"] is False
+
+
+async def test_import_users_creates_skips_and_fails() -> None:
+    svc, repo, _ = _service()
+    repo.by_tid[999] = FakeUser(id=9, telegram_id=999)  # already exists
+
+    result = await svc.import_users(
+        [
+            {"telegram_id": 100, "username": "new1", "first_name": "New"},
+            {"telegram_id": 999},  # existing -> skipped
+            {"telegram_id": "not-an-int"},  # invalid -> failed
+            {"username": "no_id"},  # missing id -> failed
+        ]
+    )
+
+    assert result.created == 1
+    assert result.skipped == 1
+    assert result.failed == 2
+    assert len(result.errors) == 2
+    assert 100 in repo.by_tid and repo.by_tid[100].username == "new1"
+
+
+async def test_import_users_blank_username_becomes_none() -> None:
+    svc, repo, _ = _service()
+    result = await svc.import_users([{"telegram_id": 100, "username": "   "}])
+    assert result.created == 1
+    assert repo.by_tid[100].username is None
+
+
 async def test_record_activity_debounced_within_window() -> None:
     svc, repo, _ = _service(debounce_seconds=60)
     snap = await svc.get_or_create_user(telegram_id=1001)
