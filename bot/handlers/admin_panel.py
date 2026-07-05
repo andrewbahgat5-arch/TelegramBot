@@ -73,6 +73,7 @@ from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
 from services.queue_service import QueueService
+from services.referral_service import ReferralService
 from services.settings_service import (
     InvalidSettingValueError,
     SettingNotFoundError,
@@ -86,6 +87,7 @@ _log = get_logger("bot.handlers.admin_panel")
 UserServiceFactory = Callable[[AsyncSession], UserService]
 SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
 AdminServiceFactory = Callable[[AsyncSession], AdminService]
+ReferralServiceFactory = Callable[[AsyncSession], ReferralService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
@@ -140,6 +142,7 @@ async def panel_navigate(
     settings_service_factory: SettingsServiceFactory,
     ad_service_factory: AdServiceFactory,
     admin_service_factory: AdminServiceFactory,
+    referral_service_factory: ReferralServiceFactory,
     queue_service: QueueService,
     callback_signer: CallbackSigner,
     translate: Translator,
@@ -163,6 +166,7 @@ async def panel_navigate(
         settings_service_factory,
         ad_service_factory,
         admin_service_factory,
+        referral_service_factory,
         queue_service,
         translate,
         locale,
@@ -869,6 +873,7 @@ async def _render(
     settings_factory: SettingsServiceFactory,
     ad_factory: AdServiceFactory,
     admin_factory: AdminServiceFactory,
+    referral_factory: ReferralServiceFactory,
     queue: QueueService,
     translate: Translator,
     locale: str,
@@ -902,6 +907,9 @@ async def _render(
         return await _stats_text(
             user_factory(session), queue, translate, locale
         ), build_section_menu("t", role, signer, locale)
+    if section == "r":  # Referral analytics dashboard (Sprint 13.7)
+        text = await _referral_dashboard_text(referral_factory(session), translate, locale)
+        return text, build_section_menu("r", role, signer, locale)
     if section == "u":
         users = user_factory(session)
         if action == "inf" and panel.arg is not None:
@@ -1093,6 +1101,36 @@ async def _platform_export(
     if callback.bot is not None and isinstance(callback.message, Message):
         await callback.bot.send_document(callback.message.chat.id, document)
     await callback.answer(translate("panel.platforms.exported", locale))
+
+
+async def _referral_dashboard_text(
+    referral: ReferralService, translate: Translator, locale: str
+) -> str:
+    """Referral analytics dashboard: totals, period breakdowns, top-5 leaderboard (13.7)."""
+    dash = await referral.get_dashboard()
+
+    def label(name: str) -> str:
+        return translate(f"panel.referral.{name}", locale)
+
+    lines = [
+        ui.header(label("title"), icon=ui.emoji("referral")),
+        "",
+        ui.metric(ui.emoji("chart"), label("total"), dash.total_referrals),
+        ui.metric(ui.emoji("new"), label("today"), dash.referrals_today),
+        ui.metric(ui.emoji("calendar"), label("week"), dash.referrals_week),
+        ui.metric(ui.emoji("calendar"), label("month"), dash.referrals_month),
+        ui.metric(ui.emoji("gift"), label("rewards"), dash.total_rewards_granted),
+    ]
+    if dash.top_referrers:
+        lines += ["", ui.divider(), f"  {ui.emoji('trophy')} {label('top')}", ""]
+        max_invites = max(entry.invite_count for entry in dash.top_referrers)
+        for rank, entry in enumerate(dash.top_referrers, start=1):
+            handle = (
+                f"@{entry.username}" if entry.username else (entry.first_name or str(entry.user_id))
+            )
+            lines.append(f"  {rank}. {ui.sparkline(handle, entry.invite_count, max_invites)}")
+    lines += ["", ui.footer()]
+    return "\n".join(lines)
 
 
 async def _subscribers_write(

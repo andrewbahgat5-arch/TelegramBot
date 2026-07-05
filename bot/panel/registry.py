@@ -67,6 +67,7 @@ class Section:
 SECTIONS: tuple[Section, ...] = (
     Section("u", "panel.section.users"),
     Section("a", "panel.section.advertisements"),
+    Section("r", "panel.section.referrals"),  # Sprint 13.7
     Section("b", "panel.section.broadcast", owner_only=True),
     Section("s", "panel.section.settings"),
     Section("t", "panel.section.statistics"),
@@ -132,6 +133,7 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
         # Platform analytics sub-screen (Sprint 13.3); arg=3 opens the all-time view.
         MenuItem("panel.menu.t.platforms", "stt", arg=3),
     ),
+    "r": (MenuItem("panel.menu.r.refresh", "ls"),),  # Sprint 13.7 referral dashboard
     "h": (MenuItem("panel.action.list", "ls"),),
     "m": (
         MenuItem("panel.menu.m.banned_list", "ls"),

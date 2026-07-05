@@ -135,6 +135,23 @@ class _FakeAdmin:
         return SimpleNamespace(rows=rows, total_all_time=451)
 
 
+class _FakeReferralSvc:
+    async def get_dashboard(self) -> Any:
+        top = [
+            SimpleNamespace(
+                user_id=100, username="ahmed", first_name="Ahmed", invite_count=5, rewards_earned=25
+            )
+        ]
+        return SimpleNamespace(
+            total_referrals=12,
+            referrals_today=2,
+            referrals_week=5,
+            referrals_month=9,
+            total_rewards_granted=24,
+            top_referrers=top,
+        )
+
+
 class _FakeAd:
     def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
         self.id = ad_id
@@ -246,6 +263,7 @@ async def _navigate(
         lambda s: _FakeSettings(),
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
+        lambda s: _FakeReferralSvc(),
         _FakeQueue(),
         signer,
         translate,
@@ -298,6 +316,14 @@ async def test_navigate_platform_stats_renders_sparklines() -> None:
     await _navigate(callback, ParsedPanel("t", "stt", 3), _user(), signer)
     text = callback.message.edit_text.await_args.args[0]
     assert "TikTok" in text and "62.7%" in text
+
+
+async def test_navigate_referral_dashboard_renders_leaderboard() -> None:
+    signer = _signer()
+    callback = _callback(signer, "r", "op")
+    await _navigate(callback, ParsedPanel("r", "op"), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Referral" in text and "ahmed" in text
 
 
 async def test_navigate_users_list_shows_tappable_rows() -> None:
@@ -635,6 +661,7 @@ async def test_user_detail_renders_via_navigation() -> None:
         lambda s: _FakeSettings(),
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
+        lambda s: _FakeReferralSvc(),
         _FakeQueue(),
         signer,
         translate,

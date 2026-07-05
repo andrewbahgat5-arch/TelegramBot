@@ -290,6 +290,16 @@
   "panel.users.import_parse_error": "❌ تعذّر تحليل الملف. تأكد أنه ملف ‎.csv أو ‎.json صالح.",
   "panel.users.import_result": "✅ <b>اكتمل الاستيراد</b>\n🆕 أُنشئ: <b>{created}</b>\n♻️ تم التخطّي: {skipped}\n❌ فشل: {failed}",
 
+  "panel.section.referrals": "🔗 الإحالات",
+  "panel.menu.r.refresh": "🔄 تحديث",
+  "panel.referral.title": "تحليلات الإحالة",
+  "panel.referral.total": "إجمالي الإحالات",
+  "panel.referral.today": "اليوم",
+  "panel.referral.week": "هذا الأسبوع",
+  "panel.referral.month": "هذا الشهر",
+  "panel.referral.rewards": "المكافآت الممنوحة",
+  "panel.referral.top": "أفضل المُحيلين",
+
   "panel.settings.info.cache_body": "🗃 <b>التخزين المؤقت</b>\n\nيتم تخزين الملفات والبيانات الوصفية المجلوبة حديثًا مؤقتًا في Redis لتجنّب إعادة التنزيل. لا يوجد مفتاح تخزين مؤقت قابل للتعديل في اللوحة — يتم ضبط مدد الصلاحية عبر إعدادات البيئة <code>CACHE_*</code>.",
   "panel.settings.info.languages_body": "🌐 <b>اللغات</b>\n\nالمفعّلة: {languages}\nالافتراضية: {default}\n\nيختار كل مستخدم لغته بنفسه في أي وقت عبر 🌐 تغيير اللغة (ضمن /start) أو قسم 🌐 اللغة هنا — لا يوجد إعداد لغة عام للتعديل.",
   "panel.settings.info.fallback": "📋 <b>معلومات</b>\n\nلا يوجد ما يُعرض.",
