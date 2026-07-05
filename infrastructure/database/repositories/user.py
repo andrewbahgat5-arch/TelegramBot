@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from collections.abc import Sequence
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
 from domain.entities.audience import AudienceRuleSpec
@@ -120,6 +120,43 @@ class UserRepository(SqlAlchemyRepository[User]):
     async def count_active_since(self, since: datetime.datetime) -> int:
         result = await self.session.execute(
             select(func.count()).select_from(User).where(User.last_activity_at >= since)
+        )
+        return int(result.scalar_one())
+
+    async def count_active_in_hours(self, hours: int) -> int:
+        """Users with ``last_activity_at`` within the last ``hours`` (13.4 activity)."""
+        since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.last_activity_at >= since)
+        )
+        return int(result.scalar_one())
+
+    async def count_inactive_days(self, days: int) -> int:
+        """Users last active before ``days`` ago, OR never active (NULL) (13.4)."""
+        cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(or_(User.last_activity_at < cutoff, User.last_activity_at.is_(None)))
+        )
+        return int(result.scalar_one())
+
+    async def count_active_current_hour(self) -> int:
+        """Users active within the current clock hour (13.4)."""
+        start = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.last_activity_at >= start)
+        )
+        return int(result.scalar_one())
+
+    async def count_active_previous_hour(self) -> int:
+        """Users active within the previous clock hour only (13.4)."""
+        current = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
+        previous = current - datetime.timedelta(hours=1)
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.last_activity_at >= previous, User.last_activity_at < current)
         )
         return int(result.scalar_one())
 

@@ -95,6 +95,15 @@ async def test_get_stats_aggregates_cohorts() -> None:
     assert stats.active_today == 2  # users 1 and 3
     assert stats.premium_users == 1  # user 1
     assert stats.staff_users == 1  # user 3 (moderator)
+    # Enhanced activity metrics (13.4): users 1 & 3 active "now"; 2 & 4 never active.
+    assert stats.active_24h == 2
+    assert stats.active_7d == 2
+    assert stats.active_30d == 2
+    assert stats.active_current_hour == 2
+    assert stats.active_previous_hour == 0
+    assert stats.inactive_5d == 2  # users 2 & 4 (NULL last_activity)
+    assert stats.inactive_7d == 2
+    assert stats.inactive_30d == 2
 
 
 async def test_record_activity_writes_when_never_active() -> None:

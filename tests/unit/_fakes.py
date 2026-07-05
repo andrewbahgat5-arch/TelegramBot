@@ -198,6 +198,39 @@ class FakeUserRepo:
             if u.last_activity_at is not None and u.last_activity_at >= since
         )
 
+    async def count_active_in_hours(self, hours: int) -> int:
+        since = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
+        return sum(
+            1
+            for u in self.by_tid.values()
+            if u.last_activity_at is not None and u.last_activity_at >= since
+        )
+
+    async def count_inactive_days(self, days: int) -> int:
+        cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)
+        return sum(
+            1
+            for u in self.by_tid.values()
+            if u.last_activity_at is None or u.last_activity_at < cutoff
+        )
+
+    async def count_active_current_hour(self) -> int:
+        start = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
+        return sum(
+            1
+            for u in self.by_tid.values()
+            if u.last_activity_at is not None and u.last_activity_at >= start
+        )
+
+    async def count_active_previous_hour(self) -> int:
+        current = datetime.datetime.now(datetime.UTC).replace(minute=0, second=0, microsecond=0)
+        previous = current - datetime.timedelta(hours=1)
+        return sum(
+            1
+            for u in self.by_tid.values()
+            if u.last_activity_at is not None and previous <= u.last_activity_at < current
+        )
+
     async def count_premium(self) -> int:
         return sum(1 for u in self.by_tid.values() if u.is_premium)
 

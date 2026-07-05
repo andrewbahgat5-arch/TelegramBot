@@ -72,6 +72,22 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Users whose ``last_activity_at`` is at or after ``since`` (active-today stat)."""
         ...
 
+    async def count_active_in_hours(self, hours: int) -> int:
+        """Users active within the last ``hours`` (13.4 activity metrics)."""
+        ...
+
+    async def count_inactive_days(self, days: int) -> int:
+        """Users last active before ``days`` ago, or never active (13.4)."""
+        ...
+
+    async def count_active_current_hour(self) -> int:
+        """Users active within the current clock hour (13.4)."""
+        ...
+
+    async def count_active_previous_hour(self) -> int:
+        """Users active within the previous clock hour only (13.4)."""
+        ...
+
     async def count_premium(self) -> int:
         """Users currently flagged premium (admin stats)."""
         ...

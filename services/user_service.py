@@ -43,6 +43,16 @@ class UserStats:
     active_today: int = 0
     premium_users: int = 0
     staff_users: int = 0
+    # Enhanced activity metrics (Sprint 13.4). Default 0 so callers that build a
+    # UserStats directly (tests, legacy paths) keep working unchanged.
+    active_24h: int = 0
+    active_7d: int = 0
+    active_30d: int = 0
+    inactive_5d: int = 0
+    inactive_7d: int = 0
+    inactive_30d: int = 0
+    active_current_hour: int = 0
+    active_previous_hour: int = 0
 
 
 class UserService:
@@ -120,6 +130,14 @@ class UserService:
             active_today=await self._repo.count_active_since(today_start),
             premium_users=await self._repo.count_premium(),
             staff_users=await self._repo.count_staff(),
+            active_24h=await self._repo.count_active_in_hours(24),
+            active_7d=await self._repo.count_active_in_hours(24 * 7),
+            active_30d=await self._repo.count_active_in_hours(24 * 30),
+            inactive_5d=await self._repo.count_inactive_days(5),
+            inactive_7d=await self._repo.count_inactive_days(7),
+            inactive_30d=await self._repo.count_inactive_days(30),
+            active_current_hour=await self._repo.count_active_current_hour(),
+            active_previous_hour=await self._repo.count_active_previous_hour(),
         )
 
     async def list_users(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:
