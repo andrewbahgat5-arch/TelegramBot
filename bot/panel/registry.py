@@ -75,6 +75,7 @@ SECTIONS: tuple[Section, ...] = (
     Section("m", "panel.section.moderation"),
     Section("d", "panel.section.downloads"),
     Section("y", "panel.section.system"),
+    Section("tp", "panel.section.templates", owner_only=True),  # Sprint 13.8
     # Personal language preference (Sprint 11.5) — not an administrative mutation
     # (zero blast radius, affects only the acting staff member's own row), so it's
     # visible to both roles like any other read-tier section.

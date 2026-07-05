@@ -25,6 +25,7 @@ from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
 from services.referral_service import ReferralService
 from services.settings_service import SettingsService
+from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
 from tests.unit._fakes import FakeMessageSender, FakeQueueBackend, load_settings
@@ -88,6 +89,7 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         audience_service_factory=_audience_factory,
         admin_service_factory=_admin_factory,
         referral_service_factory=_referral_factory,
+        template_service=cast(TemplateService, None),
         queue_service=QueueService(FakeQueueBackend()),
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),

@@ -152,6 +152,38 @@ class _FakeReferralSvc:
         )
 
 
+class _FakeTemplates:
+    def __init__(self) -> None:
+        self.custom: dict[tuple[str, str], str] = {}
+        self.saved: list[tuple[str, str, str, int]] = []
+        self.reset_calls: list[tuple[str, str]] = []
+
+    async def list_all(self, locale: str) -> list[Any]:
+        from services.template_service import TEMPLATE_DEFS
+
+        return [
+            SimpleNamespace(
+                key=d.key,
+                locale=locale,
+                is_custom=(d.key, locale) in self.custom,
+                content_preview="",
+                updated_at=None,
+            )
+            for d in TEMPLATE_DEFS
+        ]
+
+    async def get(self, key: str, locale: str) -> str | None:
+        return self.custom.get((key, locale))
+
+    async def set(self, key: str, locale: str, content: str, updated_by: int) -> None:
+        self.custom[(key, locale)] = content
+        self.saved.append((key, locale, content, updated_by))
+
+    async def reset(self, key: str, locale: str) -> None:
+        self.reset_calls.append((key, locale))
+        self.custom.pop((key, locale), None)
+
+
 class _FakeAd:
     def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
         self.id = ad_id
@@ -264,6 +296,7 @@ async def _navigate(
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
         lambda s: _FakeReferralSvc(),
+        _FakeTemplates(),
         _FakeQueue(),
         signer,
         translate,
@@ -403,6 +436,7 @@ async def _write(
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
+        _FakeTemplates(),
         _signer(),
         translate,
         _LOCALE,
@@ -518,6 +552,7 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
+        _FakeTemplates(),
         _signer(),
         translate,
         _LOCALE,
@@ -530,6 +565,66 @@ async def test_platform_csv_export_sends_document() -> None:
     await _uwrite(callback, ParsedPanel("t", "csv"), _FakeUsersRW())
     callback.bot.send_document.assert_awaited_once()
     callback.answer.assert_awaited()
+
+
+async def test_navigate_templates_list() -> None:
+    signer = _signer()
+    callback = _callback(signer, "tp", "op")
+    await _navigate(callback, ParsedPanel("tp", "op"), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Templates" in text
+
+
+async def _twrite(callback: Any, panel: ParsedPanel, templates: _FakeTemplates) -> None:
+    await panel_write(
+        callback,
+        panel,
+        _session(),
+        _user(),
+        _state(),
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
+        templates,
+        _signer(),
+        translate,
+        _LOCALE,
+    )
+
+
+async def test_template_edit_arms_fsm() -> None:
+    callback = _callback(_signer(), "tp", "ed")
+    templates = _FakeTemplates()
+    state = _state()
+    await panel_write(
+        callback,
+        ParsedPanel("tp", "ed", 0),
+        _session(),
+        _user(),
+        state,
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
+        templates,
+        _signer(),
+        translate,
+        _LOCALE,
+    )
+    state.set_state.assert_awaited_once()
+
+
+async def test_template_reset_confirmed_reverts() -> None:
+    callback = _callback(_signer(), "tp", "rsc")
+    templates = _FakeTemplates()
+    templates.custom[("welcome", _LOCALE)] = "custom"
+    await _twrite(callback, ParsedPanel("tp", "rsc", 0), templates)
+    assert templates.reset_calls == [("welcome", _LOCALE)]
 
 
 async def test_subscribers_export_shows_format_picker() -> None:
@@ -566,6 +661,7 @@ async def test_subscribers_import_arms_upload_state() -> None:
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
+        _FakeTemplates(),
         signer,
         translate,
         _LOCALE,
@@ -662,6 +758,7 @@ async def test_user_detail_renders_via_navigation() -> None:
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
         lambda s: _FakeReferralSvc(),
+        _FakeTemplates(),
         _FakeQueue(),
         signer,
         translate,
@@ -692,6 +789,7 @@ async def _bwrite(callback: Any, panel: ParsedPanel) -> None:
         lambda s: _FakeAds(),
         lambda s: _FakeBroadcasts(),
         lambda s: _FakeAudience(),
+        _FakeTemplates(),
         _signer(),
         translate,
         _LOCALE,
@@ -713,6 +811,7 @@ async def _awrite(
         lambda s: ads,
         lambda s: broadcasts or _FakeBroadcasts(),
         lambda s: _FakeAudience(),
+        _FakeTemplates(),
         _signer(),
         translate,
         _LOCALE,

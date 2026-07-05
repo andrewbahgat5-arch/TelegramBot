@@ -152,6 +152,37 @@ def build_platform_stats(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_template_list(
+    views: Sequence[Any], signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """One tappable row per editable template (Sprint 13.8); custom rows marked ✏️."""
+    rows = [
+        [
+            _btn(
+                signer,
+                f"{'✏️' if view.is_custom else '📄'} {view.key}",
+                "tp",
+                "inf",
+                index,
+            )
+        ]
+        for index, view in enumerate(views)
+    ]
+    rows.append(nav_row(signer, locale, back=("mn", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_template_detail(
+    index: int, *, is_custom: bool, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """A template's edit screen: Edit Content, Reset (only if custom), Back (13.8)."""
+    rows = [[_btn(signer, translate("panel.templates.edit", locale), "tp", "ed", index)]]
+    if is_custom:
+        rows.append([_btn(signer, translate("panel.templates.reset", locale), "tp", "rs", index)])
+    rows.append(nav_row(signer, locale, back=("tp", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_export_formats(signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
     """Format picker for subscriber export (Sprint 13.6): CSV / JSON + Back."""
     return InlineKeyboardMarkup(

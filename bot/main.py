@@ -44,6 +44,7 @@ from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
 from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
+from infrastructure.database.message_template_store import MessageTemplateStore
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
 from infrastructure.database.repositories.ad_audience_rule import AdAudienceRuleRepository
 from infrastructure.database.repositories.ad_button import AdButtonRepository
@@ -87,6 +88,7 @@ from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
 from services.referral_service import ReferralService
 from services.settings_service import SettingsService
+from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
 from services.user_service import UserService
 
@@ -107,6 +109,7 @@ def build_dispatcher(
     audience_service_factory: Callable[[AsyncSession], AudienceService],
     admin_service_factory: Callable[[AsyncSession], AdminService],
     referral_service_factory: Callable[[AsyncSession], ReferralService],
+    template_service: TemplateService,
     queue_service: QueueService,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
@@ -126,6 +129,7 @@ def build_dispatcher(
     dp["audience_service_factory"] = audience_service_factory
     dp["admin_service_factory"] = admin_service_factory
     dp["referral_service_factory"] = referral_service_factory
+    dp["template_service"] = template_service
     dp["queue_service"] = queue_service
     dp["notification_service"] = notification_service
     dp["callback_signer"] = callback_signer
@@ -172,6 +176,11 @@ async def main() -> None:
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
     queue_service = QueueService(RedisQueue(redis_clients.queue))
+
+    # Admin-editable message templates (Sprint 13.8): a process singleton whose cache is
+    # warmed once here and mirrored into core.i18n's override map (read-heavy, write-rare).
+    template_service = TemplateService(MessageTemplateStore(session_factory))
+    await template_service.load()
 
     # The registry is a process singleton (holds provider health state). It reads
     # provider settings via an adapter that opens its own short-lived sessions.
@@ -298,6 +307,7 @@ async def main() -> None:
         audience_service_factory=make_audience_service,
         admin_service_factory=make_admin_service,
         referral_service_factory=make_referral_service,
+        template_service=template_service,
         queue_service=queue_service,
         notification_service=notification_service,
         callback_signer=callback_signer,

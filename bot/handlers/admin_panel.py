@@ -57,6 +57,8 @@ from bot.keyboards.admin_panel import (
     build_section_menu,
     build_setting_stepper,
     build_settings_menu,
+    build_template_detail,
+    build_template_list,
     build_user_detail,
     build_user_list,
 )
@@ -64,7 +66,7 @@ from bot.keyboards.language_select import build_language_picker
 from bot.panel import ui
 from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
 from bot.panel.states import PanelStates
-from core.i18n import Translator, list_enabled_locales
+from core.i18n import Translator, catalog_template, list_enabled_locales
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
@@ -79,6 +81,7 @@ from services.settings_service import (
     SettingNotFoundError,
     SettingsService,
 )
+from services.template_service import TEMPLATE_DEFS, TemplateService
 from services.user_service import UserService
 
 router = Router(name="admin_panel")
@@ -143,6 +146,7 @@ async def panel_navigate(
     ad_service_factory: AdServiceFactory,
     admin_service_factory: AdminServiceFactory,
     referral_service_factory: ReferralServiceFactory,
+    template_service: TemplateService,
     queue_service: QueueService,
     callback_signer: CallbackSigner,
     translate: Translator,
@@ -167,6 +171,7 @@ async def panel_navigate(
         ad_service_factory,
         admin_service_factory,
         referral_service_factory,
+        template_service,
         queue_service,
         translate,
         locale,
@@ -191,6 +196,7 @@ async def panel_write(
     ad_service_factory: AdServiceFactory,
     broadcast_service_factory: BroadcastServiceFactory,
     audience_service_factory: AudienceServiceFactory,
+    template_service: TemplateService,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
@@ -272,6 +278,11 @@ async def panel_write(
         return
     if panel.section == "t" and panel.action == "csv":  # Platform analytics CSV export (13.3)
         await _platform_export(callback, admin_service_factory(session), translate, locale)
+        return
+    if panel.section == "tp":  # Message templates edit / reset (Sprint 13.8)
+        await _templates_write(
+            callback, panel, template_service, user, callback_signer, state, translate, locale
+        )
         return
     if panel.section == "a":  # Advertisements management (9.6.9)
         await _ads_write(
@@ -874,6 +885,7 @@ async def _render(
     ad_factory: AdServiceFactory,
     admin_factory: AdminServiceFactory,
     referral_factory: ReferralServiceFactory,
+    template_service: TemplateService,
     queue: QueueService,
     translate: Translator,
     locale: str,
@@ -910,6 +922,13 @@ async def _render(
     if section == "r":  # Referral analytics dashboard (Sprint 13.7)
         text = await _referral_dashboard_text(referral_factory(session), translate, locale)
         return text, build_section_menu("r", role, signer, locale)
+    if section == "tp":  # Message templates (Sprint 13.8)
+        if action == "inf" and panel.arg is not None and 0 <= panel.arg < len(TEMPLATE_DEFS):
+            return await _template_detail_view(
+                template_service, panel.arg, signer, translate, locale
+            )
+        views = await template_service.list_all(locale)
+        return _templates_list_text(translate, locale), build_template_list(views, signer, locale)
     if section == "u":
         users = user_factory(session)
         if action == "inf" and panel.arg is not None:
@@ -1131,6 +1150,156 @@ async def _referral_dashboard_text(
             lines.append(f"  {rank}. {ui.sparkline(handle, entry.invite_count, max_invites)}")
     lines += ["", ui.footer()]
     return "\n".join(lines)
+
+
+def _templates_list_text(translate: Translator, locale: str) -> str:
+    return "\n".join(
+        [
+            ui.header(translate("panel.templates.title", locale), icon=ui.emoji("templates")),
+            "",
+            translate("panel.templates.subtitle", locale),
+        ]
+    )
+
+
+def _template_detail_text(
+    definition: Any, content: str, is_custom: bool, translate: Translator, locale: str
+) -> str:
+    """Edit screen body: the raw template source, its placeholders, and custom/default."""
+    status = translate(
+        "panel.templates.status_custom" if is_custom else "panel.templates.status_default", locale
+    )
+    placeholders = ", ".join(f"{{{name}}}" for name in definition.placeholders) or "—"
+    return "\n".join(
+        [
+            ui.header(
+                translate("panel.templates.edit_title", locale, template=definition.key),
+                icon=ui.emoji("note"),
+            ),
+            "",
+            f"  {translate('panel.templates.content_label', locale)}",
+            "  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+            escape(content) or "—",
+            "  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
+            "",
+            ui.metric(
+                ui.emoji("settings"),
+                translate("panel.templates.placeholders", locale),
+                placeholders,
+            ),
+            ui.metric(ui.emoji("check"), translate("panel.templates.status", locale), status),
+        ]
+    )
+
+
+async def _template_detail_view(
+    template_service: TemplateService,
+    index: int,
+    signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Build a single template's edit screen (custom content or shipped default)."""
+    definition = TEMPLATE_DEFS[index]
+    custom = await template_service.get(definition.key, locale)
+    is_custom = custom is not None
+    content = custom if is_custom else (catalog_template(definition.i18n_key, locale) or "")
+    text = _template_detail_text(definition, content or "", is_custom, translate, locale)
+    return text, build_template_detail(index, is_custom=is_custom, signer=signer, locale=locale)
+
+
+async def _templates_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    template_service: TemplateService,
+    actor: UserSnapshot,
+    signer: CallbackSigner,
+    state: FSMContext,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Edit content (arm FSM), reset-to-default (confirm), or apply a confirmed reset (13.8)."""
+    index = panel.arg
+    if index is None or not (0 <= index < len(TEMPLATE_DEFS)):
+        await callback.answer()
+        return
+    definition = TEMPLATE_DEFS[index]
+    if panel.action == "ed":  # arm the content-edit FSM
+        if isinstance(callback.message, Message):
+            await state.set_state(PanelStates.template_edit)
+            await state.update_data(
+                template=definition.key,
+                locale=locale,
+                index=index,
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+            )
+            await _safe_edit(
+                callback.message,
+                translate("panel.templates.edit_prompt", locale, template=definition.key),
+                build_input_prompt(
+                    signer, locale, back=("tp", "inf", index), cancel=("tp", "inf", index)
+                ),
+            )
+        await callback.answer()
+        return
+    if panel.action == "rs":  # confirm reset-to-default
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.templates.reset_confirm", locale, template=definition.key),
+                build_confirm(
+                    signer, locale, confirm=("tp", "rsc", index, None), cancel=("tp", "inf", index)
+                ),
+            )
+        await callback.answer()
+        return
+    if panel.action == "rsc":  # confirmed reset
+        await template_service.reset(definition.key, locale)
+        text, markup = await _template_detail_view(
+            template_service, index, signer, translate, locale
+        )
+        if isinstance(callback.message, Message):
+            await _safe_edit(callback.message, text, markup)
+        await callback.answer(translate("panel.templates.reset_done", locale))
+        return
+    await callback.answer()
+
+
+@router.message(PanelStates.template_edit, OwnerFilter)
+async def on_template_edit(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    user: UserSnapshot,
+    template_service: TemplateService,
+    callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Capture the typed template content, persist it, and re-render the edit screen (13.8)."""
+    data = await state.get_data()
+    key, tlocale, index = data.get("key"), data.get("locale"), data.get("index")
+    chat_id, message_id = data.get("chat_id"), data.get("message_id")
+    if (
+        not isinstance(key, str)
+        or not isinstance(tlocale, str)
+        or not isinstance(index, int)
+        or chat_id is None
+        or message_id is None
+    ):
+        await state.clear()
+        return
+    content = (message.text or "").strip()
+    if not content:
+        await message.reply(translate("panel.templates.empty_content", locale))
+        return  # keep the state for the next attempt
+    await state.clear()
+    await template_service.set(key, tlocale, content, updated_by=user.id)
+    text, markup = await _template_detail_view(
+        template_service, index, callback_signer, translate, tlocale
+    )
+    await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
 
 
 async def _subscribers_write(
