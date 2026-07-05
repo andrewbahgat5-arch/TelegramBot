@@ -124,7 +124,11 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
         MenuItem("panel.menu.b.all", "ba"),
         MenuItem("panel.menu.b.by_language", "bl"),
     ),
-    "t": (MenuItem("panel.menu.t.refresh", "ls"),),
+    "t": (
+        MenuItem("panel.menu.t.refresh", "ls"),
+        # Platform analytics sub-screen (Sprint 13.3); arg=3 opens the all-time view.
+        MenuItem("panel.menu.t.platforms", "stt", arg=3),
+    ),
     "h": (MenuItem("panel.action.list", "ls"),),
     "m": (
         MenuItem("panel.menu.m.banned_list", "ls"),

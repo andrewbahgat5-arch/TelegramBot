@@ -119,6 +119,21 @@ class _FakeAdmin:
     async def count_user_active_jobs(self, user_id: int) -> int:
         return 1
 
+    async def get_platform_stats(self, *, period: str = "all") -> Any:
+        platforms = [
+            SimpleNamespace(platform="tiktok", count=451, share_pct=62.7),
+            SimpleNamespace(platform="instagram", count=197, share_pct=27.4),
+        ]
+        return SimpleNamespace(platforms=platforms, total=648, period=period)
+
+    async def get_platform_report(self) -> Any:
+        rows = [
+            SimpleNamespace(
+                platform="tiktok", today=3, week=10, month=40, all_time=451, share_pct=62.7
+            )
+        ]
+        return SimpleNamespace(rows=rows, total_all_time=451)
+
 
 class _FakeAd:
     def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
@@ -275,6 +290,14 @@ async def test_navigate_statistics_renders_stats() -> None:
     callback = _callback(signer, "t", "op")
     await _navigate(callback, ParsedPanel("t", "op"), _user(), signer)
     assert "Statistics" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_navigate_platform_stats_renders_sparklines() -> None:
+    signer = _signer()
+    callback = _callback(signer, "t", "stt")
+    await _navigate(callback, ParsedPanel("t", "stt", 3), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "TikTok" in text and "62.7%" in text
 
 
 async def test_navigate_users_list_shows_tappable_rows() -> None:
@@ -469,6 +492,14 @@ async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> Non
         translate,
         _LOCALE,
     )
+
+
+async def test_platform_csv_export_sends_document() -> None:
+    signer = _signer()
+    callback = _callback(signer, "t", "csv")
+    await _uwrite(callback, ParsedPanel("t", "csv"), _FakeUsersRW())
+    callback.bot.send_document.assert_awaited_once()
+    callback.answer.assert_awaited()
 
 
 async def test_ban_opens_confirm_without_mutating() -> None:

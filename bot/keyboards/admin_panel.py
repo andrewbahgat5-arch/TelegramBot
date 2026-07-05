@@ -119,6 +119,39 @@ def build_section_menu(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_platform_stats(
+    signer: CallbackSigner, locale: str, *, period_index: int, role: UserRole
+) -> InlineKeyboardMarkup:
+    """Platform-analytics screen: time filters (compact), owner-only CSV export, Back.
+
+    The four period buttons carry ``stt`` with arg 0..3 (today/week/month/all); the
+    active period is marked. Export is a write action, so it is hidden from moderators
+    here (keyboard layer) and blocked by ``OwnerFilter`` (filter layer).
+    """
+    filters = [
+        _btn(
+            signer,
+            f"{'• ' if period_index == idx else ''}{translate(key, locale)}",
+            "t",
+            "stt",
+            idx,
+        )
+        for idx, key in enumerate(
+            (
+                "panel.platforms.filter.today",
+                "panel.platforms.filter.week",
+                "panel.platforms.filter.month",
+                "panel.platforms.filter.all",
+            )
+        )
+    ]
+    rows = [filters]  # all four on one compact row (§2.2 rule 3)
+    if role is UserRole.OWNER:
+        rows.append([_btn(signer, translate("panel.platforms.export", locale), "t", "csv")])
+    rows.append(nav_row(signer, locale, back=("t", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_settings_menu(
     role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:

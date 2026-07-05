@@ -26,7 +26,9 @@ interpolated verbatim; everything else is a ``core.i18n`` key.
 
 from __future__ import annotations
 
+import csv
 import datetime
+import io
 from collections.abc import Callable, Sequence
 from html import escape
 from typing import Any
@@ -35,7 +37,7 @@ from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
@@ -49,6 +51,7 @@ from bot.keyboards.admin_panel import (
     build_confirm,
     build_input_prompt,
     build_main_menu,
+    build_platform_stats,
     build_section_menu,
     build_setting_stepper,
     build_settings_menu,
@@ -89,6 +92,9 @@ OwnerFilter = RoleFilter(UserRole.OWNER)
 
 _OWNER_ONLY_SECTIONS = frozenset(section.code for section in SECTIONS if section.owner_only)
 _LIST_LIMIT = 20
+
+# Platform-analytics period filter, indexed by the compact callback ``arg`` (13.3).
+_PERIODS: tuple[str, ...] = ("today", "week", "month", "all")
 
 
 # --- entry commands -------------------------------------------------------
@@ -246,6 +252,9 @@ async def panel_write(
             translate,
             locale,
         )
+        return
+    if panel.section == "t" and panel.action == "csv":  # Platform analytics CSV export (13.3)
+        await _platform_export(callback, admin_service_factory(session), translate, locale)
         return
     if panel.section == "a":  # Advertisements management (9.6.9)
         await _ads_write(
@@ -867,6 +876,16 @@ async def _render(
             settings_factory(session), translate, locale
         ), build_settings_menu(role, signer, locale)
     if section == "t":
+        if action == "stt":  # platform-analytics sub-screen (Sprint 13.3)
+            period = (
+                _PERIODS[panel.arg]
+                if panel.arg is not None and 0 <= panel.arg < len(_PERIODS)
+                else "all"
+            )
+            text = await _platform_stats_text(admin_factory(session), period, translate, locale)
+            return text, build_platform_stats(
+                signer, locale, period_index=_PERIODS.index(period), role=role
+            )
         return await _stats_text(
             user_factory(session), queue, translate, locale
         ), build_section_menu("t", role, signer, locale)
@@ -997,6 +1016,70 @@ async def _stats_text(
         ui.footer(),
     ]
     return "\n".join(lines)
+
+
+def _platform_name(code: str, translate: Translator, locale: str) -> str:
+    """Localized platform display name, falling back to the raw code (13.3)."""
+    key = f"platform.{code.lower()}"
+    name = translate(key, locale)
+    return code if name == key else name
+
+
+async def _platform_stats_text(
+    admin: AdminService, period: str, translate: Translator, locale: str
+) -> str:
+    """Sparkline breakdown of downloads per platform for a period (Sprint 13.3)."""
+    view = await admin.get_platform_stats(period=period)
+    title = translate("panel.platforms.title", locale)
+    period_label = translate(f"panel.platforms.filter.{period}", locale)
+    lines = [ui.header(f"{title} · {period_label}", icon=ui.emoji("chart")), ""]
+    if not view.platforms:
+        lines.append(translate("panel.platforms.empty", locale))
+        lines += ["", ui.footer()]
+        return "\n".join(lines)
+    max_count = max(p.count for p in view.platforms)
+    for entry in view.platforms:
+        name = _platform_name(entry.platform, translate, locale)
+        lines.append(f"{ui.sparkline(name, entry.count, max_count)}  {entry.share_pct:.1f}%")
+    lines += [
+        ui.divider(),
+        ui.metric(ui.emoji("chart"), translate("panel.platforms.total", locale), view.total),
+        "",
+        ui.footer(),
+    ]
+    return "\n".join(lines)
+
+
+def _platform_report_csv(report: Any, translate: Translator, locale: str) -> bytes:
+    """Render the multi-period platform report to CSV bytes (Sprint 13.3)."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["Platform", "Today", "This Week", "This Month", "All Time", "Share %"])
+    for row in report.rows:
+        writer.writerow(
+            [
+                _platform_name(row.platform, translate, locale),
+                row.today,
+                row.week,
+                row.month,
+                row.all_time,
+                f"{row.share_pct:.1f}",
+            ]
+        )
+    return buffer.getvalue().encode("utf-8")
+
+
+async def _platform_export(
+    callback: CallbackQuery, admin: AdminService, translate: Translator, locale: str
+) -> None:
+    """Generate and send the platform-analytics CSV as a document (Sprint 13.3)."""
+    report = await admin.get_platform_report()
+    data = _platform_report_csv(report, translate, locale)
+    date = datetime.datetime.now(datetime.UTC).date().isoformat()
+    document = BufferedInputFile(data, filename=f"download_stats_{date}.csv")
+    if callback.bot is not None and isinstance(callback.message, Message):
+        await callback.bot.send_document(callback.message.chat.id, document)
+    await callback.answer(translate("panel.platforms.exported", locale))
 
 
 async def _users_text(
