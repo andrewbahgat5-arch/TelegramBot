@@ -316,7 +316,16 @@ async def test_open_panel_sends_main_menu() -> None:
     signer = _signer()
     message: Any = AsyncMock(spec=Message)
     message.answer = AsyncMock()
-    await open_panel(message, _user(), signer, translate, _LOCALE)
+    await open_panel(
+        message,
+        _session(),
+        _user(),
+        lambda s: _FakeUsers(),
+        _FakeQueue(),
+        signer,
+        translate,
+        _LOCALE,
+    )
     message.answer.assert_awaited_once()
     call = _call(message.answer)
     assert "Admin Panel" in call.args[0]

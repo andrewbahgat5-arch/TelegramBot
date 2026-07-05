@@ -110,14 +110,41 @@ _PERIODS: tuple[str, ...] = ("today", "week", "month", "all")
 @router.message(Command("admin"), StaffFilter)
 async def open_panel(
     message: Message,
+    session: AsyncSession,
     user: UserSnapshot,
+    user_service_factory: UserServiceFactory,
+    queue_service: QueueService,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
 ) -> None:
-    await message.answer(
-        translate("panel.main_title", locale),
-        reply_markup=build_main_menu(user.role, callback_signer, locale),
+    text = await _main_menu_text(user_service_factory(session), queue_service, translate, locale)
+    await message.answer(text, reply_markup=build_main_menu(user.role, callback_signer, locale))
+
+
+async def _main_menu_text(
+    users: UserService, queue: QueueService, translate: Translator, locale: str
+) -> str:
+    """The main-menu live dashboard: 5 key metrics before the owner taps anything (§2.5)."""
+    stats = await users.get_stats()
+    depth, active = await queue.depth(), await queue.active_count()
+
+    def label(name: str) -> str:
+        return translate(f"panel.stats.label.{name}", locale)
+
+    return "\n".join(
+        [
+            ui.header(translate("panel.main_title", locale), icon=ui.emoji("stats")),
+            "",
+            ui.metric(ui.emoji("members"), label("members"), stats.total_users),
+            ui.metric(ui.emoji("fire"), label("active_24h"), stats.active_24h),
+            ui.metric(ui.emoji("download"), label("downloads"), stats.total_downloads),
+            ui.metric(ui.emoji("queue"), label("queue"), f"{depth} / {active}"),
+            ui.metric(ui.emoji("premium"), label("premium"), stats.premium_users),
+            ui.metric(ui.badge("banned"), label("banned"), stats.banned_users),
+            "",
+            ui.footer(),
+        ]
     )
 
 
@@ -908,7 +935,8 @@ async def _render(
     section, action = panel.section, panel.action
     role = user.role
     if section == "mn":
-        return translate("panel.main_title", locale), build_main_menu(role, signer, locale)
+        text = await _main_menu_text(user_factory(session), queue, translate, locale)
+        return text, build_main_menu(role, signer, locale)
     if section == "l":  # personal language preference (Sprint 11.5) — same picker as /start
         return translate("language.picker_prompt", locale), build_language_picker(signer)
     if section == "s":
