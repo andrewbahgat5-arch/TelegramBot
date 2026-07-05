@@ -56,6 +56,7 @@ from bot.keyboards.admin_panel import (
     build_user_list,
 )
 from bot.keyboards.language_select import build_language_picker
+from bot.panel import ui
 from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
 from bot.panel.states import PanelStates
 from core.i18n import Translator, list_enabled_locales
@@ -961,22 +962,41 @@ async def _safe_edit(message: Message, text: str, markup: InlineKeyboardMarkup) 
 async def _stats_text(
     users: UserService, queue: QueueService, translate: Translator, locale: str
 ) -> str:
+    """Dashboard-grade Statistics screen (Sprint 13.2/13.4) built from ui.py primitives."""
     stats = await users.get_stats()
     depth, active = await queue.depth(), await queue.active_count()
-    return translate(
-        "panel.stats.body",
-        locale,
-        total=stats.total_users,
-        premium=stats.premium_users,
-        staff=stats.staff_users,
-        banned=stats.banned_users,
-        today=stats.new_today,
-        week=stats.new_this_week,
-        active_today=stats.active_today,
-        downloads=stats.total_downloads,
-        depth=depth,
-        active=active,
-    )
+
+    def label(name: str) -> str:
+        return translate(f"panel.stats.label.{name}", locale)
+
+    lines = [
+        ui.header(translate("panel.stats.title", locale), icon=ui.emoji("stats")),
+        "",
+        ui.metric(ui.emoji("members"), label("members"), stats.total_users),
+        ui.metric(ui.emoji("premium"), label("premium"), stats.premium_users),
+        ui.metric(ui.emoji("moderator"), label("staff"), stats.staff_users),
+        ui.metric(ui.badge("banned"), label("banned"), stats.banned_users),
+        ui.divider(),
+        ui.metric(ui.emoji("new"), label("new_today"), stats.new_today),
+        ui.metric(ui.emoji("fire"), label("active_24h"), stats.active_24h),
+        ui.metric(ui.emoji("fire"), label("active_7d"), stats.active_7d),
+        ui.metric(ui.emoji("fire"), label("active_30d"), stats.active_30d),
+        ui.divider(),
+        ui.metric(ui.emoji("sleep"), label("inactive_5d"), stats.inactive_5d),
+        ui.metric(ui.emoji("sleep"), label("inactive_7d"), stats.inactive_7d),
+        ui.metric(ui.emoji("sleep"), label("inactive_30d"), stats.inactive_30d),
+        ui.divider(),
+        ui.metric(ui.emoji("active"), label("this_hour"), stats.active_current_hour),
+        ui.metric(ui.emoji("active"), label("prev_hour"), stats.active_previous_hour),
+        ui.divider(),
+        ui.metric(ui.emoji("deleted"), label("deleted"), stats.deleted_users),
+        ui.metric(ui.emoji("blocked"), label("blocked"), stats.blocked_users),
+        ui.metric(ui.emoji("download"), label("downloads"), stats.total_downloads),
+        ui.metric(ui.emoji("queue"), label("queue"), f"{depth} / {active}"),
+        "",
+        ui.footer(),
+    ]
+    return "\n".join(lines)
 
 
 async def _users_text(
