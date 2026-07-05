@@ -275,6 +275,17 @@
   "platform.snapchat": "Snapchat",
   "platform.reddit": "Reddit",
 
+  "panel.menu.u.export": "📤 Export",
+  "panel.menu.u.import": "📥 Import",
+  "panel.users.export_prompt": "📤 <b>Export Subscribers</b>\nChoose a file format.",
+  "panel.users.export_csv": "📊 CSV",
+  "panel.users.export_json": "📋 JSON",
+  "panel.users.exported": "Export ready",
+  "panel.users.import_prompt": "📥 <b>Import Subscribers</b>\nSend a .csv or .json file exported from this bot. Existing users are skipped (never overwritten).",
+  "panel.users.import_need_file": "Please send a .csv or .json <b>file</b> (as a document).",
+  "panel.users.import_parse_error": "❌ Could not parse that file. Make sure it's a valid .csv or .json export.",
+  "panel.users.import_result": "✅ <b>Import Complete</b>\n🆕 Created: <b>{created}</b>\n♻️ Skipped: {skipped}\n❌ Failed: {failed}",
+
   "panel.settings.info.cache_body": "🗃 <b>Cache</b>\n\nRecently fetched files and metadata are cached in Redis to skip re-downloads. There is no tunable cache key in the panel — TTLs are configured via the <code>CACHE_*</code> environment settings.",
   "panel.settings.info.languages_body": "🌐 <b>Languages</b>\n\nEnabled: {languages}\nDefault: {default}\n\nEach user picks their own language anytime via 🌐 Change Language (under /start) or the 🌐 Language section here — there's no global language setting to edit.",
   "panel.settings.info.fallback": "📋 <b>Info</b>\n\nNothing to show.",

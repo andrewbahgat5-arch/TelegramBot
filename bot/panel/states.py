@@ -16,6 +16,10 @@ or write clears pending input, so only one guided input is ever active at a time
   language / user id / button), discriminated by ``field`` in the FSM data (9.6 wizard).
 * :attr:`wizard_content` — the Owner is sending the advertisement content; the next
   message becomes the ad (copy-mode capture, 9.6 wizard).
+* :attr:`import_subscribers` — the Owner is uploading a ``.csv`` / ``.json`` file to
+  bulk-import subscribers (Sprint 13.6); the next document is parsed and upserted.
+* :attr:`template_edit` — the Owner is typing new content for a message template
+  (Sprint 13.8); ``key``/``locale`` ride in the FSM data.
 """
 
 from __future__ import annotations
@@ -29,3 +33,5 @@ class PanelStates(StatesGroup):
     user_action = State()
     wizard_text = State()
     wizard_content = State()
+    import_subscribers = State()
+    template_edit = State()

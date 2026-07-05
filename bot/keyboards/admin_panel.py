@@ -152,6 +152,19 @@ def build_platform_stats(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_export_formats(signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
+    """Format picker for subscriber export (Sprint 13.6): CSV / JSON + Back."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _btn(signer, translate("panel.users.export_csv", locale), "u", "exc"),
+                _btn(signer, translate("panel.users.export_json", locale), "u", "exj"),
+            ],
+            nav_row(signer, locale, back=("u", "op")),
+        ]
+    )
+
+
 def build_settings_menu(
     role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:

@@ -474,6 +474,10 @@ class _FakeUsersRW:
         self.target = replace(self.target, role=role)
         return self.target
 
+    async def export_users(self, fmt: str = "csv") -> tuple[bytes, str]:
+        self.calls.append(("export", fmt))
+        return b"telegram_id\n555\n", f"subscribers_2026-07-05.{fmt}"
+
 
 async def _uwrite(callback: Any, panel: ParsedPanel, users: _FakeUsersRW) -> None:
     await panel_write(
@@ -500,6 +504,48 @@ async def test_platform_csv_export_sends_document() -> None:
     await _uwrite(callback, ParsedPanel("t", "csv"), _FakeUsersRW())
     callback.bot.send_document.assert_awaited_once()
     callback.answer.assert_awaited()
+
+
+async def test_subscribers_export_shows_format_picker() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "exp")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "exp"), users)
+    assert users.calls == []  # picker only; no export yet
+    assert "Export" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_subscribers_export_csv_sends_document() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "exc")
+    users = _FakeUsersRW()
+    await _uwrite(callback, ParsedPanel("u", "exc"), users)
+    assert users.calls == [("export", "csv")]
+    callback.bot.send_document.assert_awaited_once()
+
+
+async def test_subscribers_import_arms_upload_state() -> None:
+    signer = _signer()
+    callback = _callback(signer, "u", "imp")
+    state = _state()
+    await panel_write(
+        callback,
+        ParsedPanel("u", "imp"),
+        _session(),
+        _user(),
+        state,
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
+        signer,
+        translate,
+        _LOCALE,
+    )
+    state.set_state.assert_awaited_once()
+    assert "Import" in callback.message.edit_text.await_args.args[0]
 
 
 async def test_ban_opens_confirm_without_mutating() -> None:

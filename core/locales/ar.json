@@ -275,6 +275,17 @@
   "platform.snapchat": "سناب شات",
   "platform.reddit": "ريديت",
 
+  "panel.menu.u.export": "📤 تصدير",
+  "panel.menu.u.import": "📥 استيراد",
+  "panel.users.export_prompt": "📤 <b>تصدير المشتركين</b>\nاختر صيغة الملف.",
+  "panel.users.export_csv": "📊 CSV",
+  "panel.users.export_json": "📋 JSON",
+  "panel.users.exported": "التصدير جاهز",
+  "panel.users.import_prompt": "📥 <b>استيراد المشتركين</b>\nأرسل ملف ‎.csv أو ‎.json مُصدّر من هذا البوت. يتم تخطّي المستخدمين الموجودين (لا يُستبدلون).",
+  "panel.users.import_need_file": "الرجاء إرسال ملف ‎.csv أو ‎.json <b>كمستند</b>.",
+  "panel.users.import_parse_error": "❌ تعذّر تحليل الملف. تأكد أنه ملف ‎.csv أو ‎.json صالح.",
+  "panel.users.import_result": "✅ <b>اكتمل الاستيراد</b>\n🆕 أُنشئ: <b>{created}</b>\n♻️ تم التخطّي: {skipped}\n❌ فشل: {failed}",
+
   "panel.settings.info.cache_body": "🗃 <b>التخزين المؤقت</b>\n\nيتم تخزين الملفات والبيانات الوصفية المجلوبة حديثًا مؤقتًا في Redis لتجنّب إعادة التنزيل. لا يوجد مفتاح تخزين مؤقت قابل للتعديل في اللوحة — يتم ضبط مدد الصلاحية عبر إعدادات البيئة <code>CACHE_*</code>.",
   "panel.settings.info.languages_body": "🌐 <b>اللغات</b>\n\nالمفعّلة: {languages}\nالافتراضية: {default}\n\nيختار كل مستخدم لغته بنفسه في أي وقت عبر 🌐 تغيير اللغة (ضمن /start) أو قسم 🌐 اللغة هنا — لا يوجد إعداد لغة عام للتعديل.",
   "panel.settings.info.fallback": "📋 <b>معلومات</b>\n\nلا يوجد ما يُعرض.",

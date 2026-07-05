@@ -106,6 +106,9 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
         MenuItem("panel.menu.u.remove_premium", "rp"),
         MenuItem("panel.menu.u.make_admin", "mka"),
         MenuItem("panel.menu.u.remove_admin", "rma"),
+        # Subscriber export/import (Sprint 13.6) — owner-only (write-tier actions).
+        MenuItem("panel.menu.u.export", "exp"),
+        MenuItem("panel.menu.u.import", "imp"),
     ),
     "a": (
         MenuItem("panel.action.list", "ls"),

@@ -29,6 +29,7 @@ from __future__ import annotations
 import csv
 import datetime
 import io
+import json
 from collections.abc import Callable, Sequence
 from html import escape
 from typing import Any
@@ -49,6 +50,7 @@ from bot.keyboards.admin_panel import (
     build_ad_detail,
     build_ad_list,
     build_confirm,
+    build_export_formats,
     build_input_prompt,
     build_main_menu,
     build_platform_stats,
@@ -233,6 +235,17 @@ async def panel_write(
             panel,
             settings_service_factory(session),
             user,
+            callback_signer,
+            state,
+            translate,
+            locale,
+        )
+        return
+    if panel.section == "u" and panel.action in ("exp", "exc", "exj", "imp"):  # subscribers (13.6)
+        await _subscribers_write(
+            callback,
+            panel,
+            user_service_factory(session),
             callback_signer,
             state,
             translate,
@@ -1080,6 +1093,93 @@ async def _platform_export(
     if callback.bot is not None and isinstance(callback.message, Message):
         await callback.bot.send_document(callback.message.chat.id, document)
     await callback.answer(translate("panel.platforms.exported", locale))
+
+
+async def _subscribers_write(
+    callback: CallbackQuery,
+    panel: ParsedPanel,
+    users: UserService,
+    signer: CallbackSigner,
+    state: FSMContext,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Subscriber export (format picker → document) and import (arm file upload) (13.6)."""
+    if panel.action == "exp":  # show the CSV / JSON format picker
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.users.export_prompt", locale),
+                build_export_formats(signer, locale),
+            )
+        await callback.answer()
+        return
+    if panel.action in ("exc", "exj"):  # generate + send the export document
+        data, filename = await users.export_users("csv" if panel.action == "exc" else "json")
+        if callback.bot is not None and isinstance(callback.message, Message):
+            await callback.bot.send_document(
+                callback.message.chat.id, BufferedInputFile(data, filename=filename)
+            )
+        await callback.answer(translate("panel.users.exported", locale))
+        return
+    # imp → arm the file-upload FSM; the next document is parsed and upserted
+    if isinstance(callback.message, Message):
+        await state.set_state(PanelStates.import_subscribers)
+        await state.update_data(
+            chat_id=callback.message.chat.id, message_id=callback.message.message_id
+        )
+        await _safe_edit(
+            callback.message,
+            translate("panel.users.import_prompt", locale),
+            build_input_prompt(signer, locale, back=("u", "op", None), cancel=("u", "op", None)),
+        )
+    await callback.answer()
+
+
+def _parse_subscribers(raw: bytes, filename: str) -> list[dict[str, Any]]:
+    """Parse an uploaded ``.json`` / ``.csv`` subscriber file into row dicts (13.6)."""
+    text = raw.decode("utf-8-sig", errors="replace")
+    if filename.lower().endswith(".json"):
+        payload = json.loads(text)
+        rows = payload.get("users", []) if isinstance(payload, dict) else payload
+        if not isinstance(rows, list):
+            raise ValueError("json payload is not a user list")
+        return [row for row in rows if isinstance(row, dict)]
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+@router.message(PanelStates.import_subscribers, OwnerFilter)
+async def on_import_subscribers(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    session: AsyncSession,
+    user_service_factory: UserServiceFactory,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Receive the uploaded subscriber file, parse it, and bulk-import (create-only)."""
+    if message.document is None:
+        await message.reply(translate("panel.users.import_need_file", locale))
+        return  # keep the state so the next upload is still captured
+    await state.clear()
+    buffer = await bot.download(message.document)
+    raw = buffer.read() if buffer is not None else b""
+    try:
+        rows = _parse_subscribers(raw, message.document.file_name or "")
+    except (ValueError, json.JSONDecodeError):
+        await message.reply(translate("panel.users.import_parse_error", locale))
+        return
+    result = await user_service_factory(session).import_users(rows)
+    await message.reply(
+        translate(
+            "panel.users.import_result",
+            locale,
+            created=result.created,
+            skipped=result.skipped,
+            failed=result.failed,
+        )
+    )
 
 
 async def _users_text(
