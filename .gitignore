@@ -62,3 +62,6 @@ logs/
 deploy/.data/
 pgdata/
 redisdata/
+
+# --- graphify (generated code-graph artifacts; not source) ---
+graphify-out/
