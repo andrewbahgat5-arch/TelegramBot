@@ -53,6 +53,9 @@ class UserStats:
     inactive_30d: int = 0
     active_current_hour: int = 0
     active_previous_hour: int = 0
+    # User-health counts (Sprint 13.5).
+    blocked_users: int = 0
+    deleted_users: int = 0
 
 
 class UserService:
@@ -138,6 +141,8 @@ class UserService:
             inactive_30d=await self._repo.count_inactive_days(30),
             active_current_hour=await self._repo.count_active_current_hour(),
             active_previous_hour=await self._repo.count_active_previous_hour(),
+            blocked_users=await self._repo.count_blocked(),
+            deleted_users=await self._repo.count_deleted(),
         )
 
     async def list_users(self, *, limit: int = 30, offset: int = 0) -> list[UserSnapshot]:

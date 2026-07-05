@@ -39,6 +39,10 @@ class User(Base):
     )
     total_downloads: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     last_activity_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    # User-health flags (Sprint 13.5): set by the batch Telegram-API status checker.
+    bot_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    status_checked_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

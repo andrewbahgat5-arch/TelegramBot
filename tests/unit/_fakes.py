@@ -82,6 +82,10 @@ def _today() -> datetime.date:
     return datetime.datetime.now(datetime.UTC).date()
 
 
+# Sort sentinel for never-checked users (status_checked_at IS NULL sorts first).
+_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+
+
 @dataclass
 class FakeUser:
     id: int
@@ -101,6 +105,9 @@ class FakeUser:
     last_activity_at: datetime.datetime | None = None
     updated_at: datetime.datetime | None = None
     created_at: datetime.datetime | None = None
+    bot_blocked: bool = False
+    is_deleted: bool = False
+    status_checked_at: datetime.datetime | None = None
 
 
 class FakeUserRepo:
@@ -236,6 +243,58 @@ class FakeUserRepo:
 
     async def count_staff(self) -> int:
         return sum(1 for u in self.by_tid.values() if u.role in ("owner", "moderator"))
+
+    # User-health detection (Sprint 13.5).
+    async def count_blocked(self) -> int:
+        return sum(1 for u in self.by_tid.values() if u.bot_blocked)
+
+    async def count_deleted(self) -> int:
+        return sum(1 for u in self.by_tid.values() if u.is_deleted)
+
+    async def list_blocked(self, *, limit: int = 30, offset: int = 0) -> Sequence[FakeUser]:
+        rows = sorted((u for u in self.by_tid.values() if u.bot_blocked), key=lambda u: u.id)
+        return rows[offset : offset + limit]
+
+    async def list_deleted(self, *, limit: int = 30, offset: int = 0) -> Sequence[FakeUser]:
+        rows = sorted((u for u in self.by_tid.values() if u.is_deleted), key=lambda u: u.id)
+        return rows[offset : offset + limit]
+
+    async def mark_blocked(self, telegram_id: int) -> None:
+        user = self.by_tid.get(telegram_id)
+        if user is not None:
+            user.bot_blocked, user.is_deleted = True, False
+            user.status_checked_at = datetime.datetime.now(datetime.UTC)
+
+    async def mark_deleted(self, telegram_id: int) -> None:
+        user = self.by_tid.get(telegram_id)
+        if user is not None:
+            user.is_deleted, user.bot_blocked = True, False
+            user.status_checked_at = datetime.datetime.now(datetime.UTC)
+
+    async def mark_active(self, telegram_id: int) -> None:
+        user = self.by_tid.get(telegram_id)
+        if user is not None:
+            user.bot_blocked = user.is_deleted = False
+            user.status_checked_at = datetime.datetime.now(datetime.UTC)
+
+    async def get_unchecked_ids(self, *, limit: int = 100) -> list[int]:
+        rows = sorted(
+            self.by_tid.values(),
+            key=lambda u: (u.status_checked_at is not None, u.status_checked_at or _EPOCH),
+        )
+        return [u.telegram_id for u in rows[:limit]]
+
+    async def purge_blocked(self) -> int:
+        victims = [tid for tid, u in self.by_tid.items() if u.bot_blocked]
+        for tid in victims:
+            del self.by_tid[tid]
+        return len(victims)
+
+    async def purge_deleted(self) -> int:
+        victims = [tid for tid, u in self.by_tid.items() if u.is_deleted]
+        for tid in victims:
+            del self.by_tid[tid]
+        return len(victims)
 
     def _audience(self, role: str | None, language: str | None) -> list[FakeUser]:
         users = [u for u in self.by_tid.values() if not u.is_banned]

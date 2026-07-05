@@ -5,7 +5,7 @@ from __future__ import annotations
 import datetime
 from collections.abc import Sequence
 
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import case, delete, func, or_, select, update
 from sqlalchemy.sql.elements import ColumnElement
 
 from domain.entities.audience import AudienceRuleSpec
@@ -171,6 +171,86 @@ class UserRepository(SqlAlchemyRepository[User]):
             select(func.count()).select_from(User).where(User.role.in_(_STAFF_ROLES))
         )
         return int(result.scalar_one())
+
+    # --- User-health detection (Sprint 13.5) ------------------------------
+
+    async def count_blocked(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.bot_blocked.is_(True))
+        )
+        return int(result.scalar_one())
+
+    async def count_deleted(self) -> int:
+        result = await self.session.execute(
+            select(func.count()).select_from(User).where(User.is_deleted.is_(True))
+        )
+        return int(result.scalar_one())
+
+    async def list_blocked(self, *, limit: int = 30, offset: int = 0) -> Sequence[User]:
+        result = await self.session.execute(
+            select(User)
+            .where(User.bot_blocked.is_(True))
+            .order_by(User.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return result.scalars().all()
+
+    async def list_deleted(self, *, limit: int = 30, offset: int = 0) -> Sequence[User]:
+        result = await self.session.execute(
+            select(User)
+            .where(User.is_deleted.is_(True))
+            .order_by(User.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return result.scalars().all()
+
+    async def mark_blocked(self, telegram_id: int) -> None:
+        """Flag a user as having blocked the bot; records the probe time."""
+        now = datetime.datetime.now(datetime.UTC)
+        await self.session.execute(
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(bot_blocked=True, is_deleted=False, status_checked_at=now)
+        )
+
+    async def mark_deleted(self, telegram_id: int) -> None:
+        """Flag a user's Telegram account as deleted/deactivated; records the probe time."""
+        now = datetime.datetime.now(datetime.UTC)
+        await self.session.execute(
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(is_deleted=True, bot_blocked=False, status_checked_at=now)
+        )
+
+    async def mark_active(self, telegram_id: int) -> None:
+        """Clear both health flags after a successful probe; records the probe time."""
+        now = datetime.datetime.now(datetime.UTC)
+        await self.session.execute(
+            update(User)
+            .where(User.telegram_id == telegram_id)
+            .values(bot_blocked=False, is_deleted=False, status_checked_at=now)
+        )
+
+    async def get_unchecked_ids(self, *, limit: int = 100) -> list[int]:
+        """Telegram ids to probe next: never-checked first, then oldest checked."""
+        result = await self.session.execute(
+            select(User.telegram_id)
+            .order_by(User.status_checked_at.asc().nulls_first())
+            .limit(limit)
+        )
+        return [int(tid) for tid in result.scalars().all()]
+
+    async def purge_blocked(self) -> int:
+        """Delete every user flagged ``bot_blocked``; returns the number removed."""
+        result = await self.session.execute(delete(User).where(User.bot_blocked.is_(True)))
+        return int(result.rowcount or 0)
+
+    async def purge_deleted(self) -> int:
+        """Delete every user flagged ``is_deleted``; returns the number removed."""
+        result = await self.session.execute(delete(User).where(User.is_deleted.is_(True)))
+        return int(result.rowcount or 0)
 
     @staticmethod
     def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:

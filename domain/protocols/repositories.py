@@ -96,6 +96,47 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Users with an Owner or Moderator role (admin stats)."""
         ...
 
+    # User-health detection (Sprint 13.5).
+    async def count_blocked(self) -> int:
+        """Users flagged as having blocked the bot."""
+        ...
+
+    async def count_deleted(self) -> int:
+        """Users whose Telegram account is flagged deleted/deactivated."""
+        ...
+
+    async def list_blocked(self, *, limit: int = 30, offset: int = 0) -> Sequence[T]:
+        """A page of blocked users (id ascending)."""
+        ...
+
+    async def list_deleted(self, *, limit: int = 30, offset: int = 0) -> Sequence[T]:
+        """A page of deleted-account users (id ascending)."""
+        ...
+
+    async def mark_blocked(self, telegram_id: int) -> None:
+        """Flag a user as having blocked the bot; records the probe time."""
+        ...
+
+    async def mark_deleted(self, telegram_id: int) -> None:
+        """Flag a user's account as deleted/deactivated; records the probe time."""
+        ...
+
+    async def mark_active(self, telegram_id: int) -> None:
+        """Clear both health flags after a successful probe; records the probe time."""
+        ...
+
+    async def get_unchecked_ids(self, *, limit: int = 100) -> list[int]:
+        """Telegram ids to probe next: never-checked first, then oldest checked."""
+        ...
+
+    async def purge_blocked(self) -> int:
+        """Delete every ``bot_blocked`` user; returns the number removed."""
+        ...
+
+    async def purge_deleted(self) -> int:
+        """Delete every ``is_deleted`` user; returns the number removed."""
+        ...
+
     async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
         """Count the non-banned audience matching the broadcast filters (16.8)."""
         ...
