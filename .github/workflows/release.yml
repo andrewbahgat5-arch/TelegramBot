@@ -1,0 +1,141 @@
+name: Release
+
+# Cut a production release image set from a version tag. Triggered by pushing a
+# tag like `v1.0.0` (or manually via the Actions UI). MASTER_PLAN Sprint 12 / A5.
+#
+# What this DOES (no external infra required):
+#   * re-run the full gate set on the exact release commit (a release must not
+#     ship if lint/types/architecture/tests/security are red);
+#   * validate deploy/docker-compose.prod.yml resolves;
+#   * build the bot/worker/api production images tagged with the release tag.
+#
+# What this deliberately does NOT do yet (needs Owner-provided infra — OQ-3 host,
+# a container registry + credentials): push images or deploy to production. The
+# push step below is wired but guarded on a REGISTRY secret, so it stays a no-op
+# until the Owner adds the secret. Deploy itself remains manual per D-032 (never
+# deploy to production without explicit Owner authorization) — see
+# deploy/RELEASE_CHECKLIST.md.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to build (defaults to the git ref name)"
+        required: false
+        default: ""
+
+env:
+  PYTHON_VERSION: "3.13"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  gates:
+    name: Release gates (lint · types · tests · security)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: Mypy (strict)
+        run: mypy --config-file=mypy.ini .
+      - name: Import-linter (architecture layers)
+        run: lint-imports
+      - name: Pytest
+        run: pytest
+      - name: pip-audit
+        run: pip-audit
+      - name: bandit
+        run: bandit -r . -c pyproject.toml
+
+  build:
+    name: Build production images
+    runs-on: ubuntu-latest
+    needs: gates
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="${GITHUB_REF_NAME}"; fi
+          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building image tag: $TAG"
+
+      - name: Validate production compose file
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          # Dummy values just so the ${VAR:?} interpolation guards resolve during
+          # `config` validation — these are NOT deployed anywhere.
+          DB_PASSWORD: ci-validate-only
+          TELEGRAM_API_ID: "0"
+          TELEGRAM_API_HASH: ci-validate-only
+        run: docker compose -f deploy/docker-compose.prod.yml config >/dev/null
+
+      - name: Build app images
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+        run: |
+          docker build -f deploy/Dockerfile.bot    -t telegram-bot/bot:"$IMAGE_TAG"    .
+          docker build -f deploy/Dockerfile.worker -t telegram-bot/worker:"$IMAGE_TAG" .
+          docker build -f deploy/Dockerfile.api    -t telegram-bot/api:"$IMAGE_TAG"    .
+
+      # --- Publish (Owner-infra-gated; no-op until a REGISTRY secret is set) -----
+      # Enable by adding repo secrets REGISTRY, REGISTRY_USER, REGISTRY_TOKEN and
+      # (optionally) an image-name prefix. Kept as a guarded, documented step so
+      # turning on publishing is a secrets change, not a workflow rewrite.
+      # `secrets` is not available in a step `if:`, so map it to an output first.
+      - name: Detect registry secret
+        id: reg
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+        run: |
+          if [ -n "$REGISTRY" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push images (skipped unless REGISTRY secret is configured)
+        if: ${{ steps.reg.outputs.enabled == 'true' }}
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          for svc in bot worker api; do
+            docker tag "telegram-bot/$svc:$IMAGE_TAG" "$REGISTRY/telegram-bot/$svc:$IMAGE_TAG"
+            docker push "$REGISTRY/telegram-bot/$svc:$IMAGE_TAG"
+          done
+
+      - name: Release summary
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+        run: |
+          {
+            echo "## Release build complete"
+            echo ""
+            echo "- **Tag:** \`$IMAGE_TAG\`"
+            echo "- **Images:** telegram-bot/{bot,worker,api}:\`$IMAGE_TAG\`"
+            echo "- **Publish:** ${{ steps.reg.outputs.enabled == 'true' && 'pushed to registry' || 'skipped (no REGISTRY secret)' }}"
+            echo ""
+            echo "Deploy is manual (D-032). Follow \`deploy/RELEASE_CHECKLIST.md\`."
+          } >> "$GITHUB_STEP_SUMMARY"
