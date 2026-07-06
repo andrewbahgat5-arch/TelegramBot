@@ -669,22 +669,31 @@ live execution. Work top-to-bottom; each block is a prerequisite for the next.
 
 | Field | Value |
 |---|---|
-| **Status** | `[ ]` Not Started |
-| **Completion** | 0% (0 / 7) |
+| **Status** | `[~]` Phase A COMPLETE (A1–A6, code/docs) — Phase B (12.1–12.7) Owner-infra-blocked |
+| **Completion** | Phase A 100% (6 / 6); Phase B 0% (0 / 7, blocked) |
 | **Goal** | Bot ready for public traffic. |
 | **Stop Point** | Owner signs off on smoke tests + E2E reruns + release entries in all three report files. V1 complete. |
 
-**Pending Tasks**
+**Phase A — deploy prep (code/docs, no production infra needed) — COMPLETE**
+
+- [x] **A1** `deploy/docker-compose.prod.yml` — app tier (bot/worker/api) over the postgres/redis/pgbouncer/uptime-kuma infra (`d06b583`, 2026-07-01).
+- [x] **A2** `.env.production.example` — production app-config template mirroring the LOCKED §13.2 key set, placeholder-only secrets; `.gitignore` exception; gate tests in `test_config.py` (`9e77ed4`, 2026-07-06).
+- [x] **A3** `deploy/smoke-test.sh` (scripted endpoint checks) + `deploy/SMOKE_TEST.md` (full launch checklist incl. the manual bot-flow half) (`3ebbbed`, 2026-07-06).
+- [x] **A4** `deploy/RELEASE_CHECKLIST.md` — ordered release procedure (gates → build/tag → migrate → deploy → smoke → sign-off) + rollback (`45b5e22`, 2026-07-06).
+- [x] **A5** `.github/workflows/release.yml` — tag-triggered gate re-run + prod-compose validation + image build; publish/deploy left Owner-infra-gated (`b27db7e`, 2026-07-06).
+- [x] **A6** Runbook drift fix — `deploy/README.md` + compose head comment corrected to `202607050003`, §3 rewritten for prod compose, admin-API line corrected to opt-in/D-051 (`849965d`, 2026-07-06).
+
+**Phase B — production deploy (BLOCKED on Owner infra: OQ-1 Sentry, OQ-3 host, OQ-5 alerts chat; transitively on Sprint 11 Phase B)**
 
 - [ ] **12.1** Deploy bot, worker, api containers to production.
 - [ ] **12.2** Configure Sentry production project + Uptime Kuma monitors.
-- [ ] **12.3** Production smoke tests (`/start`, cached download, fresh download, `/stats`, ad, ban/unban).
+- [ ] **12.3** Production smoke tests (`/start`, cached download, fresh download, `/stats`, ad, ban/unban). — checklist + script shipped (A3); execution needs the live stack.
 - [ ] **12.4** Re-run E2E scenarios S-1 and S-2 against production.
-- [ ] **12.5** Hand off runbook to Owner.
+- [ ] **12.5** Hand off runbook to Owner. — runbook current (A6); hand-off is the Owner walkthrough.
 - [ ] **12.6** Schedule first restore drill (30 days post-launch) + first L4 production-shadow load run (90 days post-launch).
 - [ ] **12.7** Mark V1 complete; append release entries to `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`.
 
-**Validation Results:** pending.
+**Validation Results:** Phase A — `test_config.py` gates green (23 tests, incl. the new production-example build/parity/no-secrets checks); `smoke-test.sh` syntax-checked (`sh -n`) and failure-path verified (exit 1 against a dead port); `release.yml` valid YAML; single Alembic head confirmed `202607050003`. Phase B — pending (needs production infra).
 **Known Issues:** none.
 
 ---
