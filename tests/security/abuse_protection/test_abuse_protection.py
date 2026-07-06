@@ -15,10 +15,12 @@ from domain.exceptions import (
     RateLimitExceededError,
 )
 from services.rate_limit_service import RateLimitService
+from services.reward_service import RewardService
 from services.settings_service import SettingsService
 from tests.unit._fakes import (
     DEFAULT_RATE_SETTINGS,
     FakeCache,
+    FakeRewardRepo,
     FakeSettingsStore,
     FakeUser,
     FakeUserRepo,
@@ -34,7 +36,9 @@ def _service(
         data.update(overrides)
     settings_service = SettingsService(FakeSettingsStore(data), FakeCache())
     cache_service, _ = make_cache_service()
-    return RateLimitService(settings_service, cache_service, FakeUserRepo())
+    return RateLimitService(
+        settings_service, cache_service, FakeUserRepo(), RewardService(FakeRewardRepo())
+    )
 
 
 # --- Message-rate spam ----------------------------------------------------
