@@ -1568,7 +1568,14 @@ def _ad_picker_text(action: str, rows: Sequence[Any], translate: Translator, loc
     if not rows:
         return translate("panel.ads.picker_empty", locale)
     verb_key = _AD_PICKER_VERB.get(action, "panel.verb.manage")
-    return translate("panel.ads.picker_header", locale, verb=translate(verb_key, locale))
+    verb = translate(verb_key, locale)
+    return "\n".join(
+        [
+            ui.header(translate("panel.ads.picker_title", locale, verb=verb), icon=ui.emoji("ads")),
+            "",
+            translate("panel.ads.picker_subtitle", locale),
+        ]
+    )
 
 
 async def _ads_write(
@@ -1695,43 +1702,68 @@ async def _ad_detail_view(
 
 
 def _ad_detail_text(ad: Any, translate: Translator, locale: str) -> str:
+    """Ad detail rendered as a ui.card profile block (Sprint 13.2)."""
     state = translate(
         "panel.ads.state_active" if ad.is_active else "panel.ads.state_disabled", locale
     )
     ctr = f"{ad.clicks / ad.impressions * 100:.1f}%" if ad.impressions else "—"
-    return translate(
-        "panel.ads.detail_body",
-        locale,
-        title=escape(ad.title),
-        id=ad.id,
-        type=ad.type,
-        state=state,
-        target=ad.target_role or translate("panel.ads.target_all", locale),
-        priority=ad.priority,
-        frequency=ad.show_every_n_downloads,
-        impressions=ad.impressions,
-        clicks=ad.clicks,
-        ctr=ctr,
+    target = ad.target_role or translate("panel.ads.target_all", locale)
+
+    def lbl(name: str) -> str:
+        return translate(f"panel.ads.label.{name}", locale)
+
+    return ui.card(
+        f"{ad.title} (#{ad.id})",
+        [
+            (lbl("type"), str(ad.type)),
+            (lbl("state"), state),
+            (lbl("target"), str(target)),
+            (lbl("priority"), str(ad.priority)),
+            (lbl("frequency"), str(ad.show_every_n_downloads)),
+            (lbl("impressions"), ui.number_fmt(ad.impressions)),
+            (lbl("clicks"), ui.number_fmt(ad.clicks)),
+            (lbl("ctr"), ctr),
+        ],
+        icon=ui.emoji("ads"),
     )
 
 
 def _ads_list_text(rows: Sequence[Any], translate: Translator, locale: str) -> str:
+    """Ads section header rendered through ui.py (the ads themselves are buttons)."""
+    header = ui.header(translate("panel.ads.list_title", locale), icon=ui.emoji("ads"))
     if not rows:
-        return translate("panel.ads.list_empty", locale)
-    return translate("panel.ads.list_header", locale, count=len(rows))
+        return f"{header}\n\n{translate('panel.ads.list_empty', locale)}"
+    return "\n".join(
+        [
+            header,
+            "",
+            ui.metric(ui.emoji("ads"), translate("panel.ads.count_label", locale), len(rows)),
+            "",
+            ui.footer(),
+        ]
+    )
 
 
 async def _overall_stats_text(ads: AdService, translate: Translator, locale: str) -> str:
+    """Ad totals rendered as a ui.py metric dashboard (Sprint 13.2)."""
     stats = await ads.overall_stats()
     ctr = f"{stats.clicks / stats.impressions * 100:.1f}%" if stats.impressions else "—"
-    return translate(
-        "panel.ads.stats_body",
-        locale,
-        total=stats.total_ads,
-        active=stats.active_ads,
-        impressions=stats.impressions,
-        clicks=stats.clicks,
-        ctr=ctr,
+
+    def lbl(name: str) -> str:
+        return translate(f"panel.ads.label.{name}", locale)
+
+    return "\n".join(
+        [
+            ui.header(translate("panel.ads.stats_title", locale), icon=ui.emoji("chart")),
+            "",
+            ui.metric(ui.emoji("ads"), lbl("total"), stats.total_ads),
+            ui.metric(ui.emoji("active"), lbl("active"), stats.active_ads),
+            ui.metric(ui.emoji("members"), lbl("impressions"), stats.impressions),
+            ui.metric(ui.emoji("link"), lbl("clicks"), stats.clicks),
+            ui.metric(ui.emoji("chart"), lbl("ctr"), ctr),
+            "",
+            ui.footer(),
+        ]
     )
 
 

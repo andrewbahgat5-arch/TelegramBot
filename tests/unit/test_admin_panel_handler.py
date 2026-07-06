@@ -962,7 +962,8 @@ async def test_ads_overall_stats_renders() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "stt")
     await _navigate(callback, ParsedPanel("a", "stt"), _user(), signer)
-    assert "Ad totals" in callback.message.edit_text.await_args.args[0]
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Ad Totals" in text and "Total Ads" in text  # ui.header + metric labels
 
 
 # --- guided User Info lookup (9.6.8) --------------------------------------
