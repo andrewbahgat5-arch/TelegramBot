@@ -10,6 +10,9 @@ paths 404. health/ready/metrics are always public.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
+
 import uvicorn
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -48,6 +51,31 @@ def _pool_in_use(engine: AsyncEngine) -> int:
     """Connections checked out of the pool (0 for non-queue pools, e.g. NullPool)."""
     pool = engine.pool
     return pool.checkedout() if isinstance(pool, QueuePool) else 0
+
+
+def resolve_bind_port(settings: Settings, environ: Mapping[str, str] | None = None) -> int:
+    """The TCP port the api binds to.
+
+    Prefers the platform-provided ``PORT`` env var — Railway/Heroku inject a
+    dynamic port that a web service MUST listen on — and falls back to the
+    configured ``API_BIND_PORT`` when ``PORT`` is unset, blank, non-numeric, or out
+    of range. Backward compatible: docker-compose sets ``API_BIND_PORT`` and no
+    ``PORT``, so its behaviour is unchanged. Deployment binding only — no business
+    logic depends on this.
+    """
+    env = os.environ if environ is None else environ
+    raw = env.get("PORT", "").strip()
+    if not raw:
+        return settings.api_bind_port
+    try:
+        port = int(raw)
+    except ValueError:
+        _log.warning("port_env_not_numeric_ignored", value=raw)
+        return settings.api_bind_port
+    if 1 <= port <= 65535:
+        return port
+    _log.warning("port_env_out_of_range_ignored", value=raw)
+    return settings.api_bind_port
 
 
 async def main() -> None:  # pragma: no cover - process entry; logic covered by unit tests
@@ -143,11 +171,12 @@ async def main() -> None:  # pragma: no cover - process entry; logic covered by 
 
     app = create_app(checker=checker, refresh_metrics=refresh_metrics, admin_router=admin_router)
 
-    _log.info("api_starting", host=settings.api_bind_host, port=settings.api_bind_port)
+    bind_port = resolve_bind_port(settings)
+    _log.info("api_starting", host=settings.api_bind_host, port=bind_port)
     config = uvicorn.Config(
         app,
         host=settings.api_bind_host,
-        port=settings.api_bind_port,
+        port=bind_port,
         log_level=settings.log_level.lower(),
         log_config=None,
     )

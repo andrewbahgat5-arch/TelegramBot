@@ -7,15 +7,51 @@ in-process client sends an HTTP scope and collects the response messages.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from api.app import create_app
+from api.main import resolve_bind_port
 from api.readiness import ReadinessChecker
 from core import metrics
+from core.config import Settings
 
 pytestmark = pytest.mark.asyncio
+
+_ENV_EXAMPLE = str(Path(__file__).resolve().parents[2] / ".env.example")
+
+
+def _settings() -> Settings:
+    return Settings(_env_file=_ENV_EXAMPLE)  # type: ignore[call-arg]
+
+
+# --- resolve_bind_port (Railway/PaaS PORT support) ------------------------
+# A web service on Railway/Heroku must bind to the dynamic PORT the platform
+# injects; docker-compose sets API_BIND_PORT and no PORT — both must work.
+async def test_resolve_bind_port_prefers_platform_port() -> None:
+    assert resolve_bind_port(_settings(), {"PORT": "3000"}) == 3000
+
+
+async def test_resolve_bind_port_falls_back_to_api_bind_port() -> None:
+    settings = _settings()  # API_BIND_PORT=8080 in the example
+    assert resolve_bind_port(settings, {}) == settings.api_bind_port == 8080
+
+
+async def test_resolve_bind_port_ignores_blank_port() -> None:
+    settings = _settings()
+    assert resolve_bind_port(settings, {"PORT": "   "}) == settings.api_bind_port
+
+
+async def test_resolve_bind_port_ignores_non_numeric_port() -> None:
+    settings = _settings()
+    assert resolve_bind_port(settings, {"PORT": "not-a-number"}) == settings.api_bind_port
+
+
+async def test_resolve_bind_port_ignores_out_of_range_port() -> None:
+    settings = _settings()
+    assert resolve_bind_port(settings, {"PORT": "70000"}) == settings.api_bind_port
 
 
 async def _get(app: Any, path: str) -> tuple[int, dict[str, str], bytes]:
