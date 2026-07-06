@@ -92,8 +92,15 @@ class RateLimitService:
         daily_limit: int = await self._settings.get(_DAILY_LIMIT_KEY[plan])
         cooldown: int = await self._settings.get(_COOLDOWN_KEY[plan])
 
+        # A permanent referral bonus stacks on top of the base daily limit (D-066,
+        # SPRINT_13_PLAN §13.7): effective_limit = base + referral_bonus_downloads.
+        # The bonus never expires and is never cleared by the lazy daily-counter
+        # reset below (that reset only zeroes daily_download_count, not the bonus).
+        bonus = int(getattr(user, "referral_bonus_downloads", 0) or 0)
+        effective_limit = daily_limit + bonus
+
         await self._repo.reset_daily_download_count_if_needed(user)
-        if user.daily_download_count >= daily_limit:
+        if user.daily_download_count >= effective_limit:
             raise DailyLimitExceededError("Daily download limit reached. Try again tomorrow.")
 
         if await self._cache.is_on_cooldown(user.id):

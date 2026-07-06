@@ -133,6 +133,94 @@ async def test_lazy_daily_reset_then_pass() -> None:
     assert user.daily_download_count == 0
 
 
+# --- daily-reset boundary / date-edge cases (Owner req #11, D-012) ---------
+async def test_no_reset_when_reset_date_is_today() -> None:
+    # Boundary: reset_date == today must NOT reset — same-day usage still counts, so a
+    # user at the cap is rejected rather than silently getting a fresh quota.
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        daily_download_count=10,  # free_daily_limit
+        daily_download_count_reset_date=_today(),
+    )
+    with pytest.raises(DailyLimitExceededError):
+        await svc.check_download(user)
+    assert user.daily_download_count == 10  # untouched
+
+
+async def test_reset_when_reset_date_is_far_in_the_past() -> None:
+    # A long-idle user (400 days) resets exactly once to today, not proportionally.
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        daily_download_count=10,
+        daily_download_count_reset_date=_today() - datetime.timedelta(days=400),
+    )
+    await svc.check_download(user)
+    assert user.daily_download_count == 0
+    assert user.daily_download_count_reset_date == _today()
+
+
+# --- permanent referral bonus and the daily limit (Owner req #11, D-066) ---
+# D-066 / SPRINT_13_PLAN §13.7: the referral bonus is added on top of the base
+# daily limit (effective = base + referral_bonus_downloads), is permanent, and is
+# NEVER cleared by the D-012 lazy daily-counter reset.
+async def test_referral_bonus_raises_effective_daily_limit() -> None:
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        daily_download_count=12,  # over base free (10), under base + bonus (15)
+        referral_bonus_downloads=5,
+        daily_download_count_reset_date=_today(),
+    )
+    await svc.check_download(user)  # must not raise — the +5 bonus counts (D-066)
+
+
+async def test_referral_bonus_still_enforces_at_combined_cap() -> None:
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        daily_download_count=15,  # exactly base (10) + bonus (5)
+        referral_bonus_downloads=5,
+        daily_download_count_reset_date=_today(),
+    )
+    with pytest.raises(DailyLimitExceededError):
+        await svc.check_download(user)
+
+
+async def test_referral_bonus_stacks_on_premium_limit() -> None:
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        is_premium=True,
+        premium_expires_at=datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=1),
+        daily_download_count=102,  # over premium (100), under premium + bonus (105)
+        referral_bonus_downloads=5,
+        daily_download_count_reset_date=_today(),
+    )
+    await svc.check_download(user)  # must not raise — bonus stacks on premium too
+
+
+async def test_referral_bonus_survives_daily_reset() -> None:
+    # Yesterday's usage is wiped by the lazy reset; the permanent bonus is not.
+    svc, _ = _service()
+    user = FakeUser(
+        id=1,
+        telegram_id=1,
+        daily_download_count=13,  # yesterday, near the base + bonus cap
+        referral_bonus_downloads=5,
+        daily_download_count_reset_date=_today() - datetime.timedelta(days=1),
+    )
+    await svc.check_download(user)  # resets the count, bonus intact → passes
+    assert user.daily_download_count == 0
+    assert user.referral_bonus_downloads == 5  # bonus never reset (D-066)
+
+
 # --- Owner bypass (#21) ---------------------------------------------------
 async def test_owner_bypasses_all_limits_and_no_cooldown() -> None:
     # Maintenance on + a huge daily count: the Owner is still authorized and is NOT
