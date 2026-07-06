@@ -18,6 +18,8 @@ from collections.abc import Sequence
 from typing import Any, Protocol, TypeVar
 
 from domain.entities.audience import AudienceRuleSpec
+from domain.entities.reward import Reward
+from domain.rewards import RewardType
 
 T = TypeVar("T")
 
@@ -29,6 +31,31 @@ class Repository(Protocol[T]):
     async def get_by_id(self, id_: Any) -> T | None: ...
     async def list_paginated(self, *, limit: int = 50, offset: int = 0) -> Sequence[T]: ...
     async def delete(self, entity: T) -> None: ...
+
+
+class RewardRepositoryProtocol(Protocol):
+    """Persistence for granted rewards (the Reward Engine, D-075).
+
+    Returns domain :class:`~domain.entities.reward.Reward` snapshots (not ORM rows).
+    ``list_active`` / ``list_all_active`` return only rewards active at ``now``
+    (a null ``expires_at`` is permanent) — the caller aggregates per the type's
+    stacking rule.
+    """
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        reward_type: RewardType,
+        value: int,
+        param: str | None,
+        source: str,
+        expires_at: datetime.datetime | None,
+    ) -> Reward: ...
+    async def list_active(
+        self, user_id: int, reward_type: RewardType, *, now: datetime.datetime
+    ) -> list[Reward]: ...
+    async def list_all_active(self, user_id: int, *, now: datetime.datetime) -> list[Reward]: ...
 
 
 class UserRepositoryProtocol(Repository[T], Protocol[T]):

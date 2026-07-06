@@ -18,8 +18,10 @@ from core.config import Settings
 from core.uuid7 import uuid7_str
 from domain.entities.audience import AudienceRuleSpec
 from domain.entities.media import DownloadedFile, MediaInfo
+from domain.entities.reward import Reward
 from domain.enums import MediaFormat, Quality
 from domain.protocols.downloader import Capability, ProviderHealth
+from domain.rewards import RewardType
 from services.audience_service import AudienceContext, evaluate_audience
 from services.cache_service import CacheService
 
@@ -379,6 +381,51 @@ class FakeUserRepo:
         now: datetime.datetime,
     ) -> Sequence[FakeUser]:
         return [u for u in self._audience_expr(mode, rules, now) if u.id > after_id][:limit]
+
+
+# --- Reward engine fake (D-075) -------------------------------------------
+class FakeRewardRepo:
+    """In-memory ``RewardRepositoryProtocol``; filters active by ``is_active(now)``."""
+
+    def __init__(self) -> None:
+        self.rewards: list[Reward] = []
+        self._next_id = 1
+
+    async def create(
+        self,
+        *,
+        user_id: int,
+        reward_type: RewardType,
+        value: int,
+        param: str | None,
+        source: str,
+        expires_at: datetime.datetime | None,
+    ) -> Reward:
+        reward = Reward(
+            id=self._next_id,
+            user_id=user_id,
+            reward_type=reward_type,
+            value=value,
+            param=param,
+            source=source,
+            granted_at=datetime.datetime.now(datetime.UTC),
+            expires_at=expires_at,
+        )
+        self._next_id += 1
+        self.rewards.append(reward)
+        return reward
+
+    async def list_active(
+        self, user_id: int, reward_type: RewardType, *, now: datetime.datetime
+    ) -> list[Reward]:
+        return [
+            r
+            for r in self.rewards
+            if r.user_id == user_id and r.reward_type is reward_type and r.is_active(now)
+        ]
+
+    async def list_all_active(self, user_id: int, *, now: datetime.datetime) -> list[Reward]:
+        return [r for r in self.rewards if r.user_id == user_id and r.is_active(now)]
 
 
 # --- Settings store fake --------------------------------------------------
