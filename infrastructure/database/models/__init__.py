@@ -20,6 +20,7 @@ from infrastructure.database.models.job_waiter import JobWaiter
 from infrastructure.database.models.media_metadata import MediaMetadata
 from infrastructure.database.models.message_template import MessageTemplate
 from infrastructure.database.models.referral import Referral
+from infrastructure.database.models.reward import Reward
 from infrastructure.database.models.setting import Setting
 from infrastructure.database.models.user import User
 from infrastructure.database.models.user_preference import UserPreference
@@ -45,6 +46,7 @@ __all__ = [
     "MediaMetadata",
     "MessageTemplate",
     "Referral",
+    "Reward",
     "Setting",
     "User",
     "UserPreference",

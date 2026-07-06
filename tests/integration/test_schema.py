@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "error_logs",
     "user_preferences",
     "ad_events",
+    "rewards",
 }
 
 PARTITIONED_TABLES = {"downloads", "jobs", "error_logs", "ad_events"}
@@ -41,6 +42,7 @@ EXPECTED_FK_DELETE = {
     ("user_preferences", "user_id"): "c",
     ("job_waiters", "user_id"): "c",
     ("settings", "updated_by"): "n",
+    ("rewards", "user_id"): "c",
 }
 
 EXPECTED_INDEXES = {
@@ -77,6 +79,7 @@ EXPECTED_INDEXES = {
     "ix_errors_correlation_id",
     "ix_ad_events_ad",
     "ix_ad_events_type_created",
+    "ix_rewards_user_type",
 }
 
 
