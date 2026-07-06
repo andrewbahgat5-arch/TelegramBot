@@ -37,3 +37,17 @@ def test_worker_and_bot_run_the_expected_entrypoints() -> None:
     assert "workers.main" in _read("Dockerfile.worker")
     assert "bot.main" in _read("Dockerfile.bot")
     assert "api.main" in _read("Dockerfile.api")
+
+
+def test_builder_copies_source_before_installing() -> None:
+    # The project declares explicit packages (api/bot/core/...), so `pip install .`
+    # builds a wheel that needs the source in the build context. Guard against
+    # regressing to a pyproject-only copy (which fails: "package directory 'api'
+    # does not exist").
+    for name in ("Dockerfile.api", "Dockerfile.bot", "Dockerfile.worker"):
+        df = _read(name).replace("\r\n", "\n")
+        copy_idx = df.find("COPY . .")
+        install_idx = df.find("pip install --prefix=/install .")
+        assert copy_idx != -1, f"{name}: builder must COPY the full source"
+        assert install_idx != -1, f"{name}: builder must install into /install"
+        assert copy_idx < install_idx, f"{name}: COPY source must precede the install"

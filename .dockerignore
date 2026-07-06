@@ -1,0 +1,34 @@
+# Build-context excludes for the deploy/ Dockerfiles.
+# Keep source, migrations, alembic.ini, deploy/, core/locales, README.md, pyproject.toml.
+
+# Version control & CI
+.git
+.gitignore
+.gitattributes
+
+# Virtual environments
+.venv
+venv
+env
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.import_linter_cache
+.coverage
+htmlcov
+
+# Local env files & secrets — never bake into an image (Railway injects real vars)
+.env
+.env.*
+
+# Agent / generated / local-only
+.claude
+graphify-out
+
+# Tests are not needed at runtime
+tests
