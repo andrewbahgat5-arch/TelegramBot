@@ -10,7 +10,20 @@ from pydantic import ValidationError
 from core.config import Settings
 from core.constants import REDACTED
 
-ENV_EXAMPLE = str(Path(__file__).resolve().parents[2] / ".env.example")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+ENV_EXAMPLE = str(_REPO_ROOT / ".env.example")
+ENV_PRODUCTION_EXAMPLE = str(_REPO_ROOT / ".env.production.example")
+
+
+def _env_keys(path: str) -> set[str]:
+    """Collect the ``KEY`` names from a dotenv file (ignoring comments/blanks)."""
+    keys: set[str] = set()
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        keys.add(stripped.split("=", 1)[0].strip())
+    return keys
 
 
 def _settings() -> Settings:
@@ -25,6 +38,45 @@ def test_builds_from_env_example() -> None:
     assert settings.log_format == "json"
     assert settings.worker_count == 3
     assert settings.telegram_alerts_chat_id is None
+
+
+def test_production_example_builds_and_has_production_defaults() -> None:
+    """`.env.production.example` (Sprint 12 A2) parses into a valid Settings.
+
+    It carries production-appropriate defaults and must not trip the environment
+    safety rules (the test-env guard is a no-op under DEPLOY_ENV=production).
+    """
+    settings = Settings(_env_file=ENV_PRODUCTION_EXAMPLE)  # type: ignore[call-arg]
+    assert settings.deploy_env == "production"
+    assert settings.is_production is True
+    assert settings.sentry_environment == "production"
+    assert settings.log_format == "json"
+    assert settings.log_level == "INFO"
+    # The DB path is the pooler (compose additionally forces it, D-020).
+    assert settings.db_host == "pgbouncer"
+    assert settings.db_port == 6432
+    # Admin HTTP API is not served in V1 → no key shipped in the example.
+    assert settings.admin_api_enabled is False
+
+
+def test_production_example_key_set_matches_locked_set() -> None:
+    """The production example must define exactly the LOCKED §13.2 key set.
+
+    Parity with `.env.example` keeps the two files from drifting: a new env var
+    added to one but not the other fails this test.
+    """
+    assert _env_keys(ENV_PRODUCTION_EXAMPLE) == _env_keys(ENV_EXAMPLE)
+
+
+def test_production_example_contains_no_real_secrets() -> None:
+    """Secrets in the example are placeholders, never real values (A2 rule)."""
+    text = Path(ENV_PRODUCTION_EXAMPLE).read_text(encoding="utf-8")
+    for secret_key in ("SENTRY_DSN", "ADMIN_API_KEY", "BOT_WEBHOOK_SECRET"):
+        # These are empty in the example (disabled/optional surfaces).
+        assert f"{secret_key}=\n" in text or text.rstrip().endswith(f"{secret_key}=")
+    # The must-be-set secrets carry an obvious placeholder sentinel, not a value.
+    assert "BOT_TOKEN=__SET_IN_SECRET_BACKEND__" in text
+    assert "DB_PASSWORD=__SET_IN_SECRET_BACKEND__" in text
 
 
 def test_repr_redacts_secrets() -> None:
