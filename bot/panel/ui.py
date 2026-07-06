@@ -39,7 +39,10 @@ _FILL = "▰"
 _EMPTY = "▱"
 _LEFT_MARKER = "▸"
 _RIGHT_MARKER = "◂"
-_RLM = "‏"  # RIGHT-TO-LEFT MARK (U+200F) — anchors an RTL line's base direction
+# RIGHT-TO-LEFT MARK (U+200F) — anchors an RTL line's base direction. Intentional
+# and required for correct Arabic rendering; bandit's trojan-source (B613) check
+# flags any bidi control char, so it is suppressed here with justification.
+_RLM = "‏"  # nosec B613
 
 _METRIC_LABEL_WIDTH = 16
 _METRIC_VALUE_WIDTH = 6
