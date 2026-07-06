@@ -26,6 +26,7 @@ from services.job_service import JobService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
+from services.reward_service import RewardService
 from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from tests.unit._fakes import (
@@ -41,6 +42,7 @@ from tests.unit._fakes import (
     FakeMessageSender,
     FakeProvider,
     FakeQueueBackend,
+    FakeRewardRepo,
     FakeSettingsStore,
     FakeUser,
     FakeUserRepo,
@@ -308,7 +310,9 @@ def _rate_limit_service() -> RateLimitService:
     settings_service = SettingsService(
         FakeSettingsStore(dict(DEFAULT_RATE_SETTINGS)), FakeCache(), cache_ttl=60
     )
-    return RateLimitService(settings_service, cache_service, FakeUserRepo())
+    return RateLimitService(
+        settings_service, cache_service, FakeUserRepo(), RewardService(FakeRewardRepo())
+    )
 
 
 async def test_quality_choice_enqueues_job() -> None:
@@ -350,7 +354,7 @@ def _rate_limit_service_at_limit() -> RateLimitService:
     )
     repo = FakeUserRepo()
     repo.by_tid[555] = FakeUser(id=7, telegram_id=555)
-    return RateLimitService(settings_service, cache_service, repo)
+    return RateLimitService(settings_service, cache_service, repo, RewardService(FakeRewardRepo()))
 
 
 async def test_quality_choice_blocked_when_over_daily_limit() -> None:

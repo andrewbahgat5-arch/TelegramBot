@@ -15,7 +15,7 @@ row, so ``check_download`` takes the user row (not the cached snapshot).
 from __future__ import annotations
 
 import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from domain.enums import UNLIMITED_ROLES
 from domain.exceptions import (
@@ -26,10 +26,23 @@ from domain.exceptions import (
     RateLimitExceededError,
 )
 from domain.protocols.repositories import UserRepositoryProtocol
+from domain.rewards import RewardType
 from services.cache_service import CacheService
 from services.settings_service import SettingsService
 
 _MESSAGE_WINDOW_SECONDS = 60
+
+
+class RewardReader(Protocol):
+    """The slice of the Reward Engine the rate limiter reads (D-075).
+
+    Kept narrow so the download-limit logic depends on an *effect*
+    (``DAILY_DOWNLOAD_BONUS``), never on a reward source. ``RewardService``
+    satisfies this structurally.
+    """
+
+    async def active_value(self, user_id: int, reward_type: RewardType) -> int: ...
+
 
 # Effective-plan → settings keys (Section 13.4). V1 traffic is all ``free``; the
 # ``premium`` keys are read only once V2 grants premium (Section 16.5 resolution).
@@ -46,10 +59,12 @@ class RateLimitService:
         settings: SettingsService,
         cache: CacheService,
         repo: UserRepositoryProtocol[Any],
+        rewards: RewardReader,
     ) -> None:
         self._settings = settings
         self._cache = cache
         self._repo = repo
+        self._rewards = rewards
 
     async def check_message_rate(self, user_id: int) -> None:
         """Throttle inbound messages per user (Section 14.5). Raises on exceed."""
@@ -92,11 +107,12 @@ class RateLimitService:
         daily_limit: int = await self._settings.get(_DAILY_LIMIT_KEY[plan])
         cooldown: int = await self._settings.get(_COOLDOWN_KEY[plan])
 
-        # A permanent referral bonus stacks on top of the base daily limit (D-066,
-        # SPRINT_13_PLAN §13.7): effective_limit = base + referral_bonus_downloads.
-        # The bonus never expires and is never cleared by the lazy daily-counter
-        # reset below (that reset only zeroes daily_download_count, not the bonus).
-        bonus = int(getattr(user, "referral_bonus_downloads", 0) or 0)
+        # The daily limit consumes the active DAILY_DOWNLOAD_BONUS *reward* (Reward
+        # Engine, D-075): effective_limit = base + aggregated active bonus. This is
+        # source-agnostic — a referral grants it today (D-066), but the limiter no
+        # longer knows that. Active (non-expired) rewards stack per the SUM rule; the
+        # lazy daily-counter reset below never touches rewards.
+        bonus = await self._rewards.active_value(user.id, RewardType.DAILY_DOWNLOAD_BONUS)
         effective_limit = daily_limit + bonus
 
         await self._repo.reset_daily_download_count_if_needed(user)

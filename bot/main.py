@@ -63,6 +63,7 @@ from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
 from infrastructure.database.repositories.referral import ReferralRepository
+from infrastructure.database.repositories.reward import RewardRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.session import create_session_factory
@@ -89,6 +90,7 @@ from services.notification_service import NotificationService
 from services.queue_service import QueueService
 from services.rate_limit_service import RateLimitService
 from services.referral_service import ReferralService
+from services.reward_service import RewardService
 from services.settings_service import SettingsService
 from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
@@ -219,11 +221,19 @@ async def main() -> None:
             owner_telegram_id=settings.bot_owner_telegram_id,
         )
 
+    def make_reward_service(session: AsyncSession) -> RewardService:
+        return RewardService(RewardRepository(session))
+
     def make_rate_limit_service(session: AsyncSession) -> RateLimitService:
         settings_service = SettingsService(
             SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
         )
-        return RateLimitService(settings_service, cache_service, UserRepository(session))
+        return RateLimitService(
+            settings_service,
+            cache_service,
+            UserRepository(session),
+            make_reward_service(session),
+        )
 
     def make_url_analyzer(session: AsyncSession) -> URLAnalyzerService:
         return URLAnalyzerService(registry, cache_service, MediaRepository(session))

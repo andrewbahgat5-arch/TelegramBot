@@ -23,11 +23,13 @@ from bot.middlewares.throttle import THROTTLE_MESSAGE, ThrottleMiddleware
 from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from services.rate_limit_service import RateLimitService
+from services.reward_service import RewardService
 from services.settings_service import SettingsService
 from services.user_service import UserService
 from tests.unit._fakes import (
     DEFAULT_RATE_SETTINGS,
     FakeCache,
+    FakeRewardRepo,
     FakeSettingsStore,
     FakeUser,
     FakeUserRepo,
@@ -188,7 +190,9 @@ def _rate_service(limit: str) -> RateLimitService:
     data["rate_limit_messages_per_minute"] = (limit, "int")
     settings_service = SettingsService(FakeSettingsStore(data), FakeCache())
     cache_service, _ = make_cache_service()
-    return RateLimitService(settings_service, cache_service, FakeUserRepo())
+    return RateLimitService(
+        settings_service, cache_service, FakeUserRepo(), RewardService(FakeRewardRepo())
+    )
 
 
 def _snapshot() -> UserSnapshot:
