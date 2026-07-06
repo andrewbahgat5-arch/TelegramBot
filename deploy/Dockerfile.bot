@@ -18,11 +18,18 @@ FROM python:3.13-slim AS final
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
+# The URL-analysis step (URLAnalyzerService → YtDlpProvider.extract_info) shells
+# out to the yt-dlp binary in the bot process (to show format/quality options
+# before enqueuing the job), so the bot image needs yt-dlp too. Pinned exactly
+# (§6.4), bump per OQ-9. No ffmpeg — the bot only reads metadata; the actual
+# download + transcode (which needs ffmpeg) runs in the worker.
+RUN pip install --no-cache-dir yt-dlp==2026.7.4
+
 # Non-root runtime user.
 RUN useradd --create-home --uid 10001 appuser
 COPY --from=builder /install /usr/local
 COPY . .
 USER appuser
 
-# Placeholder command; replaced when bot/main.py exists (Sprint 4).
+# Composition root: builds the dispatcher + runs long-polling (webhook optional).
 CMD ["python", "-m", "bot.main"]

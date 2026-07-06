@@ -22,15 +22,16 @@ def test_worker_image_installs_ffmpeg() -> None:
     assert "ffmpeg" in _read("Dockerfile.worker")
 
 
-def test_worker_image_installs_pinned_ytdlp() -> None:
+def test_worker_and_bot_images_install_pinned_ytdlp() -> None:
     # yt-dlp is invoked as a *binary subprocess* (YtDlpProvider wraps the `yt-dlp`
-    # binary, no Python import), so the worker image must install it — otherwise
-    # every download fails with "yt-dlp not found". Pinned exactly, date-versioned.
-    dockerfile = _read("Dockerfile.worker")
-    assert re.search(r"yt-dlp==\d{4}\.\d{1,2}\.\d{1,2}", dockerfile), (
-        "Dockerfile.worker must install a pinned yt-dlp==<date> — the download "
-        "pipeline shells out to the yt-dlp binary at runtime."
-    )
+    # binary, no Python import). BOTH images need it: the worker downloads, and the
+    # bot runs extract_info to show format options before enqueuing. Missing it →
+    # "yt-dlp: No such file or directory". Pinned exactly, date-versioned.
+    for name in ("Dockerfile.worker", "Dockerfile.bot"):
+        assert re.search(r"yt-dlp==\d{4}\.\d{1,2}\.\d{1,2}", _read(name)), (
+            f"{name} must install a pinned yt-dlp==<date> — it shells out to the "
+            "yt-dlp binary at runtime."
+        )
 
 
 def test_worker_and_bot_run_the_expected_entrypoints() -> None:
