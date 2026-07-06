@@ -49,9 +49,8 @@ class User(Base):
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
     referral_code: Mapped[str | None] = mapped_column(String(20), unique=True)
-    referral_bonus_downloads: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="0"
-    )
+    # Reward bonuses live in the generic `rewards` table now (Reward Engine, D-075),
+    # not on a users column — the download limit consumes active rewards.
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

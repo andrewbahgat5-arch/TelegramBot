@@ -177,10 +177,6 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Record which user (``users.id``) referred this user."""
         ...
 
-    async def add_referral_bonus(self, user_id: int, amount: int) -> None:
-        """Atomically add permanent bonus downloads to a user."""
-        ...
-
     async def count_for_broadcast(self, *, role: str | None, language: str | None) -> int:
         """Count the non-banned audience matching the broadcast filters (16.8)."""
         ...

@@ -4,9 +4,12 @@ Framework-free (MASTER_PLAN §8): depends on the user/referral repository protoc
 and a narrow settings reader only. The bot layer parses the ``?start=ref_<CODE>``
 payload and notifies the referrer; this service owns the rules and the writes.
 
-Reward model: a successful referral grants ``referral_reward_downloads`` *permanent*
-bonus downloads to **both** the referrer and the new user (stacks on the daily
-limit, never expires). ``user_id`` arguments are ``users.id`` (DB ids), matching the
+Reward model (Reward Engine, D-075): a successful referral grants a *permanent*
+``DAILY_DOWNLOAD_BONUS`` reward worth ``referral_reward_downloads`` to **both** the
+referrer and the new user, via the injected reward engine. Referrals no longer touch
+a ``referral_bonus_downloads`` column — the download limiter consumes the reward as
+the ``DAILY_DOWNLOAD_BONUS`` effect, and stats/leaderboard read the active bonus back
+from the engine. ``user_id`` arguments are ``users.id`` (DB ids), matching the
 ``referrals`` foreign keys — the caller resolves a Telegram id to a snapshot first.
 """
 
@@ -24,6 +27,7 @@ from domain.protocols.repositories import (
     ReferralRepositoryProtocol,
     UserRepositoryProtocol,
 )
+from domain.rewards import RewardType
 
 _log = get_logger("services.referral_service")
 
@@ -36,6 +40,25 @@ class SettingsReader(Protocol):
     """The slice of SettingsService the referral rules read."""
 
     async def get(self, key: str) -> Any: ...
+
+
+class RewardEngine(Protocol):
+    """The slice of the Reward Engine referrals use (grant + read, D-075).
+
+    ``RewardService`` satisfies this structurally. Referrals grant rewards and read
+    a user's active bonus through it, so the referral rules never touch a column.
+    """
+
+    async def grant(
+        self,
+        user_id: int,
+        reward_type: RewardType,
+        *,
+        value: int = 0,
+        source: str = "",
+        expires_at: datetime.datetime | None = None,
+    ) -> Any: ...
+    async def active_value(self, user_id: int, reward_type: RewardType) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,12 +115,14 @@ class ReferralService:
         user_repo: UserRepositoryProtocol[Any],
         referral_repo: ReferralRepositoryProtocol[Any],
         settings: SettingsReader,
+        rewards: RewardEngine,
         bot_username: str,
         code_generator: Callable[[], str] | None = None,
     ) -> None:
         self._users = user_repo
         self._referrals = referral_repo
         self._settings = settings
+        self._rewards = rewards
         self._bot_username = bot_username
         self._code_generator = code_generator or _default_code
 
@@ -137,8 +162,15 @@ class ReferralService:
             referrer_id=referrer.id, referred_id=new_user_id, reward_granted=True
         )
         await self._users.set_referred_by(new_user_id, referrer.id)
-        await self._users.add_referral_bonus(referrer.id, reward)
-        await self._users.add_referral_bonus(new_user_id, reward)
+        # Grant a permanent daily-download reward to both sides via the Reward Engine
+        # (D-075). No expiry → matches the original D-066 permanence; the download
+        # limiter consumes it as the DAILY_DOWNLOAD_BONUS effect.
+        await self._rewards.grant(
+            referrer.id, RewardType.DAILY_DOWNLOAD_BONUS, value=reward, source="referral"
+        )
+        await self._rewards.grant(
+            new_user_id, RewardType.DAILY_DOWNLOAD_BONUS, value=reward, source="referral"
+        )
         total = await self._referrals.count_for_referrer(referrer.id)
         _log.info("referral_processed", referrer_id=referrer.id, referred_id=new_user_id)
         return ReferralResult(
@@ -150,10 +182,9 @@ class ReferralService:
         )
 
     async def get_user_referral_stats(self, user_id: int) -> UserReferralStats:
-        """A single user's code, share link, invite count, and accumulated bonus."""
+        """A single user's code, share link, invite count, and active bonus (D-075)."""
         code = await self.generate_code(user_id)
-        user = await self._users.get_by_id(user_id)
-        bonus = int(getattr(user, "referral_bonus_downloads", 0)) if user is not None else 0
+        bonus = await self._rewards.active_value(user_id, RewardType.DAILY_DOWNLOAD_BONUS)
         total_invited = await self._referrals.count_for_referrer(user_id)
         return UserReferralStats(
             referral_code=code,
@@ -176,18 +207,25 @@ class ReferralService:
         )
 
     async def get_leaderboard(self, *, limit: int = 10) -> list[ReferrerEntry]:
-        """Top referrers by invite count."""
+        """Top referrers by invite count; bonus derived from active rewards (D-075).
+
+        The referral repo returns each referrer's ``users.id`` (staying
+        reward-agnostic); this fills ``rewards_earned`` from the Reward Engine.
+        """
         rows = await self._referrals.leaderboard(limit=limit)
-        return [
-            ReferrerEntry(
-                user_id=telegram_id,
-                username=username,
-                first_name=first_name,
-                invite_count=invites,
-                rewards_earned=bonus,
+        entries: list[ReferrerEntry] = []
+        for telegram_id, username, first_name, invites, user_db_id in rows:
+            earned = await self._rewards.active_value(user_db_id, RewardType.DAILY_DOWNLOAD_BONUS)
+            entries.append(
+                ReferrerEntry(
+                    user_id=telegram_id,
+                    username=username,
+                    first_name=first_name,
+                    invite_count=invites,
+                    rewards_earned=earned,
+                )
             )
-            for telegram_id, username, first_name, invites, bonus in rows
-        ]
+        return entries
 
     def _link(self, code: str) -> str:
         return f"https://t.me/{self._bot_username}?start=ref_{code}"

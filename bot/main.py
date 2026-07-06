@@ -303,6 +303,7 @@ async def main() -> None:
             user_repo=UserRepository(session),
             referral_repo=ReferralRepository(session),
             settings=make_settings_service(session),
+            rewards=make_reward_service(session),
             bot_username=bot_username,
         )
 

@@ -52,10 +52,12 @@ class ReferralRepository(SqlAlchemyRepository[Referral]):
         return int(result.scalar_one())
 
     async def leaderboard(self, *, limit: int = 10) -> list[tuple[int, str | None, str, int, int]]:
-        """Top referrers as ``(telegram_id, username, first_name, invites, bonus)``.
+        """Top referrers as ``(telegram_id, username, first_name, invites, user_db_id)``.
 
-        Joined to ``users`` so a single query yields the display fields and the
-        referrer's accumulated bonus, ordered by invite count DESC.
+        Joined to ``users`` for the display fields, ordered by invite count DESC.
+        Returns the referrer's ``users.id`` (not a bonus) so the service can derive
+        ``rewards_earned`` from the Reward Engine (D-075) — this repo stays
+        reward-agnostic.
         """
         invites = func.count(Referral.id)
         result = await self.session.execute(
@@ -64,19 +66,14 @@ class ReferralRepository(SqlAlchemyRepository[Referral]):
                 User.username,
                 User.first_name,
                 invites,
-                User.referral_bonus_downloads,
+                User.id,
             )
             .join(User, User.id == Referral.referrer_id)
-            .group_by(
-                User.telegram_id,
-                User.username,
-                User.first_name,
-                User.referral_bonus_downloads,
-            )
+            .group_by(User.telegram_id, User.username, User.first_name, User.id)
             .order_by(invites.desc())
             .limit(limit)
         )
         return [
-            (int(tid), username, first_name or "", int(count), int(bonus))
-            for tid, username, first_name, count, bonus in result.all()
+            (int(tid), username, first_name or "", int(count), int(db_id))
+            for tid, username, first_name, count, db_id in result.all()
         ]

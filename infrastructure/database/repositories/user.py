@@ -270,15 +270,6 @@ class UserRepository(SqlAlchemyRepository[User]):
         )
         await self.session.flush()
 
-    async def add_referral_bonus(self, user_id: int, amount: int) -> None:
-        """Atomically add ``amount`` permanent bonus downloads to a user (13.7)."""
-        await self.session.execute(
-            update(User)
-            .where(User.id == user_id)
-            .values(referral_bonus_downloads=User.referral_bonus_downloads + amount)
-        )
-        await self.session.flush()
-
     @staticmethod
     def _audience_filters(role: str | None, language: str | None) -> list[ColumnElement[bool]]:
         """Broadcast audience filters (16.8, item #14).
