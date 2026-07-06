@@ -4,7 +4,11 @@
 > Sprint 12 (A1 prod compose, A6 drift fix). Deploy, rollback, backup verification,
 > and the most-likely failure modes for the V1 single-host stack. Companion docs:
 > [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) (release procedure),
+> [`RAILWAY_DEPLOYMENT.md`](RAILWAY_DEPLOYMENT.md) (Railway PaaS deploy),
+> [`PRODUCTION_VALIDATION.md`](PRODUCTION_VALIDATION.md) (post-deploy checks),
+> [`LARGE_DOWNLOAD_STRESS_TEST.md`](LARGE_DOWNLOAD_STRESS_TEST.md) (capacity plan),
 > [`SMOKE_TEST.md`](SMOKE_TEST.md) (launch smoke test), [`smoke-test.sh`](smoke-test.sh),
+> [`migrate.sh`](migrate.sh), [`monitor-resources.sh`](monitor-resources.sh),
 > [`restore-drill-report.md`](restore-drill-report.md), [`LOCAL_BOT_API.md`](LOCAL_BOT_API.md),
 > [`../.env.production.example`](../.env.production.example),
 > `MASTER_PLAN.md` §13 (config), §15 (observability), §14.8 (DR).
