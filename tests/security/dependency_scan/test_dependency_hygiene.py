@@ -46,7 +46,9 @@ def test_env_is_gitignored() -> None:
 
 def test_no_real_env_committed() -> None:
     # A local untracked .env is fine (and gitignored); a *committed* one is not.
-    # Only `.env.example` may be tracked.
+    # Only the placeholder-only templates may be tracked: `.env.example` and
+    # `.env.production.example` (Sprint 12 A2 — both carry sentinels, never secrets).
+    allowed = {".env.example", ".env.production.example"}
     git = shutil.which("git")
     if git is None:  # pragma: no cover - git always present in CI / dev
         pytest.skip("git not available")
@@ -58,7 +60,7 @@ def test_no_real_env_committed() -> None:
         check=True,
     )
     tracked = {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    assert tracked <= {".env.example"}, f"unexpected tracked env files: {tracked}"
+    assert tracked <= allowed, f"unexpected tracked env files: {tracked - allowed}"
     assert (REPO_ROOT / ".env.example").exists()
 
 
