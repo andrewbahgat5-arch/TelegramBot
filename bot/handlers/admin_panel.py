@@ -1762,6 +1762,16 @@ def _settings_info_text(index: int | None, translate: Translator, locale: str) -
     return translate("panel.settings.info.fallback", locale)
 
 
+def _job_status_glyph(status: str) -> str:
+    """A colour/status glyph for a job row (Sprint 13.2)."""
+    lowered = status.lower()
+    if lowered in ("completed", "delivered", "done"):
+        return ui.emoji("check")
+    if "fail" in lowered or lowered in ("error", "cancelled", "canceled"):
+        return ui.emoji("dot_red")
+    return ui.emoji("hourglass")
+
+
 async def _jobs_text(
     admin: AdminService,
     *,
@@ -1770,29 +1780,34 @@ async def _jobs_text(
     translate: Translator,
     locale: str,
 ) -> str:
+    """Recent / active jobs list rendered through the ui.py design system (Sprint 13.2)."""
     jobs = await admin.list_jobs(limit=_LIST_LIMIT, status=status)
-    title = translate(title_key, locale)
+    header = ui.header(translate(title_key, locale), icon=ui.emoji("history"))
     if not jobs:
-        return translate("panel.jobs.empty", locale, title=title)
-    lines = [title, ""]
+        return f"{header}\n\n{translate('panel.jobs.empty', locale)}"
+    lines = [header, ""]
     for job in jobs:
         lines.append(
-            f"<code>{escape(job.id[:8])}</code> · {escape(job.status)} · "
-            f"{escape(job.format)}/{escape(job.quality)}"
+            f"  {_job_status_glyph(job.status)} <code>{escape(job.id[:8])}</code> · "
+            f"{escape(job.status)} · {escape(job.format)}/{escape(job.quality)}"
         )
+    lines += ["", ui.footer()]
     return "\n".join(lines)
 
 
 async def _errors_text(admin: AdminService, translate: Translator, locale: str) -> str:
+    """Recent errors list rendered through the ui.py design system (Sprint 13.2)."""
     errors = await admin.browse_errors(limit=_LIST_LIMIT)
+    header = ui.header(translate("panel.errors.title", locale), icon=ui.emoji("warn"))
     if not errors:
-        return translate("panel.errors.empty", locale)
-    lines = [translate("panel.errors.title", locale), ""]
+        return f"{header}\n\n{translate('panel.errors.empty', locale)}"
+    lines = [header, ""]
     for err in errors:
         lines.append(
-            f"<code>{err.created_at:%m-%d %H:%M}</code> · "
+            f"  {ui.emoji('warn')} <code>{err.created_at:%m-%d %H:%M}</code> · "
             f"{escape(err.error_type)}: {escape(err.message[:60])}"
         )
+    lines += ["", ui.footer()]
     return "\n".join(lines)
 
 
