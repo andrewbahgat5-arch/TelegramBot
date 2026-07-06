@@ -15,15 +15,22 @@ FROM python:3.13-slim AS final
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
-# FFmpeg is required by the transcoder (Sprint 6). Pinned at distro major version.
+# Runtime binaries the download pipeline shells out to (neither is imported as a
+# Python module):
+#   * ffmpeg — the transcoder (FFMPEG_PATH).
+#   * yt-dlp — the downloader; YtDlpProvider wraps the `yt-dlp` binary (YTDLP_PATH),
+#     so the image MUST ship it or every download fails with "yt-dlp not found".
+# yt-dlp is pinned exactly (§6.4) and date-versioned — bump on the agreed cadence
+# (OQ-9). Installed via pip so the `yt-dlp` console script lands on PATH.
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir yt-dlp==2026.7.4
 
 RUN useradd --create-home --uid 10001 appuser
 COPY --from=builder /install /usr/local
 COPY . .
 USER appuser
 
-# Placeholder command; replaced when workers/main.py exists (Sprint 6).
+# Composition root: builds the worker pool + maintenance loops (honours WORKER_COUNT).
 CMD ["python", "-m", "workers.main"]
