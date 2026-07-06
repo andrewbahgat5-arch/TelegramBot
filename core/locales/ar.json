@@ -225,8 +225,8 @@
   "panel.users.detail.label.active_job": "مهام نشطة",
   "panel.users.detail.label.joined": "انضم",
   "panel.users.detail.label.last_seen": "آخر ظهور",
-  "panel.users.banned_list_title": "🚫 <b>المستخدمون المحظورون</b>",
-  "panel.users.list_title": "👥 <b>المستخدمون</b>",
+  "panel.users.banned_list_title": "المستخدمون المحظورون",
+  "panel.users.list_title": "المستخدمون",
   "panel.users.none_banned": "لا يوجد مستخدمون محظورون.",
   "panel.users.none_yet": "لا يوجد مستخدمون بعد.",
 

@@ -1519,24 +1519,32 @@ async def on_import_subscribers(
 async def _users_text(
     users: UserService, *, banned_only: bool, translate: Translator, locale: str
 ) -> str:
+    """User / banned-user list rendered through the ui.py design system (Sprint 13.2)."""
     rows = await users.list_users(limit=_LIST_LIMIT)
     if banned_only:
         rows = [row for row in rows if row.is_banned]
-    title = translate(
-        "panel.users.banned_list_title" if banned_only else "panel.users.list_title", locale
+    title_key = "panel.users.banned_list_title" if banned_only else "panel.users.list_title"
+    header = ui.header(
+        translate(title_key, locale), icon=ui.emoji("blocked" if banned_only else "users")
     )
     if not rows:
         empty = translate(
             "panel.users.none_banned" if banned_only else "panel.users.none_yet", locale
         )
-        return f"{title}\n\n{empty}"
-    return "\n".join([title, "", *(_user_row(row) for row in rows)])
+        return f"{header}\n\n{empty}"
+    return "\n".join([header, "", *(_user_row(row) for row in rows), "", ui.footer()])
 
 
 def _user_row(snap: UserSnapshot) -> str:
+    """A single list row: status/role glyph · id · @username · role (Sprint 13.2)."""
     username = f"@{escape(snap.username)}" if snap.username else "—"
-    marker = "🚫" if snap.is_banned else ("⭐" if snap.is_premium else "•")
-    return f"{marker} <code>{snap.telegram_id}</code> · {username} · {snap.role.value}"
+    if snap.is_banned:
+        marker = ui.badge("banned")
+    elif snap.is_premium:
+        marker = ui.emoji("premium")
+    else:
+        marker = ui.role_icon(snap.role.value)
+    return f"{marker} <code>{snap.telegram_id}</code> · {username} · {escape(snap.role.value)}"
 
 
 # Destructive / high-impact ad actions route through a confirm screen first.

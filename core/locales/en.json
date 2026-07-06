@@ -225,8 +225,8 @@
   "panel.users.detail.label.active_job": "Active jobs",
   "panel.users.detail.label.joined": "Joined",
   "panel.users.detail.label.last_seen": "Last seen",
-  "panel.users.banned_list_title": "🚫 <b>Banned users</b>",
-  "panel.users.list_title": "👥 <b>Users</b>",
+  "panel.users.banned_list_title": "Banned Users",
+  "panel.users.list_title": "Users",
   "panel.users.none_banned": "No banned users.",
   "panel.users.none_yet": "No users yet.",
 
