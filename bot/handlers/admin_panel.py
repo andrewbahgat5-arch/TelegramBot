@@ -636,9 +636,20 @@ def _fmt_dt(value: datetime.datetime | None) -> str:
 
 
 def _users_list_text(rows: list[UserSnapshot], translate: Translator, locale: str) -> str:
+    """Tappable Users list header rendered through ui.py (rows are buttons) (13.2)."""
+    header = ui.header(translate("panel.users.list_title", locale), icon=ui.emoji("users"))
     if not rows:
-        return translate("panel.users.list_empty", locale)
-    return translate("panel.users.list_header", locale, count=len(rows))
+        return f"{header}\n\n{translate('panel.users.none_yet', locale)}"
+    return "\n".join(
+        [
+            header,
+            "",
+            ui.metric(ui.emoji("members"), translate("panel.users.count_label", locale), len(rows)),
+            f"  {translate('panel.users.tap_hint', locale)}",
+            "",
+            ui.footer(),
+        ]
+    )
 
 
 def _user_lookup_text(translate: Translator, locale: str) -> str:
@@ -1023,9 +1034,7 @@ async def _render(
             "a", role, signer, locale
         )
     if section == "b":
-        return translate("panel.broadcast.section_body", locale), build_section_menu(
-            "b", role, signer, locale
-        )
+        return _broadcast_text(translate, locale), build_section_menu("b", role, signer, locale)
     if section == "m":
         users_svc = user_factory(session)
         if action == "lsb":  # blocked-bot list (Sprint 13.5)
@@ -1767,16 +1776,50 @@ async def _overall_stats_text(ads: AdService, translate: Translator, locale: str
     )
 
 
+# Display grouping for the Settings screen (Sprint 13.2): a field index -> group
+# code map. The groups follow the existing SETTING_FIELDS order so the text order
+# still matches the stepper-button order; a ui.divider + group label is emitted at
+# each boundary. Unmapped indices (e.g. a future field) fall into no group and just
+# render without a divider, so this never crashes on registry growth.
+_SETTINGS_GROUP_BY_INDEX: dict[int, str] = {
+    0: "workers",
+    1: "limits",
+    2: "limits",
+    3: "cooldowns",
+    4: "cooldowns",
+    5: "throughput",
+    6: "throughput",
+    7: "interface",
+    8: "interface",
+    9: "interface",
+    10: "retention",
+    11: "retention",
+    12: "retention",
+    13: "providers",
+    14: "providers",
+    15: "providers",
+}
+
+
 async def _settings_text(settings: SettingsService, translate: Translator, locale: str) -> str:
+    """Settings screen grouped into labelled sections via the ui.py primitives (13.2)."""
     current = {view.key: view.value for view in await settings.list_all()}
     lines = [
-        translate("panel.settings.list_header", locale),
-        translate("panel.settings.list_subheader", locale),
+        ui.header(translate("panel.settings.list_header", locale), icon=ui.emoji("settings")),
         "",
+        translate("panel.settings.list_subheader", locale),
     ]
+    last_group: str | None = None
     for field in SETTING_FIELDS:
+        group = _SETTINGS_GROUP_BY_INDEX.get(field.index)
+        if group != last_group:
+            lines.append(ui.divider())
+            if group is not None:
+                lines.append(f"  {translate(f'panel.settings.group.{group}', locale)}")
+            last_group = group
         label = translate(field.label_key, locale)
-        lines.append(f"• {label}: <b>{escape(current.get(field.key, '—'))}</b>")
+        lines.append(ui.metric(ui.emoji("settings"), label, current.get(field.key, "—")))
+    lines += ["", ui.footer()]
     return "\n".join(lines)
 
 
@@ -1841,6 +1884,17 @@ async def _errors_text(admin: AdminService, translate: Translator, locale: str) 
         )
     lines += ["", ui.footer()]
     return "\n".join(lines)
+
+
+def _broadcast_text(translate: Translator, locale: str) -> str:
+    """Broadcast section screen rendered through the ui.py design system (13.2)."""
+    return "\n".join(
+        [
+            ui.header(translate("panel.broadcast.title", locale), icon=ui.emoji("broadcast")),
+            "",
+            translate("panel.broadcast.subtitle", locale),
+        ]
+    )
 
 
 async def _queue_text(queue: QueueService, translate: Translator, locale: str) -> str:

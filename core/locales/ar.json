@@ -155,8 +155,15 @@
   "panel.settings.saved": "تم الحفظ · {label} = {value} ✅",
   "panel.settings.stepper_body": "⚙️ <b>{label}</b>\n\nالقيمة الحالية: <b>{value}</b>\nالمسموح: من {min} إلى {max} (خطوة {step})\n\nاضبط باستخدام الأزرار، أو اضغط ✏️ إدخال قيمة لكتابتها، ثم 💾 حفظ.",
   "panel.settings.enter_value_body": "✏️ <b>{label}</b>\n\nأرسل القيمة الجديدة في الدردشة (رقم صحيح بين {min} و{max}).",
-  "panel.settings.list_header": "⚙️ <b>الإعدادات</b>",
+  "panel.settings.list_header": "الإعدادات",
   "panel.settings.list_subheader": "القيم الحالية (اضغط على حقل لتعديله):",
+  "panel.settings.group.workers": "العمّال",
+  "panel.settings.group.limits": "الحدود",
+  "panel.settings.group.cooldowns": "فترات الانتظار",
+  "panel.settings.group.throughput": "الإنتاجية",
+  "panel.settings.group.interface": "الواجهة والنمو",
+  "panel.settings.group.retention": "الاحتفاظ بالبيانات",
+  "panel.settings.group.providers": "المزوّدون",
   "panel.settings.value_number_prompt": "يرجى إرسال رقم صحيح، أو اضغط ❌ إلغاء.",
   "panel.settings.value_range_error": "يجب أن تكون القيمة بين {min} و{max}.",
   "panel.settings.confirm_set": "💾 <b>تأكيد</b>\n\nهل تريد ضبط <b>{label}</b> على <b>{value}</b>؟",
@@ -191,8 +198,8 @@
   "panel.users.owner_untouchable": "⚠️ لا يمكن إدارة المالك من اللوحة.",
   "panel.users.numeric_id_prompt": "يرجى إرسال معرّف تيليجرام رقمي، أو اضغط ❌ إلغاء.",
   "panel.users.section_body": "👥 <b>المستخدمون</b>\nاضغط 📋 القائمة لتصفّح المستخدمين وإدارتهم.",
-  "panel.users.list_empty": "👥 <b>المستخدمون</b>\n\nلا يوجد مستخدمون بعد.",
-  "panel.users.list_header": "👥 <b>المستخدمون</b> (أول {count})\nاضغط على مستخدم لإدارته.",
+  "panel.users.count_label": "المعروضون",
+  "panel.users.tap_hint": "اضغط على مستخدم لإدارته.",
   "panel.users.lookup_body": "🔍 <b>معلومات المستخدم</b>\n\nأرسل معرّف تيليجرام الخاص بالمستخدم في الدردشة.",
   "panel.users.action_prompt_body": "🔧 <b>{title}</b>\n\nأرسل معرّف تيليجرام الخاص بالمستخدم في الدردشة.",
 
@@ -260,7 +267,8 @@
   "panel.ads.label.total": "إجمالي الإعلانات",
   "panel.ads.label.active": "النشطة",
 
-  "panel.broadcast.section_body": "📣 <b>البث</b>\nاختر جمهورًا لمراسلته.",
+  "panel.broadcast.title": "البث",
+  "panel.broadcast.subtitle": "اختر جمهورًا لمراسلته.",
 
   "panel.stats.body": "📊 <b>الإحصائيات</b>\nالمستخدمون: <b>{total}</b> (⭐ {premium} بريميوم · 🛡 {staff} طاقم · 🚫 {banned} محظور)\nانضم اليوم: <b>{today}</b> · آخر 7 أيام: {week}\nنشط اليوم: <b>{active_today}</b>\nإجمالي التنزيلات: <b>{downloads}</b>\nقائمة الانتظار: <b>{depth}</b> بالانتظار · {active} قيد التنفيذ",
 
