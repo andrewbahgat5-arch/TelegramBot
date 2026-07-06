@@ -16,7 +16,7 @@
 #   docker compose -f docker-compose.prod.yml ps
 #
 # Migrations must reach head BEFORE the app boots (deploy/README.md §3):
-#   alembic upgrade head        # current head: 202606270002
+#   alembic upgrade head        # current head: 202607050003
 #
 # Image tags are pinned via ${IMAGE_TAG} so rollback = redeploy a previous tag
 # (deploy/README.md §4). The DB path is forced through PgBouncer (DB_HOST=pgbouncer,

@@ -1,8 +1,12 @@
 # Operations Runbook
 
-> MASTER_PLAN Task 10.8 · Sprint 10. Deploy, rollback, backup verification, and the
-> most-likely failure modes for the V1 single-host stack. Companion docs:
+> MASTER_PLAN Task 10.8 · Sprint 10 (deploy/rollback/DR); kept current through
+> Sprint 12 (A1 prod compose, A6 drift fix). Deploy, rollback, backup verification,
+> and the most-likely failure modes for the V1 single-host stack. Companion docs:
+> [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) (release procedure),
+> [`SMOKE_TEST.md`](SMOKE_TEST.md) (launch smoke test), [`smoke-test.sh`](smoke-test.sh),
 > [`restore-drill-report.md`](restore-drill-report.md), [`LOCAL_BOT_API.md`](LOCAL_BOT_API.md),
+> [`../.env.production.example`](../.env.production.example),
 > `MASTER_PLAN.md` §13 (config), §15 (observability), §14.8 (DR).
 
 ---
@@ -19,7 +23,9 @@
 | `pgbouncer` | `edoburu/pgbouncer` | Transaction pooling (D-020) | `6432` |
 | `uptime-kuma` | `louislam/uptime-kuma` | Probes `/v1/health` + `/v1/ready` | `3010→3001` |
 
-Admin HTTP API (`/v1/admin/*`, Task 8.3) is **deferred** — not served.
+Admin HTTP API (`/v1/admin/*`, Task 8.3) is **opt-in and disabled by default**
+(D-051): the router is mounted only when `ADMIN_API_KEY` is set, otherwise those
+paths 404. V1 ships with it off — leave `ADMIN_API_KEY` empty unless you need it.
 
 ---
 
@@ -42,26 +48,35 @@ The DB path goes through PgBouncer: set `DB_HOST=pgbouncer`, `DB_PORT=6432`.
 
 ## 3. Deploy
 
+Production runs the full stack via `docker-compose.prod.yml` (Sprint 12 A1). App
+config comes from `.env.production` (copy [`../.env.production.example`](../.env.production.example)
+and fill it); infra secrets (`DB_*`) come from the shell env or `deploy/.env`. The
+ordered, gated procedure is [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md); the
+short form:
+
 ```bash
 cd deploy
-# 1. Bring up infrastructure.
-docker compose -f docker-compose.yml up -d postgres redis pgbouncer uptime-kuma
+# 1. Bring up infrastructure first.
+docker compose -f docker-compose.prod.yml up -d postgres redis pgbouncer uptime-kuma
 
-# 2. Apply migrations (must reach the current head before app boot).
+# 2. Apply migrations (must reach the current head BEFORE the app boots).
 #    Run from the repo root with the app env loaded.
-alembic upgrade head           # expect head: 202606240001
+alembic upgrade head           # current head: 202607050003
 
-# 3. Build + start the app processes (Sprint 12 wires these into compose;
-#    until then run the images / processes directly):
-python -m api.main             # api  (serves :8080)
-python -m workers.main         # worker(s) — honours WORKER_COUNT
-python -m bot.main             # bot
+# 3. Build + start the app tier (bot, worker, api). Pin IMAGE_TAG for rollback.
+IMAGE_TAG=<tag> docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml ps            # all services healthy?
 
-# 4. Smoke test.
-curl -fsS localhost:8080/v1/health         # {"status":"ok"}
-curl -fsS localhost:8080/v1/ready          # ready:true once DB+Redis+worker up
-curl -fsS localhost:8080/v1/metrics | head # Prometheus exposition
+#    (The self-hosted Bot API server is opt-in behind a profile — D-040:
+#     docker compose --profile bot-api -f docker-compose.prod.yml up -d bot-api)
+
+# 4. Smoke test (Task 12.3): scripted endpoint half, then the manual checklist.
+./smoke-test.sh http://localhost:8080                   # → PASSED (3/3)
+#    then complete SMOKE_TEST.md §2 (bot flows).
 ```
+
+> Local/dev use `docker-compose.yml` and can run the processes directly
+> (`python -m api.main` / `-m workers.main` / `-m bot.main`) against dev infra.
 
 Point Uptime Kuma monitors at `/v1/health` (liveness) and `/v1/ready` (readiness).
 
