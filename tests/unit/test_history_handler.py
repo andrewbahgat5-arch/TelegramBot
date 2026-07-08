@@ -44,7 +44,13 @@ class FakeHistoryService:
         return self._page
 
     async def resend(
-        self, *, download_id: int, user_id: int, telegram_id: int, progress_message_id: int
+        self,
+        *,
+        download_id: int,
+        user_id: int,
+        telegram_id: int,
+        progress_message_id: int,
+        user: object = None,
     ) -> ResendKind:
         self.resend_calls.append((download_id, user_id, telegram_id, progress_message_id))
         return self._resend

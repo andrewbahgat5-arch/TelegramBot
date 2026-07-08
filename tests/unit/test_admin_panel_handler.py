@@ -215,6 +215,8 @@ class _FakeAds:
     def __init__(self) -> None:
         self.ad = _FakeAd()
         self.calls: list[tuple[Any, ...]] = []
+        self.placement_rows: list[str] = ["home"]  # what the target ad occupies (#9)
+        self.conflicts: list[Any] = []  # other active ads on the guarded placement
 
     async def list_ads(self) -> list[Any]:
         return [self.ad]
@@ -234,7 +236,17 @@ class _FakeAds:
         return ad_id == self.ad.id
 
     async def list_placements(self, ad_id: int) -> list[str]:
-        return ["home"]
+        return list(self.placement_rows)
+
+    async def targets_placement(self, ad_id: int, placement: str) -> bool:
+        return placement in self.placement_rows
+
+    async def active_conflicts(self, placement: str, *, exclude_id: int | None = None) -> list[Any]:
+        return [c for c in self.conflicts if c.id != exclude_id]
+
+    async def replace_active_on_placement(self, placement: str, *, keep_id: int) -> list[int]:
+        self.calls.append(("replace", placement, keep_id))
+        return [c.id for c in self.conflicts if c.id != keep_id]
 
     async def list_buttons(self, ad_id: int) -> list[Any]:
         return []
@@ -818,7 +830,8 @@ async def test_broadcast_create_starts_wizard() -> None:
     signer = _signer()
     callback = _callback(signer, "b", "cr")
     await _bwrite(callback, ParsedPanel("b", "cr"))
-    assert "Compose" in callback.bot.edit_message_text.await_args.args[0]
+    # No Type step anymore: the wizard opens straight on Audience (#1/#2).
+    assert "Audience" in callback.bot.edit_message_text.await_args.args[0]
 
 
 # --- ads management (9.6.9) -----------------------------------------------
@@ -873,6 +886,50 @@ async def test_ad_disable_acts_directly() -> None:
     await _awrite(callback, ParsedPanel("a", "di", 1), ads)
     assert ("set_active", 1, False) in ads.calls
     assert "Disabled" in _call(callback.answer).args[0]
+
+
+async def test_ad_enable_without_conflict_acts_directly() -> None:
+    signer = _signer()
+    ads = _FakeAds()  # target occupies "home", no post-download conflict
+    callback = _callback(signer, "a", "en")
+    await _awrite(callback, ParsedPanel("a", "en", 1), ads)
+    assert ("set_active", 1, True) in ads.calls
+    assert "Enabled" in _call(callback.answer).args[0]
+
+
+async def test_ad_enable_with_post_download_conflict_warns_first() -> None:
+    signer = _signer()
+    ads = _FakeAds()
+    ads.placement_rows = ["post_download"]  # target is a post-download ad
+    ads.conflicts = [SimpleNamespace(id=2, title="Existing", is_active=True)]
+    callback = _callback(signer, "a", "en")
+    await _awrite(callback, ParsedPanel("a", "en", 1), ads)
+    # Warned, not enabled: the confirm screen is shown and nothing was toggled.
+    assert all(c[0] != "set_active" for c in ads.calls)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "#2" in text and "Existing" in text
+
+
+async def test_ad_conflict_keep_both_enables_target_only() -> None:
+    signer = _signer()
+    ads = _FakeAds()
+    ads.placement_rows = ["post_download"]
+    ads.conflicts = [SimpleNamespace(id=2, title="Existing", is_active=True)]
+    callback = _callback(signer, "a", "enk")
+    await _awrite(callback, ParsedPanel("a", "enk", 1), ads)
+    assert ("set_active", 1, True) in ads.calls
+    assert all(c[0] != "replace" for c in ads.calls)  # the other ad stays active
+
+
+async def test_ad_conflict_replace_disables_existing() -> None:
+    signer = _signer()
+    ads = _FakeAds()
+    ads.placement_rows = ["post_download"]
+    ads.conflicts = [SimpleNamespace(id=2, title="Existing", is_active=True)]
+    callback = _callback(signer, "a", "enr")
+    await _awrite(callback, ParsedPanel("a", "enr", 1), ads)
+    assert ("replace", "post_download", 1) in ads.calls
+    assert ("set_active", 1, True) in ads.calls
 
 
 async def test_ad_delete_requires_confirm() -> None:
@@ -934,7 +991,8 @@ async def test_ad_create_starts_wizard() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "cr")
     await _awrite(callback, ParsedPanel("a", "cr"), _FakeAds())
-    assert "Compose" in callback.bot.edit_message_text.await_args.args[0]
+    # No Type step anymore: the wizard opens straight on Audience (#1/#2).
+    assert "Audience" in callback.bot.edit_message_text.await_args.args[0]
 
 
 async def test_ads_list_renders_tappable_rows() -> None:

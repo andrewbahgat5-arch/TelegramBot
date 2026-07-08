@@ -336,6 +336,9 @@ PLACEMENT_OPTIONS: tuple[PlacementOption, ...] = (
     PlacementOption(3, "quality_select", "panel.placement.quality_select"),
     PlacementOption(4, "home", "panel.placement.home"),
     PlacementOption(5, "history", "panel.placement.history"),
+    # Caption layer (two-layer ads): text + buttons injected into the delivered media's own
+    # caption. Appended (index 6) so the existing option ids stay stable.
+    PlacementOption(6, "caption", "panel.placement.caption"),
 )
 
 

@@ -32,6 +32,7 @@ from core.uuid7 import uuid7
 from domain.entities.media import MediaInfo
 from domain.enums import JobStatus, MediaFormat, Quality
 from domain.exceptions import CachedFileExpiredError
+from domain.protocols.advertising import AdButtonSpec
 from domain.protocols.file_sender import FileSenderProtocol
 from domain.protocols.repositories import (
     ActiveDownloadRepositoryProtocol,
@@ -42,6 +43,7 @@ from domain.protocols.repositories import (
     UserRepositoryProtocol,
 )
 from services.cache_service import CacheService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
 
@@ -78,6 +80,7 @@ class JobService:
         file_sender: FileSenderProtocol,
         notification_service: NotificationService,
         settings: Settings,
+        caption_mixer: CaptionAdMixer | None = None,
     ) -> None:
         self._jobs = job_repo
         self._cached = cached_file_repo
@@ -90,6 +93,7 @@ class JobService:
         self._file_sender = file_sender
         self._notifier = notification_service
         self._settings = settings
+        self._caption_mixer = caption_mixer
 
     async def request(
         self,
@@ -191,6 +195,19 @@ class JobService:
         _log.info("job_queued", job_id=str(job_id), user_id=user_id, format=fmt, quality=qual)
         return RequestOutcome(RequestKind.QUEUED, job_id=str(job_id))
 
+    async def _caption_addon(
+        self, user_id: int, base: str | None
+    ) -> tuple[str | None, tuple[AdButtonSpec, ...]]:
+        """Base caption + any due caption-layer ad for the requester (two-layer ads)."""
+        if self._caption_mixer is None:
+            return base, ()
+        user = await self._users.get_by_id(user_id)
+        if user is None:
+            return base, ()
+        # Cache-hit counters bump *after* delivery, so the caption ad's every-N sees the
+        # post-increment total (consistent with the follow-up layer, D-010).
+        return await self._caption_mixer.decorate_for_user(user, base, user.total_downloads + 1)
+
     async def _try_deliver_cached(
         self,
         media_id: int,
@@ -213,9 +230,15 @@ class JobService:
         cached_id: int = cached.id
         file_id: str = cached.telegram_file_id
         file_size: int | None = cached.file_size
+        caption, buttons = await self._caption_addon(user_id, info.title)
         try:
             await self._file_sender.send_cached(
-                telegram_id, file_id, format_=format_, quality=quality, caption=info.title
+                telegram_id,
+                file_id,
+                format_=format_,
+                quality=quality,
+                caption=caption,
+                buttons=buttons,
             )
         except CachedFileExpiredError:
             await self._cached.delete(cached)

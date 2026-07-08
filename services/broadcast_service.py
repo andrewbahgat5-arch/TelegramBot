@@ -91,6 +91,25 @@ class BroadcastService:
         total = await self._users.count_for_broadcast(role=target_role, language=target_language)
         return total, None
 
+    async def estimate_recipients(
+        self,
+        *,
+        audience_mode: str | None,
+        audience_rules: Sequence[AudienceRuleSpec],
+    ) -> int:
+        """Count how many users a broadcast would reach, without persisting anything (#7).
+
+        A read-only preview of the same audience the real ``create`` would snapshot — it
+        runs the identical unified predicate (``count_for_audience``) but never creates an
+        audience-expression row, so it is safe to call every time the Preview step renders.
+        """
+        mode = audience_mode or AudienceMode.ALL.value
+        if mode not in _VALID_MODES:
+            raise InvalidBroadcastError(f"Unknown audience mode: {mode}")
+        return await self._users.count_for_audience(
+            mode=mode, rules=list(audience_rules), now=_now()
+        )
+
     async def create(
         self,
         *,

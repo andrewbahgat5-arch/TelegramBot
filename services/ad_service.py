@@ -92,6 +92,18 @@ class AdStats:
 
 
 @dataclass(frozen=True, slots=True)
+class CaptionAd:
+    """A caption-layer ad resolved to what a media caption can carry: text + buttons.
+
+    Telegram captions cannot embed media, so the caption layer only ever renders the ad's
+    ``content_text`` plus its inline buttons (built once, reused per recipient in a fan-out).
+    """
+
+    text: str
+    buttons: tuple[AdButtonSpec, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class AdBroadcastPlan:
     """A pre-resolved ad ready to deliver to many recipients (Sprint 9.5 ad broadcast).
 
@@ -181,15 +193,43 @@ class AdService:
         placement: str | None = None,
         reply_to_message_id: int | None = None,
     ) -> bool:
-        """Select and deliver an ad at ``placement`` after a user action (16.7, D-010)."""
+        """Select and deliver a standalone ad at ``placement`` after a user action.
+
+        This is the "follow-up message" layer (16.7, D-010): the chosen ad is delivered as
+        its own message. The caption layer (:meth:`select_caption_ad`) shares the very same
+        selection via :meth:`_select_due_ad`, so audience/scheduling/rotation never diverge.
+        """
         place = placement or AdPlacement.POST_DOWNLOAD.value
         if not await self._ads_enabled():
             return False
         if not await self._placement_enabled(place):
             return False
+        ctx = self._audience_ctx(
+            role, is_premium, premium_expires_at, language, telegram_id, user_row_id
+        )
+        ad = await self._select_due_ad(place, ctx, total_downloads)
+        if ad is None:
+            return False
+        delivered = await self._deliver(ad, chat_id, reply_to_message_id=reply_to_message_id)
+        if delivered and self._events is not None:
+            # Off the hot path (D-052): schedules a background ad_events write; the
+            # advertisements.impressions counter (in _deliver) stays the source of truth.
+            self._events.record_impression(
+                advertisement_id=ad.id, user_id=user_row_id, placement=place
+            )
+        return delivered
 
+    def _audience_ctx(
+        self,
+        role: str,
+        is_premium: bool,
+        premium_expires_at: datetime.datetime | None,
+        language: str | None,
+        telegram_id: int | None,
+        user_row_id: int | None,
+    ) -> AudienceContext:
         premium = _is_premium_active(is_premium, premium_expires_at)
-        ctx = AudienceContext(
+        return AudienceContext(
             role=role,
             plan="premium" if premium else "free",
             language=language,
@@ -197,9 +237,20 @@ class AdService:
             user_row_id=user_row_id or 0,
             untargeted_exempt=premium or role in UNLIMITED_ROLES,
         )
+
+    async def _select_due_ad(
+        self, place: str, ctx: AudienceContext, total_downloads: int
+    ) -> Any | None:
+        """The one ad to show at ``place`` for this viewer, or None — the shared selector.
+
+        Walks active candidates in the repo's fair-rotation order (priority DESC, then
+        least-recently-shown, #10), skipping not-yet-due (``scheduled_at``), audience
+        non-matches, and ads whose ``every-N`` does not land on this download. Returns the
+        first eligible ad **without delivering it**, so both the follow-up and caption layers
+        reuse the identical logic.
+        """
         now = datetime.datetime.now(datetime.UTC)
-        candidates = await self._ads.list_active_for_placement(place)
-        for ad in candidates:  # highest priority first; fall through on a non-match/miss
+        for ad in await self._ads.list_active_for_placement(place):
             scheduled_at = getattr(ad, "scheduled_at", None)
             if scheduled_at is not None and scheduled_at > now:  # not yet due (9.5.10)
                 continue
@@ -208,15 +259,48 @@ class AdService:
             frequency = ad.show_every_n_downloads or 1
             if total_downloads % frequency != 0:  # post-increment modulo (D-010)
                 continue
-            delivered = await self._deliver(ad, chat_id, reply_to_message_id=reply_to_message_id)
-            if delivered and self._events is not None:
-                # Off the hot path (D-052): schedules a background ad_events write; the
-                # advertisements.impressions counter (in _deliver) stays the source of truth.
-                self._events.record_impression(
-                    advertisement_id=ad.id, user_id=user_row_id, placement=place
-                )
-            return delivered
-        return False
+            return ad
+        return None
+
+    async def select_caption_ad(
+        self,
+        *,
+        role: str,
+        is_premium: bool,
+        premium_expires_at: datetime.datetime | None,
+        total_downloads: int,
+        language: str | None = None,
+        telegram_id: int | None = None,
+        user_row_id: int | None = None,
+    ) -> CaptionAd | None:
+        """Pick the caption-layer ad for this viewer as text + buttons (UX: caption ads).
+
+        The caption layer injects an ad's text and inline buttons into a delivered media's
+        own caption (Telegram captions cannot hold media, so only text + buttons apply). This
+        selects the due ``caption``-placement ad via the shared :meth:`_select_due_ad`,
+        records the impression (advancing the impressions counter + ``last_shown_at``
+        rotation exactly like a delivered ad), and returns its text + buttons for the mixer
+        to render. Returns None when the layer is off, no ad matches, or the ad has no text.
+        """
+        if not await self._ads_enabled():
+            return None
+        if not await self._placement_enabled(AdPlacement.CAPTION.value):
+            return None
+        ctx = self._audience_ctx(
+            role, is_premium, premium_expires_at, language, telegram_id, user_row_id
+        )
+        ad = await self._select_due_ad(AdPlacement.CAPTION.value, ctx, total_downloads)
+        if ad is None or not (ad.content_text or "").strip():
+            return None
+        buttons = await self._build_buttons(ad)
+        await self._ads.increment_impressions(ad.id)  # counter + last_shown_at rotation (#10)
+        metrics.record_ad_shown()
+        if self._events is not None:
+            self._events.record_impression(
+                advertisement_id=ad.id, user_id=user_row_id, placement=AdPlacement.CAPTION.value
+            )
+        _log.info("caption_ad_selected", ad_id=ad.id)
+        return CaptionAd(text=str(ad.content_text), buttons=tuple(buttons))
 
     async def _ads_enabled(self) -> bool:
         try:
@@ -229,8 +313,10 @@ class AdService:
         try:
             enabled: bool = await self._settings.get(f"ad_placement_{placement}_enabled")
         except SettingNotFoundError:
-            # Unconfigured: only the Sprint 9 compat placement is on by default.
-            return placement == AdPlacement.POST_DOWNLOAD.value
+            # Unconfigured: the Sprint 9 compat placement and the caption layer are on by
+            # default (no seed row needed) — the admin's real on/off control for the caption
+            # layer is the ad's own Enabled toggle + whether it targets the caption placement.
+            return placement in (AdPlacement.POST_DOWNLOAD.value, AdPlacement.CAPTION.value)
         return bool(enabled)
 
     async def _build_buttons(self, ad: Any) -> list[AdButtonSpec]:
@@ -468,6 +554,38 @@ class AdService:
         if ad is None:
             return None
         return await self._ads.apply_update(ad, {"is_active": active})
+
+    # --- placement-conflict detection (UX sprint #9) ---------------------
+    async def targets_placement(self, ad_id: int, placement: str) -> bool:
+        """Whether ``ad_id`` occupies ``placement`` (multi-placement rows, or legacy column)."""
+        places = await self._ads.list_placements(ad_id)
+        if places:
+            return placement in places
+        ad = await self._ads.get_by_id(ad_id)
+        return ad is not None and ad.placement == placement
+
+    async def active_conflicts(self, placement: str, *, exclude_id: int | None = None) -> list[Any]:
+        """Other currently-active ads occupying ``placement`` (UX sprint #9).
+
+        Used to warn an admin before a second ad goes live on a high-visibility placement
+        (e.g. post-download): both may legitimately coexist and share exposure under the
+        fair-rotation rule (#10), but the admin should choose that knowingly rather than
+        create an unnoticed overlap. Excludes ``exclude_id`` (the ad being enabled/edited).
+        """
+        active = await self._ads.list_active_for_placement(placement)
+        return [ad for ad in active if ad.id != exclude_id]
+
+    async def replace_active_on_placement(self, placement: str, *, keep_id: int) -> list[int]:
+        """Disable every active ad on ``placement`` except ``keep_id`` (the "Replace" choice).
+
+        Returns the ids that were disabled, so the caller can report exactly what changed.
+        """
+        disabled: list[int] = []
+        for ad in await self._ads.list_active_for_placement(placement):
+            if ad.id != keep_id:
+                await self._ads.apply_update(ad, {"is_active": False})
+                disabled.append(ad.id)
+        return disabled
 
     async def list_placements(self, ad_id: int) -> Sequence[str]:
         """The placements an ad occupies (Sprint 9.6, D-056)."""

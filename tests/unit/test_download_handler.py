@@ -55,6 +55,30 @@ def _today() -> datetime.date:
     return datetime.datetime.now(datetime.UTC).date()
 
 
+def _user() -> UserSnapshot:
+    return UserSnapshot(
+        id=1,
+        telegram_id=555,
+        role=UserRole.USER,
+        is_banned=False,
+        is_premium=False,
+        daily_download_count=0,
+        daily_download_count_reset_date=_today(),
+        total_downloads=0,
+    )
+
+
+class _NoCaptionAds:
+    """AdService stand-in with the caption layer off (no ad injected)."""
+
+    async def select_caption_ad(self, **_kw: object) -> None:
+        return None
+
+
+def _no_ads(_session: AsyncSession) -> object:
+    return _NoCaptionAds()
+
+
 _URL = "https://example.org/clip"
 
 
@@ -97,7 +121,16 @@ async def test_url_message_shows_format_keyboard() -> None:
     analyzer = _analyzer()  # _result() has no thumbnail → ack is edited in place
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
 
     message.answer.assert_awaited_once()  # the instant "Analyzing…" ack
     ack.edit_text.assert_awaited_once()
@@ -108,7 +141,16 @@ async def test_url_message_unsupported_replies_without_keyboard() -> None:
     analyzer = _analyzer(error=URLNotSupportedError())
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
 
     ack.edit_text.assert_awaited_once()  # the ack is edited to the error text
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
@@ -117,8 +159,40 @@ async def test_url_message_unsupported_replies_without_keyboard() -> None:
 async def test_url_message_extraction_failed_replies() -> None:
     analyzer = _analyzer(error=ExtractionFailedError())
     message, ack = _message_with_ack()
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
     ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
+
+
+async def test_url_message_transient_failure_shows_try_again() -> None:
+    # A transient failure that survived retries must read as temporary, not "private/removed"
+    # (#12).
+    from core.i18n import translate as _translate
+    from domain.protocols.downloader import ProviderRetryElsewhere
+
+    analyzer = _analyzer(error=ProviderRetryElsewhere("rate limited"))
+    message, ack = _message_with_ack()
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.args[0] == _translate("download.temporary_error", "en")
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
 
@@ -130,7 +204,16 @@ async def test_url_message_no_formats_replies() -> None:
     cache_service, _ = make_cache_service()
     analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
     message, ack = _message_with_ack()
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
     ack.edit_text.assert_awaited_once()
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
@@ -246,7 +329,16 @@ async def test_url_message_with_thumbnail_sends_photo() -> None:
     analyzer = URLAnalyzerService(downloader, cache_service, FakeMediaRepo())
     message, ack = _message_with_ack()
 
-    await handle_url(message, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en")
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
 
     message.answer.assert_awaited_once()  # instant ack
     message.answer_photo.assert_awaited_once()  # thumbnail + keyboard

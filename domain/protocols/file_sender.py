@@ -11,11 +11,13 @@ these ports, satisfied by ``infrastructure/telegram/file_sender.py`` (Section 8)
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from domain.enums import MediaFormat, Quality
+from domain.protocols.advertising import AdButtonSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +40,14 @@ class FileSenderProtocol(Protocol):
         chat_id: int,
         filename: str,
         caption: str | None = None,
+        buttons: Sequence[AdButtonSpec] = (),
     ) -> UploadedFile:
         """Upload ``path`` to ``chat_id`` (delivering it) and return its reusable ids.
 
         The first waiter's upload *is* their delivery, so we never send the file
-        twice. ``quality`` selects the audio container's send method.
+        twice. ``quality`` selects the audio container's send method. ``buttons`` (default
+        none) renders an inline keyboard on the media message — used by the caption-ad layer
+        so a caption ad's CTA rides on the same message.
         """
         ...
 
@@ -54,8 +59,12 @@ class FileSenderProtocol(Protocol):
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
+        buttons: Sequence[AdButtonSpec] = (),
     ) -> int | None:
-        """Deliver an already-uploaded file by ``file_id``; return its message id (#30)."""
+        """Deliver an already-uploaded file by ``file_id``; return its message id (#30).
+
+        ``buttons`` (default none) attaches a caption-ad inline keyboard to the media.
+        """
         ...
 
 

@@ -100,6 +100,7 @@ async def handle_resend(
         user_id=user.id,
         telegram_id=user.telegram_id,
         progress_message_id=progress_message_id,
+        user=user,  # lets the caption-ad layer target this viewer (two-layer ads)
     )
     if outcome is ResendKind.RESENT:
         await notification_service.notify_completed(user.telegram_id, progress_message_id, locale)

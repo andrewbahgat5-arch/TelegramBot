@@ -22,6 +22,8 @@ import asyncio
 from collections.abc import Callable
 
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.base import BaseStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.callbacks.factory import CallbackSigner
@@ -84,6 +86,7 @@ from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
@@ -120,9 +123,15 @@ def build_dispatcher(
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
     session_factory: async_sessionmaker[AsyncSession],
+    storage: BaseStorage | None = None,
 ) -> Dispatcher:
-    """Build the dispatcher and install the Section 9.1 middleware stack."""
-    dp = Dispatcher()
+    """Build the dispatcher and install the Section 9.1 middleware stack.
+
+    ``storage`` is the aiogram FSM storage. In production it is a Redis-backed store so the
+    multi-step admin compose wizard survives process restarts and is shared across replicas
+    (#6); when omitted (tests) aiogram's default in-memory storage is used.
+    """
+    dp = Dispatcher(storage=storage) if storage is not None else Dispatcher()
     # Workflow data injected into handlers by parameter name (download/history/admin).
     dp["analyzer_factory"] = analyzer_factory
     dp["job_service_factory"] = job_service_factory
@@ -251,7 +260,12 @@ async def main() -> None:
             file_sender=file_sender,
             notification_service=notification_service,
             settings=settings,
+            caption_mixer=make_caption_mixer(session),
         )
+
+    def make_caption_mixer(session: AsyncSession) -> CaptionAdMixer:
+        # Two-layer ads: injects a caption ad into delivered media captions (single pipeline).
+        return CaptionAdMixer(make_ad_service(session))
 
     def make_history_service(session: AsyncSession) -> HistoryService:
         return HistoryService(
@@ -262,6 +276,7 @@ async def main() -> None:
             file_sender=file_sender,
             cache_service=cache_service,
             settings_service=make_settings_service(session),
+            caption_mixer=make_caption_mixer(session),
         )
 
     def make_settings_service(session: AsyncSession) -> SettingsService:
@@ -337,6 +352,11 @@ async def main() -> None:
         notification_service=notification_service,
         callback_signer=callback_signer,
         session_factory=session_factory,
+        # Durable FSM so the admin compose wizard never expires mid-edit on a restart or a
+        # second replica (#6). No TTL is set, so wizard state persists until it is explicitly
+        # saved/cancelled — "some time passing" can no longer drop it. Reuses the cache DB;
+        # aiogram namespaces its keys under an "fsm" prefix, so there is no collision.
+        storage=RedisStorage(redis=redis_clients.cache),
     )
 
     _log.info("bot_starting", mode="webhook" if settings.use_webhook else "polling")

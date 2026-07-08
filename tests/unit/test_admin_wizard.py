@@ -78,6 +78,15 @@ class _FakeAds:
         self.active: bool | None = None
         self.cleared_buttons = False
         self.ad: Any = None  # the ad returned by get() in edit mode
+        self.conflicts: list[Any] = []  # active post-download ads for the #9 warning
+        self.replaced_keep_id: int | None = None
+
+    async def active_conflicts(self, placement: str, *, exclude_id: int | None = None) -> list[Any]:
+        return [c for c in self.conflicts if getattr(c, "id", None) != exclude_id]
+
+    async def replace_active_on_placement(self, placement: str, *, keep_id: int) -> list[int]:
+        self.replaced_keep_id = keep_id
+        return [c.id for c in self.conflicts if c.id != keep_id]
 
     async def create(self, fields: Any, *, created_by: int, **kw: Any) -> Any:
         self.created = {"fields": dict(fields), "created_by": created_by, **kw}
@@ -143,6 +152,10 @@ class _FakeBroadcasts:
         self.created = kw
         return SimpleNamespace(id=8, expected_total=50)
 
+    async def estimate_recipients(self, *, audience_mode: Any, audience_rules: Any) -> int:
+        self.estimated = {"audience_mode": audience_mode, "rules": list(audience_rules)}
+        return 1234
+
 
 def _callback() -> Any:
     cb = AsyncMock(spec=CallbackQuery)
@@ -178,27 +191,80 @@ def _seed(fsm: _FSM, ws: WizardState) -> None:
 
 
 # --- entry + navigation ---------------------------------------------------
-async def test_start_opens_type_step() -> None:
+async def test_start_opens_audience_step() -> None:
+    # No Type step: the kind is fixed by the entry section and the wizard opens straight on
+    # Audience (#1/#2).
     fsm, cb = _FSM(), _callback()
     await admin_wizard.start(cb, fsm, _signer(), translate, _LOCALE, kind="ad")  # type: ignore[arg-type]
     ws = WizardState.from_data(fsm.data["wizard"])
-    assert ws.kind == "ad" and ws.step == "type"
-    assert "Compose" in cb.bot.edit_message_text.await_args.args[0]
+    assert ws.kind == "ad" and ws.step == STEP_AUDIENCE
+    assert "Audience" in cb.bot.edit_message_text.await_args.args[0]
 
 
-async def test_type_selection_advances_to_audience() -> None:
+async def test_start_broadcast_preset_seeds_audience() -> None:
+    # The Broadcast-menu "Premium" shortcut opens the wizard with the audience pre-seeded.
     fsm, cb = _FSM(), _callback()
-    _seed(fsm, WizardState(kind="ad", step="type"))
+    await admin_wizard.start(
+        cb,
+        fsm,
+        _signer(),
+        translate,
+        _LOCALE,
+        kind="broadcast",
+        preset="bp",  # type: ignore[arg-type]
+    )
+    ws = WizardState.from_data(fsm.data["wizard"])
+    assert ws.kind == "broadcast" and ws.step == STEP_AUDIENCE
+    assert ws.audience_mode == "include"
+    assert ws.rules == [["include", "plan", "premium"]]
+
+
+async def test_broadcast_preview_shows_recipient_estimate() -> None:
+    # Navigating to Preview on a broadcast computes and shows the audience size (#7).
+    fsm, cb = _FSM(), _callback()
+    _seed(
+        fsm,
+        WizardState(kind="broadcast", step=STEP_CONTENT, content_mode="fields", content_text="hi"),
+    )
+    casts = _FakeBroadcasts()
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "ty", 1),
+        ParsedPanel("w", "go", step_index(STEP_PREVIEW)),
+        ads=_FakeAds(),
+        casts=casts,
+        aud=_FakeAudience(),
+    )
+    ws = WizardState.from_data(fsm.data["wizard"])
+    assert ws.step == STEP_PREVIEW
+    assert ws.estimated_recipients == 1234
+    assert "1,234" in cb.bot.edit_message_text.await_args.args[0]
+
+
+async def test_ad_preview_has_no_recipient_estimate() -> None:
+    # Ads deliver opportunistically, so their Preview shows no single reach number (#7).
+    fsm, cb = _FSM(), _callback()
+    _seed(
+        fsm,
+        WizardState(
+            kind="ad",
+            step=STEP_CONTENT,
+            placements=["home"],
+            content_mode="fields",
+            content_text="hi",
+        ),
+    )
+    await _dispatch(
+        cb,
+        fsm,
+        ParsedPanel("w", "go", step_index(STEP_PREVIEW)),
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
     )
     ws = WizardState.from_data(fsm.data["wizard"])
-    assert ws.kind == "broadcast" and ws.step == STEP_AUDIENCE
+    assert ws.step == STEP_PREVIEW
+    assert ws.estimated_recipients is None
 
 
 async def test_edit_from_preview_marks_return_to_preview() -> None:
@@ -400,6 +466,57 @@ async def test_save_broadcast_uses_unified_engine() -> None:
     assert "queued" in cb.answer.await_args.args[0]
 
 
+def _ready_post_download_ad() -> WizardState:
+    return WizardState(
+        kind="ad",
+        step=STEP_PREVIEW,
+        placements=["post_download"],
+        rules=[["include", "plan", "premium"]],
+        content_mode="copy",
+        storage_chat_id=1,
+        storage_message_id=2,
+        internal_name="New",
+    )
+
+
+async def test_save_warns_on_post_download_conflict() -> None:
+    # Saving a second active post-download ad shows the Keep both / Replace / Cancel warning
+    # instead of silently going live (#9).
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, _ready_post_download_ad())
+    ads = _FakeAds()
+    ads.conflicts = [SimpleNamespace(id=9, title="Existing")]
+    await _dispatch(
+        cb, fsm, ParsedPanel("w", "sv"), ads=ads, casts=_FakeBroadcasts(), aud=_FakeAudience()
+    )
+    assert ads.created is None  # not saved yet — warned first
+    assert "#9" in cb.bot.edit_message_text.await_args.args[0]
+
+
+async def test_save_keep_both_creates_without_replacing() -> None:
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, _ready_post_download_ad())
+    ads = _FakeAds()
+    ads.conflicts = [SimpleNamespace(id=9, title="Existing")]
+    await _dispatch(
+        cb, fsm, ParsedPanel("w", "svk"), ads=ads, casts=_FakeBroadcasts(), aud=_FakeAudience()
+    )
+    assert ads.created is not None  # saved
+    assert ads.replaced_keep_id is None  # the existing ad stays active
+
+
+async def test_save_replace_disables_existing() -> None:
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, _ready_post_download_ad())
+    ads = _FakeAds()
+    ads.conflicts = [SimpleNamespace(id=9, title="Existing")]
+    await _dispatch(
+        cb, fsm, ParsedPanel("w", "svr"), ads=ads, casts=_FakeBroadcasts(), aud=_FakeAudience()
+    )
+    assert ads.created is not None
+    assert ads.replaced_keep_id == 11  # the newly created ad id (from _FakeAds.create)
+
+
 async def test_save_blocks_on_invalid_and_jumps_to_step() -> None:
     fsm, cb = _FSM(), _callback()
     _seed(fsm, WizardState(kind="ad", step=STEP_PREVIEW))  # no placement, no content
@@ -428,6 +545,29 @@ async def test_cancel_clears_state() -> None:
         aud=_FakeAudience(),
     )
     assert fsm.data == {}
+
+
+async def test_cancel_returns_to_section_menu() -> None:
+    # Cancel from a broadcast wizard clears state and re-renders the Broadcast section menu
+    # with a confirmation (#5).
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
+    await admin_wizard.cancel(cb, fsm, _signer(), translate, _LOCALE)  # type: ignore[arg-type]
+    assert fsm.data == {}
+    assert cb.bot.edit_message_text.await_count == 1
+    cb.answer.assert_awaited()
+
+
+async def test_cancel_is_graceful_when_state_already_lost() -> None:
+    # If the FSM state was already gone (e.g. a stale button), Cancel must still exit
+    # cleanly by editing the current message rather than dead-ending on "expired" (#5/#6).
+    fsm, cb = _FSM(), _callback()  # no wizard seeded
+    await admin_wizard.cancel(cb, fsm, _signer(), translate, _LOCALE)  # type: ignore[arg-type]
+    assert fsm.data == {}
+    # Falls back to the callback message's own coordinates when ws is gone.
+    assert cb.bot.edit_message_text.await_args.kwargs["chat_id"] == 10
+    assert cb.bot.edit_message_text.await_args.kwargs["message_id"] == 20
+    cb.answer.assert_awaited()
 
 
 # --- edit-in-wizard (Bug-fix sprint) --------------------------------------
@@ -523,6 +663,32 @@ async def test_audience_selecting_opposite_side_swaps_not_conflicts() -> None:
     assert ws.rules == [["exclude", "plan", "premium"]]  # never both — the side swapped
     assert ws.audience_mode == "all"  # no include rule remains
     assert ws.step == STEP_AUDIENCE  # stayed on the same screen (Owner #4/#5)
+
+
+async def test_audience_free_plus_premium_collapses_to_all() -> None:
+    # Selecting both Free (opt 0) and Premium (opt 1) targets everyone, so the redundant
+    # pair collapses back to the All audience (#3).
+    fsm, cb = _FSM(), _callback()
+    _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
+    await _dispatch(
+        cb,
+        fsm,
+        ParsedPanel("w", "atg", 0),
+        ads=_FakeAds(),
+        casts=_FakeBroadcasts(),
+        aud=_FakeAudience(),
+    )
+    await _dispatch(
+        cb,
+        fsm,
+        ParsedPanel("w", "atg", 1),
+        ads=_FakeAds(),
+        casts=_FakeBroadcasts(),
+        aud=_FakeAudience(),
+    )
+    ws = WizardState.from_data(fsm.data["wizard"])
+    assert ws.rules == []  # both plan includes cleared
+    assert ws.audience_mode == "all"
 
 
 def test_audience_keyboard_hides_the_opposite_side() -> None:

@@ -106,8 +106,16 @@ def test_quality_for_format_handles_non_16x9(
     [
         ("ERROR: Unsupported URL: foo", URLNotSupportedError),
         ("ERROR: Video unavailable", ExtractionFailedError),
+        ("ERROR: Private video. Sign in if you've been granted access", ExtractionFailedError),
+        ("ERROR: This video has been removed by the uploader", ExtractionFailedError),
         ("ERROR: HTTP Error 503", ProviderRetryElsewhere),
-        ("ERROR: something weird", ExtractionFailedError),
+        # #12 reclassifications: these intermittent failures are now transient (were
+        # previously permanent / mis-labelled as "content"), so they get retried.
+        ("ERROR: HTTP Error 429: Too Many Requests", ProviderRetryElsewhere),
+        ("ERROR: Sign in to confirm you're not a bot", ProviderRetryElsewhere),
+        ("ERROR: unable to extract player response", ProviderRetryElsewhere),
+        ("ERROR: Unable to download webpage: nsig extraction failed", ProviderRetryElsewhere),
+        ("ERROR: something weird", ExtractionFailedError),  # unknown stays permanent (safe)
     ],
 )
 def test_map_error(stderr: str, exc: type[Exception]) -> None:
@@ -133,6 +141,59 @@ async def test_extract_info_timeout_is_retryable(monkeypatch: pytest.MonkeyPatch
     with pytest.raises(ProviderRetryElsewhere):
         await YtdlpProvider().extract_info(_URL)
     assert proc.killed
+
+
+def _patch_proc_seq(monkeypatch: pytest.MonkeyPatch, procs: list[_FakeProc]) -> dict[str, int]:
+    """Return a different fake proc per subprocess call, so retries can be exercised."""
+    state = {"calls": 0}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        proc = procs[min(state["calls"], len(procs) - 1)]
+        state["calls"] += 1
+        return proc
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    async def no_sleep(_seconds: float) -> None:  # keep retry tests fast
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    return state
+
+
+async def test_extract_info_retries_transient_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A transient bot-check on the first attempt, then a clean run — the retry recovers it
+    # instead of surfacing "couldn't read that link" (#12).
+    procs = [
+        _FakeProc(b"", b"ERROR: Sign in to confirm you're not a bot", 1),
+        _FakeProc(orjson.dumps(_INFO), b"", 0),
+    ]
+    state = _patch_proc_seq(monkeypatch, procs)
+    info = await YtdlpProvider().extract_info(_URL)
+    assert info.video_id == "vid123"
+    assert state["calls"] == 2  # one retry
+
+
+async def test_extract_info_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A persistent transient failure eventually surfaces as retryable (the handler maps it to
+    # a "try again" message), not a false "private/removed".
+    proc = _FakeProc(b"", b"ERROR: HTTP Error 429: Too Many Requests", 1)
+    state = _patch_proc_seq(monkeypatch, [proc])
+    with pytest.raises(ProviderRetryElsewhere):
+        await YtdlpProvider().extract_info(_URL)
+    assert state["calls"] == 3  # initial + 2 retries
+
+
+async def test_extract_info_does_not_retry_permanent_content_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proc = _FakeProc(b"", b"ERROR: Private video", 1)
+    state = _patch_proc_seq(monkeypatch, [proc])
+    with pytest.raises(ExtractionFailedError):
+        await YtdlpProvider().extract_info(_URL)
+    assert state["calls"] == 1  # no retry for a permanent failure
 
 
 async def test_extract_info_bad_json_is_extraction_error(monkeypatch: pytest.MonkeyPatch) -> None:

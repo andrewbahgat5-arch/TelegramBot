@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 import pytest
 
@@ -257,3 +258,83 @@ async def test_create_stores_internal_metadata() -> None:
     )
     assert ad.internal_name == "Summer Campaign"
     assert ad.internal_notes == "Q3 push"
+
+
+# --- placement-conflict detection (UX sprint #9) --------------------------
+async def test_active_conflicts_lists_other_active_ads_on_placement() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="a", placement="post_download")
+    repo.by_id[2] = FakeAdRow(id=2, title="B", content_text="b", placement="post_download")
+    repo.by_id[3] = FakeAdRow(id=3, title="C", content_text="c", placement="home")
+    conflicts = await service.active_conflicts("post_download", exclude_id=1)
+    assert [ad.id for ad in conflicts] == [2]  # ad 1 excluded, ad 3 is a different placement
+
+
+async def test_targets_placement_uses_rows_then_column() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="A", content_text="a", placement="post_download")
+    assert await service.targets_placement(1, "post_download") is True
+    await repo.set_placements(1, ["home", "history"])  # placement rows win over the column
+    assert await service.targets_placement(1, "post_download") is False
+    assert await service.targets_placement(1, "home") is True
+
+
+async def test_replace_active_on_placement_disables_the_others() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="Keep", content_text="k", placement="post_download")
+    repo.by_id[2] = FakeAdRow(id=2, title="Old", content_text="o", placement="post_download")
+    disabled = await service.replace_active_on_placement("post_download", keep_id=1)
+    assert disabled == [2]
+    assert repo.by_id[2].is_active is False
+    assert repo.by_id[1].is_active is True  # the kept ad is untouched
+
+
+# --- caption layer (two-layer ads) ----------------------------------------
+async def _select_caption(service: AdService, **kw: Any) -> Any:
+    base: dict[str, Any] = {
+        "role": "user",
+        "is_premium": False,
+        "premium_expires_at": None,
+        "total_downloads": 1,
+    }
+    base.update(kw)
+    return await service.select_caption_ad(**base)
+
+
+async def test_select_caption_ad_returns_text_and_records_impression() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(
+        id=1, title="C", content_text="Subscribe!", placement="caption", show_every_n_downloads=1
+    )
+    ad = await _select_caption(service)
+    assert ad is not None and ad.text == "Subscribe!"
+    assert repo.by_id[1].impressions == 1  # counter + rotation advanced
+    assert repo.by_id[1].last_shown_at is not None
+
+
+async def test_select_caption_ad_none_when_only_post_download_ads() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="P", content_text="hi", placement="post_download")
+    assert await _select_caption(service) is None
+
+
+async def test_select_caption_ad_none_for_owner_on_untargeted() -> None:
+    # An untargeted (audience=all) ad is exempt for the owner — same rule as the follow-up.
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="C", content_text="hi", placement="caption")
+    assert await _select_caption(service, role="owner") is None
+
+
+async def test_select_caption_ad_respects_every_n() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(
+        id=1, title="C", content_text="hi", placement="caption", show_every_n_downloads=2
+    )
+    assert await _select_caption(service, total_downloads=1) is None  # not due
+    assert await _select_caption(service, total_downloads=2) is not None  # due
+
+
+async def test_select_caption_ad_skips_ad_with_no_text() -> None:
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="C", content_text=None, placement="caption")
+    assert await _select_caption(service) is None

@@ -47,6 +47,7 @@ from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.handlers import admin_wizard
 from bot.keyboards.admin_panel import (
     build_ad_action_list,
+    build_ad_conflict_confirm,
     build_ad_detail,
     build_ad_list,
     build_confirm,
@@ -181,6 +182,15 @@ async def panel_navigate(
     translate: Translator,
     locale: str,
 ) -> None:
+    # The compose wizard's Cancel is a read-tier action (``w/cx``): route it to the wizard's
+    # own cancel *before* the blanket state.clear() below, so it can read the kind and return
+    # to the right section menu instead of silently wiping the wizard (#5).
+    if panel.section == "w":
+        if panel.action == "cx":
+            await admin_wizard.cancel(callback, state, callback_signer, translate, locale)
+        else:
+            await callback.answer()
+        return
     await state.clear()  # navigating away cancels any pending guided input
     # "User Info" with no target → start the guided id-lookup wizard (9.6.8).
     if panel.section == "u" and panel.action == "inf" and panel.arg is None:
@@ -266,7 +276,13 @@ async def panel_write(
         return
     if panel.section == "b" and panel.action in ("cr", "bf", "bp", "ba", "bl"):
         await admin_wizard.start(
-            callback, state, callback_signer, translate, locale, kind="broadcast"
+            callback,
+            state,
+            callback_signer,
+            translate,
+            locale,
+            kind="broadcast",
+            preset=panel.action,
         )
         return
     if panel.section == "s":  # Settings stepper / guided entry (9.6.5, 9.6.7)
@@ -1562,6 +1578,37 @@ _AD_CONFIRM = {
     "bc": ("bcc", "panel.verb.broadcast_all"),
 }
 
+# The high-visibility placement guarded by the "already-active" conflict warning (#9).
+_POST_DOWNLOAD = "post_download"
+
+
+def _ad_conflict_text(
+    incoming: Any, existing: Sequence[Any], translate: Translator, locale: str
+) -> str:
+    """Warn before a second post-download ad goes live, naming both sides clearly (#9)."""
+    active_lines = "\n".join(
+        translate("panel.ads.conflict.active_row", locale, id=ad.id, title=escape(ad.title))
+        for ad in existing
+    )
+    return "\n".join(
+        [
+            ui.header(translate("panel.ads.conflict.title", locale), icon=ui.emoji("ads")),
+            "",
+            translate("panel.ads.conflict.body", locale),
+            "",
+            translate("panel.ads.conflict.already_active", locale),
+            active_lines,
+            "",
+            translate(
+                "panel.ads.conflict.about_to_enable",
+                locale,
+                id=incoming.id,
+                title=escape(incoming.title),
+            ),
+        ]
+    )
+
+
 # Top-level Manage-Campaigns actions that need an ad chosen first → render a picker.
 _AD_PICKER_ACTIONS = frozenset({"en", "di", "de", "bc", "ed"})
 _AD_PICKER_VERB = {
@@ -1666,16 +1713,57 @@ async def _ads_write(
             translate("panel.ads.broadcast_queued", locale, count=broadcast.expected_total)
         )
         return
-    if action in ("en", "di"):  # enable / disable directly
-        ad = await ads.set_active(ad_id, action == "en")
-        if ad is None:
+    if action == "di":  # disable directly (never conflicts)
+        if await ads.set_active(ad_id, False) is None:
             await callback.answer(translate("panel.ads.not_found", locale), show_alert=True)
             return
         await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer, translate, locale)
-        await callback.answer(
-            translate(
-                "panel.ads.enabled_toast" if action == "en" else "panel.ads.disabled_toast", locale
+        await callback.answer(translate("panel.ads.disabled_toast", locale))
+        return
+    if action == "en":  # enable — warn first if a post-download ad is already active (#9)
+        incoming = await ads.get(ad_id)
+        if incoming is None:
+            await callback.answer(translate("panel.ads.not_found", locale), show_alert=True)
+            return
+        conflicts = (
+            await ads.active_conflicts(_POST_DOWNLOAD, exclude_id=ad_id)
+            if await ads.targets_placement(ad_id, _POST_DOWNLOAD)
+            else []
+        )
+        if conflicts and isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                _ad_conflict_text(incoming, conflicts, translate, locale),
+                build_ad_conflict_confirm(
+                    signer,
+                    locale,
+                    keep=("a", "enk", ad_id),
+                    replace=("a", "enr", ad_id),
+                    cancel=("a", "inf", ad_id),
+                ),
             )
+            await callback.answer()
+            return
+        await ads.set_active(ad_id, True)
+        await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer, translate, locale)
+        await callback.answer(translate("panel.ads.enabled_toast", locale))
+        return
+    if action == "enk":  # conflict resolution: keep both active
+        if await ads.set_active(ad_id, True) is None:
+            await callback.answer(translate("panel.ads.not_found", locale), show_alert=True)
+            return
+        await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer, translate, locale)
+        await callback.answer(translate("panel.ads.conflict.kept_both_toast", locale))
+        return
+    if action == "enr":  # conflict resolution: replace the currently-active post-download ad(s)
+        if await ads.get(ad_id) is None:
+            await callback.answer(translate("panel.ads.not_found", locale), show_alert=True)
+            return
+        disabled = await ads.replace_active_on_placement(_POST_DOWNLOAD, keep_id=ad_id)
+        await ads.set_active(ad_id, True)
+        await _rerender_ad_detail(callback, ads, ad_id, actor.role, signer, translate, locale)
+        await callback.answer(
+            translate("panel.ads.conflict.replaced_toast", locale, count=len(disabled))
         )
         return
     await callback.answer()

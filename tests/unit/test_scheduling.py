@@ -89,6 +89,43 @@ async def test_unscheduled_ad_is_shown() -> None:
     assert await _show(service) is True
 
 
+# --- fair rotation among equal-priority ads (UX sprint #10) ---------------
+
+
+async def test_equal_priority_ads_rotate_least_recently_shown() -> None:
+    service, repo = _ad_service()
+    # Two active, equal-priority, always-due ads on the same placement.
+    repo.by_id[1] = FakeAdRow(
+        id=1, title="A", content_text="a", priority=0, show_every_n_downloads=1
+    )
+    repo.by_id[2] = FakeAdRow(
+        id=2, title="B", content_text="b", priority=0, show_every_n_downloads=1
+    )
+
+    assert await _show(service) is True  # never-shown, lowest id → ad 1
+    assert repo.by_id[1].impressions == 1 and repo.by_id[2].impressions == 0
+    assert await _show(service) is True  # ad 1 now shown → least-recent is ad 2
+    assert repo.by_id[2].impressions == 1
+    assert await _show(service) is True  # back to ad 1
+    assert repo.by_id[1].impressions == 2
+    # Balanced exposure: three impressions split 2 / 1 across the two ads.
+    assert (repo.by_id[1].impressions, repo.by_id[2].impressions) == (2, 1)
+
+
+async def test_higher_priority_ad_always_wins_over_recency() -> None:
+    service, repo = _ad_service()
+    repo.by_id[1] = FakeAdRow(
+        id=1, title="Lo", content_text="lo", priority=0, show_every_n_downloads=1
+    )
+    repo.by_id[2] = FakeAdRow(
+        id=2, title="Hi", content_text="hi", priority=5, show_every_n_downloads=1
+    )
+    # The higher-priority ad is chosen every time, regardless of how recently it was shown.
+    for _ in range(3):
+        assert await _show(service) is True
+    assert repo.by_id[2].impressions == 3 and repo.by_id[1].impressions == 0
+
+
 # --- AdService scheduled_at field on create/edit --------------------------
 
 

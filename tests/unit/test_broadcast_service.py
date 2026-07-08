@@ -117,6 +117,25 @@ async def test_create_with_expression_rejects_unknown_mode() -> None:
         )
 
 
+async def test_estimate_recipients_counts_without_persisting() -> None:
+    # The Preview estimate (#7) runs the same unified count but creates no expression row.
+    service, _, users, expressions = _build_with_expressions()
+    _seed_premium(users)
+    count = await service.estimate_recipients(
+        audience_mode="include",
+        audience_rules=[AudienceRuleSpec("include", "plan", "premium")],
+    )
+    assert count == 2  # tg 201 + 203 (204 owner excluded, 202 free)
+    assert expressions.exprs == {}  # nothing persisted — read-only preview
+
+
+async def test_estimate_recipients_rejects_unknown_mode() -> None:
+    service, _, users = _build()
+    _seed_premium(users)
+    with pytest.raises(InvalidBroadcastError):
+        await service.estimate_recipients(audience_mode="whenever", audience_rules=[])
+
+
 async def test_create_without_expression_repo_falls_back_to_legacy() -> None:
     """The legacy role/language path still works when no expression repo is wired."""
     service, _, users = _build()

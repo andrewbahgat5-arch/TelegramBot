@@ -25,16 +25,19 @@ points at the self-hosted Bot API server (2 GB cap, D-040).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile, Message
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
 
 from core.logging import get_logger
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import CachedFileExpiredError, TelegramUploadError
+from domain.protocols.advertising import AdButtonSpec
 from domain.protocols.file_sender import UploadedFile
+from infrastructure.telegram.ad_sender import build_ad_keyboard
 
 _log = get_logger("infrastructure.telegram.file_sender")
 
@@ -71,12 +74,13 @@ class TelegramFileSender:
         chat_id: int,
         filename: str,
         caption: str | None = None,
+        buttons: Sequence[AdButtonSpec] = (),
     ) -> UploadedFile:
         """Upload ``path`` to ``chat_id`` (delivering it) and return its reusable ids."""
         media = FSInputFile(path, filename=filename)
         try:
             message = await self._send(
-                chat_id, media, format_=format_, quality=quality, caption=caption
+                chat_id, media, format_=format_, quality=quality, caption=caption, buttons=buttons
             )
         except Exception as exc:  # aiogram/network failure → domain error
             raise TelegramUploadError("Uploading the file to Telegram failed.") from exc
@@ -90,11 +94,17 @@ class TelegramFileSender:
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
+        buttons: Sequence[AdButtonSpec] = (),
     ) -> int | None:
         """Deliver an already-uploaded file to a user by ``file_id`` (16.2 / fan-out)."""
         try:
             message = await self._send(
-                telegram_id, file_id, format_=format_, quality=quality, caption=caption
+                telegram_id,
+                file_id,
+                format_=format_,
+                quality=quality,
+                caption=caption,
+                buttons=buttons,
             )
         except TelegramBadRequest as exc:
             if _is_invalid_file_id(exc):
@@ -113,14 +123,16 @@ class TelegramFileSender:
         format_: MediaFormat,
         quality: Quality,
         caption: str | None,
+        buttons: Sequence[AdButtonSpec] = (),
     ) -> Message:
+        markup: InlineKeyboardMarkup | None = build_ad_keyboard(buttons)
         if format_ is MediaFormat.VIDEO:
             return await self._bot.send_video(
-                chat_id, media, caption=caption, supports_streaming=True
+                chat_id, media, caption=caption, supports_streaming=True, reply_markup=markup
             )
         if format_ is MediaFormat.AUDIO and not _audio_is_document(quality):
-            return await self._bot.send_audio(chat_id, media, caption=caption)
-        return await self._bot.send_document(chat_id, media, caption=caption)
+            return await self._bot.send_audio(chat_id, media, caption=caption, reply_markup=markup)
+        return await self._bot.send_document(chat_id, media, caption=caption, reply_markup=markup)
 
 
 class TelegramMessageSender:

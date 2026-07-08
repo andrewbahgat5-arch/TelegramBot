@@ -53,7 +53,7 @@ class TelegramAdSender:
         parse_mode: str | None = None,
         reply_to_message_id: int | None = None,
     ) -> None:
-        markup = _build_markup(buttons)
+        markup = build_ad_keyboard(buttons)
         rid = reply_to_message_id
         if ad_type == AdType.PHOTO.value and media_file_id is not None:
             await self._bot.send_photo(
@@ -122,7 +122,7 @@ class TelegramAdSender:
             chat_id,
             from_chat_id=from_chat_id,
             message_id=message_id,
-            reply_markup=_build_markup(buttons),
+            reply_markup=build_ad_keyboard(buttons),
             reply_to_message_id=reply_to_message_id,
         )
 
@@ -142,12 +142,12 @@ class TelegramAdSender:
         await self._bot.send_rich_message(
             chat_id,
             InputRichMessage(markdown=markdown),
-            reply_markup=_build_markup(buttons),
+            reply_markup=build_ad_keyboard(buttons),
             reply_parameters=reply,
         )
 
 
-def _build_markup(buttons: Sequence[AdButtonSpec]) -> InlineKeyboardMarkup | None:
+def build_ad_keyboard(buttons: Sequence[AdButtonSpec]) -> InlineKeyboardMarkup | None:
     if not buttons:
         return None
     rows: dict[int, list[InlineKeyboardButton]] = {}

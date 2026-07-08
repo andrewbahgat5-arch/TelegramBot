@@ -41,6 +41,15 @@ _DEFAULT_EXTRACT_TIMEOUT = 30.0
 _DEFAULT_DOWNLOAD_TIMEOUT = 300.0
 _DEFAULT_HEALTH_TIMEOUT = 10.0
 
+# In-provider retry for metadata extraction (UX sprint #12). V1 runs a single provider, so
+# registry failover is a no-op — a transient blip (rate-limit, bot-check, a flaky player-JS
+# fetch) would otherwise surface as a hard "couldn't read that link" even though the very
+# next attempt usually succeeds. Extraction is cheap and idempotent, so retry it a couple of
+# times with a short backoff before giving up. Downloads are NOT retried here (expensive, and
+# the job layer already re-queues).
+_EXTRACT_RETRIES = 2
+_RETRY_BACKOFF_SECONDS = 0.5
+
 # Quality tiers keyed by their standard *short* side (the "Np" label) and by their
 # standard *long* side. Real pixel dimensions are matched to the nearest tier rather
 # than floored: wide/portrait videos have non-16:9 dimensions (e.g. 4K = 3840x2026),
@@ -68,18 +77,45 @@ _TIER_BY_LONG_EDGE: tuple[tuple[int, Quality], ...] = (
 # yt-dlp's own resolution label, e.g. "1080p", "2160p60", "1440p Premium".
 _NOTE_TIER_RE = re.compile(r"(\d{3,4})\s*p")
 
-# yt-dlp stderr fragments → how the registry should react.
+# yt-dlp stderr fragments → how the registry should react. Order matters: unsupported and
+# genuine-content failures are permanent (do not retry); everything transient is retried /
+# failed over. (UX sprint #12 reclassification.)
 _UNSUPPORTED_MARKERS = ("unsupported url", "is not a valid url")
+# Permanent: the content itself is gone/blocked — retrying cannot help.
 _CONTENT_MARKERS = (
     "video unavailable",
     "private video",
     "this video is not available",
-    "removed",
+    "has been removed",
+    "account has been terminated",
     "geo restricted",
-    "sign in to confirm",
+    "geo-restricted",
     "members-only",
+    "premieres in",
+    "requested format is not available",
 )
-_TRANSIENT_MARKERS = ("timed out", "temporary failure", "connection reset", "http error 5")
+# Transient: rate-limits, anti-bot interstitials, and flaky player-JS / signature fetches
+# that typically succeed on a retry. These previously fell through to a permanent
+# ExtractionFailedError (or, for the bot-check, were miscategorised as "content"), which is
+# exactly why a link that worked earlier could suddenly read as "private or removed" (#12).
+_TRANSIENT_MARKERS = (
+    "timed out",
+    "temporary failure",
+    "temporarily unavailable",
+    "connection reset",
+    "connection refused",
+    "http error 5",
+    "http error 429",
+    "too many requests",
+    "rate-limit",
+    "rate limit",
+    "sign in to confirm",  # YouTube anti-bot interstitial — throttle-based, not permanent
+    "confirm you're not a bot",
+    "unable to extract",  # usually a stale player-JS / nsig fetch; a retry re-fetches it
+    "failed to extract",
+    "nsig",
+    "unable to download webpage",
+)
 
 
 class YtdlpProvider:
@@ -99,7 +135,7 @@ class YtdlpProvider:
         self._download_timeout = download_timeout
 
     async def extract_info(self, url: str) -> MediaInfo:
-        stdout = await self._run(
+        stdout = await self._run_with_retries(
             [self._bin, "-J", "--no-playlist", "--no-warnings", url],
             timeout_s=self._extract_timeout,
         )
@@ -108,6 +144,20 @@ class YtdlpProvider:
         except orjson.JSONDecodeError as exc:
             raise ExtractionFailedError("Could not parse media metadata.") from exc
         return self._to_media_info(url, info)
+
+    async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> bytes:
+        """Run yt-dlp, retrying only *transient* failures a few times (#12)."""
+        attempt = 0
+        while True:
+            try:
+                return await self._run(args, timeout_s=timeout_s)
+            except ProviderRetryElsewhere as exc:
+                attempt += 1
+                if attempt > _EXTRACT_RETRIES:
+                    _log.warning("ytdlp_extract_gave_up", attempts=attempt, error=str(exc))
+                    raise
+                _log.info("ytdlp_extract_retry", attempt=attempt, error=str(exc))
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
     async def download(
         self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
@@ -156,7 +206,18 @@ class YtdlpProvider:
             raise ProviderRetryElsewhere("yt-dlp timed out.") from exc
 
         if proc.returncode != 0:
-            raise _map_error(stderr.decode(errors="replace"))
+            decoded = stderr.decode(errors="replace")
+            error = _map_error(decoded)
+            # Always log *why* an extraction/download failed — previously the yt-dlp stderr
+            # was discarded, so intermittent failures (#12) were undiagnosable. Truncated to
+            # keep logs readable; the mapped class says whether we retry or surface it.
+            _log.warning(
+                "ytdlp_nonzero_exit",
+                returncode=proc.returncode,
+                mapped=type(error).__name__,
+                stderr=decoded.strip()[:500],
+            )
+            raise error
         return stdout
 
     def _to_media_info(self, url: str, info: dict[str, Any]) -> MediaInfo:

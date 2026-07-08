@@ -223,11 +223,9 @@ def metric(icon: str, label: str, value: int | str, trend: str | None = None) ->
     ``value`` ints are formatted with thousands separators. The value is padded
     to a small column so a stack of ``metric()`` lines reads as a table.
     """
-    label_cell = _esc(label.ljust(_METRIC_LABEL_WIDTH))
     value_str = _fmt_value(value)
-    pad = " " * max(0, _METRIC_VALUE_WIDTH - len(value_str))
     trend_part = f"  {_esc(trend)}" if trend else ""
-    return f"{_INDENT}{_esc(icon)}  {label_cell}{pad}<b>{_esc(value_str)}</b>{trend_part}"
+    return f"{_INDENT}{_esc(icon)} {_esc(label)}: <b>{_esc(value_str)}</b>{trend_part}"
 
 
 def progress_bar(current: int, total: int, width: int = 10) -> str:
@@ -250,10 +248,8 @@ def sparkline(label: str, value: int, max_value: int, width: int = 10) -> str:
     else:
         filled = round(min(1.0, max(0.0, value / max_value)) * width)
     bar = f"{_FILL * filled}{_EMPTY * (width - filled)}"
-    label_cell = _esc(label.ljust(_SPARK_LABEL_WIDTH))
-    value_str = number_fmt(value)
-    pad = " " * max(0, _METRIC_VALUE_WIDTH - len(value_str))
-    return f"{_INDENT}{label_cell}{bar}{pad}<b>{value_str}</b>"
+    value_str = f"{value:,}"
+    return f"{_INDENT} {_esc(label)}: <b>{_esc(value_str)}</b>  {bar}"
 
 
 def badge(state: str) -> str:

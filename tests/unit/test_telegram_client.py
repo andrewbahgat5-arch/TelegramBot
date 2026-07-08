@@ -31,3 +31,29 @@ async def test_build_bot_defaults_to_public_api() -> None:
         assert "api.telegram.org" in bot.session.api.base
     finally:
         await bot.session.close()
+
+
+async def test_build_bot_uses_job_budget_as_request_timeout() -> None:
+    # Uploads must not die on aiogram's 60 s default; the session timeout is the per-job
+    # budget so a slow large-file upload completes instead of timing out + retrying.
+    settings = load_settings()
+    settings.bot_token = _FAKE_TOKEN
+    settings.worker_job_timeout = 300
+    bot = build_bot(settings)
+    try:
+        assert bot.session.timeout == 300.0
+    finally:
+        await bot.session.close()
+
+
+async def test_build_bot_sets_timeout_for_local_api_too() -> None:
+    settings = load_settings()
+    settings.bot_token = _FAKE_TOKEN
+    settings.bot_api_base_url = "http://localhost:8081"
+    settings.worker_job_timeout = 300
+    bot = build_bot(settings)
+    try:
+        assert bot.session.timeout == 300.0
+        assert "localhost:8081" in bot.session.api.base
+    finally:
+        await bot.session.close()

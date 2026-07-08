@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner, ParsedPanel
 from bot.keyboards.admin_panel import (
+    build_ad_conflict_confirm,
     build_section_menu,
     build_wizard_audience,
     build_wizard_content,
@@ -37,7 +38,6 @@ from bot.keyboards.admin_panel import (
     build_wizard_placement,
     build_wizard_preview,
     build_wizard_settings,
-    build_wizard_type,
 )
 from bot.panel.registry import audience_option, placement_option
 from bot.panel.states import PanelStates
@@ -47,11 +47,10 @@ from bot.panel.wizard import (
     STEP_PLACEMENT,
     STEP_PREVIEW,
     STEP_SETTINGS,
-    STEP_TYPE,
     WizardKind,
     WizardState,
     first_invalid_step,
-    next_step,
+    first_step,
     step_at,
     step_index,
     validate_step,
@@ -71,6 +70,24 @@ AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
 _DATA_KEY = "wizard"
 _AUDIENCE_MODES = ("all", "include", "exclude")
 _SECTION_FOR_KIND = {"ad": "a", "broadcast": "b"}
+
+# Broadcast-menu audience shortcuts (#1): the Free / Premium / All / By-language buttons
+# open the same wizard with the audience pre-seeded, so the admin lands ready to compose
+# instead of re-picking a target they already chose from the menu. "By language" seeds no
+# rule (the admin taps the Language option once on the Audience screen). "cr" (Create) and
+# any unknown action start from a clean All audience.
+_BROADCAST_PRESETS: dict[str, tuple[str, list[list[str]]]] = {
+    "bf": ("include", [["include", "plan", "free"]]),
+    "bp": ("include", [["include", "plan", "premium"]]),
+    "ba": ("all", []),
+    "bl": ("all", []),
+    "cr": ("all", []),
+}
+
+
+def _preset_audience(preset: str | None) -> tuple[str, list[list[str]]]:
+    mode, rules = _BROADCAST_PRESETS.get(preset or "cr", ("all", []))
+    return mode, [list(rule) for rule in rules]
 
 
 # --- state plumbing -------------------------------------------------------
@@ -101,25 +118,29 @@ async def start(
     locale: str,
     *,
     kind: WizardKind,
+    preset: str | None = None,
 ) -> None:
-    """Open the wizard at the Type step (kind pre-selected from the section)."""
+    """Open the wizard at its first real step (Audience).
+
+    The ``kind`` (Ad vs Broadcast) is fixed by the section the admin entered from, so the
+    wizard never re-asks it (#1/#2). ``preset`` seeds the audience from a Broadcast-menu
+    shortcut (Free / Premium / All / By-language).
+    """
     if not isinstance(callback.message, Message):
         await callback.answer()
         return
     await state.set_state(None)
+    mode, rules = _preset_audience(preset)
     ws = WizardState(
         kind=kind,
-        step=STEP_TYPE,
+        step=first_step(kind),
+        audience_mode=mode,
+        rules=rules,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
     )
     await _persist(state, ws)
-    await _edit(
-        callback.bot,  # type: ignore[arg-type]
-        ws,
-        build_wizard_type(signer, locale),
-        _screen_text(ws, translate, locale),
-    )
+    await _render(callback.bot, ws, signer, translate, locale)  # type: ignore[arg-type]
     await callback.answer()
 
 
@@ -210,10 +231,13 @@ async def dispatch(
         return
     action, arg, value = panel.action, panel.arg, panel.value
 
-    if action == "cx":
-        await _cancel(callback, state, ws, signer, translate, locale)
+    if action == "cx":  # defensive: Cancel is a read action, normally routed via cancel()
+        await cancel(callback, state, signer, translate, locale)
         return
-    if action == "sv":
+    if action in {"sv", "svk", "svr"}:
+        if action in {"svk", "svr"}:  # answer to the post-download conflict warning (#9)
+            ws.conflict_ack = True
+            ws.conflict_replace = action == "svr"
         await _save(
             callback,
             state,
@@ -233,9 +257,35 @@ async def dispatch(
         return
 
     _apply(ws, action, arg, value)
+    await _refresh_estimate(ws, session, broadcast_service_factory)
     await _persist(state, ws)
     await _render(callback.bot, ws, signer, translate, locale)  # type: ignore[arg-type]
     await callback.answer()
+
+
+async def _refresh_estimate(
+    ws: WizardState,
+    session: AsyncSession,
+    broadcast_service_factory: BroadcastServiceFactory,
+) -> None:
+    """Recompute the broadcast recipient estimate whenever the Preview step is shown (#7).
+
+    Best-effort: an estimate must never block the wizard, so any failure just leaves the
+    count unknown. Only broadcasts show a count (a broadcast is a one-shot send to a fixed
+    audience); ads deliver opportunistically over time, so a single reach number would
+    mislead.
+    """
+    if ws.step != STEP_PREVIEW or ws.kind != "broadcast":
+        ws.estimated_recipients = None
+        return
+    try:
+        casts = broadcast_service_factory(session)
+        rules = [AudienceRuleSpec(e, d, v) for e, d, v in ws.rules]
+        ws.estimated_recipients = await casts.estimate_recipients(
+            audience_mode=ws.audience_mode, audience_rules=rules
+        )
+    except Exception:  # an estimate is advisory; it must never break composing
+        ws.estimated_recipients = None
 
 
 def _is_typed(arg: int | None) -> bool:
@@ -245,11 +295,7 @@ def _is_typed(arg: int | None) -> bool:
 
 def _apply(ws: WizardState, action: str, arg: int | None, value: int | None) -> None:
     """Mutate the wizard state for a non-input action (navigation / toggles / steppers)."""
-    if action == "ty":
-        ws.kind = "broadcast" if arg == 1 else "ad"
-        forward = next_step(ws.kind, STEP_TYPE)
-        ws.step = forward or STEP_PREVIEW
-    elif action == "go":
+    if action == "go":
         target = step_at(arg)
         if target is not None:
             ws.step = target
@@ -291,8 +337,30 @@ def _set_rule(ws: WizardState, effect: str, dimension: str, value: str) -> None:
         ws.rules.append(rule)
 
 
+_INCLUDE_FREE = ["include", "plan", "free"]
+_INCLUDE_PREMIUM = ["include", "plan", "premium"]
+
+
+def _collapse_all_users(ws: WizardState) -> None:
+    """Free + Premium together == everyone, so collapse the redundant pair to All (#3).
+
+    In SQL these two include rules OR within the ``plan`` dimension to ``~premium OR
+    premium`` = every user (``infrastructure/database/audience_query.py``), so keeping both
+    is duplicated targeting. Selecting both simply clears them and drops back to the All
+    audience — a single, internally-consistent way to say "everyone".
+    """
+    if _INCLUDE_FREE in ws.rules and _INCLUDE_PREMIUM in ws.rules:
+        ws.rules.remove(_INCLUDE_FREE)
+        ws.rules.remove(_INCLUDE_PREMIUM)
+
+
 def _recompute_audience_mode(ws: WizardState) -> None:
-    """Choosing any Include switches to include; removing the last reverts to All."""
+    """Normalize the audience: collapse Free+Premium → All, then reconcile the mode.
+
+    Choosing any Include switches the mode to include; removing the last include (or
+    collapsing Free+Premium) reverts to All.
+    """
+    _collapse_all_users(ws)
     if any(e == "include" for e, _d, _v in ws.rules):
         ws.audience_mode = "include"
     elif ws.audience_mode == "include":
@@ -472,8 +540,6 @@ async def _render(
 
 
 def _screen_markup(ws: WizardState, signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
-    if ws.step == STEP_TYPE:
-        return build_wizard_type(signer, locale)
     if ws.step == STEP_AUDIENCE:
         return build_wizard_audience(ws, signer, locale)
     if ws.step == STEP_PLACEMENT:
@@ -493,19 +559,20 @@ def _kind_label(ws: WizardState, translate: Translator, locale: str) -> str:
 
 def _screen_text(ws: WizardState, translate: Translator, locale: str) -> str:
     kind = _kind_label(ws, translate, locale)
-    if ws.step == STEP_TYPE:
-        return translate("panel.wizard.compose_title", locale)
     if ws.step == STEP_AUDIENCE:
         return translate(
             "panel.wizard.audience_screen",
             locale,
             kind=kind,
-            mode=ws.audience_mode,
+            mode=translate(f"panel.audience.mode.{ws.audience_mode}", locale),
             rules=_rules_text(ws, translate, locale),
         )
     if ws.step == STEP_PLACEMENT:
         shown = ", ".join(ws.placements) or "—"
-        return translate("panel.wizard.placement_screen", locale, selected=escape(shown))
+        text = translate("panel.wizard.placement_screen", locale, selected=escape(shown))
+        if "caption" in ws.placements:  # explain the text+buttons-only limitation (#caption)
+            text += "\n\n" + translate("panel.placement.caption_warning", locale)
+        return text
     if ws.step == STEP_SETTINGS:
         yes_no = translate("panel.wizard.yes" if ws.enabled else "panel.wizard.no", locale)
         freq_suffix = (
@@ -566,6 +633,16 @@ def _preview_text(ws: WizardState, kind: str, translate: Translator, locale: str
         translate("panel.wizard.preview_type", locale, kind=kind),
         _rules_text(ws, translate, locale),
     ]
+    if ws.kind == "broadcast" and ws.estimated_recipients is not None:
+        # Count only — never names (#7): lets the admin sanity-check the audience size
+        # before sending.
+        lines.append(
+            translate(
+                "panel.wizard.preview_recipients",
+                locale,
+                count=f"{ws.estimated_recipients:,}",
+            )
+        )
     if ws.kind == "ad":
         placements = ", ".join(ws.placements) or "—"
         lines.append(translate("panel.wizard.preview_placements", locale, placements=placements))
@@ -577,40 +654,108 @@ def _preview_text(ws: WizardState, kind: str, translate: Translator, locale: str
                 frequency=ws.frequency,
             )
         )
-    yes_no = translate("panel.wizard.yes" if ws.enabled else "panel.wizard.no", locale)
-    lines.append(translate("panel.wizard.preview_enabled", locale, enabled=yes_no))
-    lines.append(
-        translate(
-            "panel.wizard.preview_internal_name", locale, name=escape(ws.internal_name or "—")
-        )
-    )
-    if ws.internal_notes:
+        # Enabled / internal name are ad-only concepts (a broadcast is a one-shot send).
+        yes_no = translate("panel.wizard.yes" if ws.enabled else "panel.wizard.no", locale)
+        lines.append(translate("panel.wizard.preview_enabled", locale, enabled=yes_no))
         lines.append(
-            translate("panel.wizard.preview_notes", locale, notes=escape(ws.internal_notes))
+            translate(
+                "panel.wizard.preview_internal_name", locale, name=escape(ws.internal_name or "—")
+            )
         )
+        if ws.internal_notes:
+            lines.append(
+                translate("panel.wizard.preview_notes", locale, notes=escape(ws.internal_notes))
+            )
     lines.append(_content_text(ws, translate, locale))
     return "\n".join(lines)
 
 
 # --- cancel + save --------------------------------------------------------
-async def _cancel(
+async def cancel(
     callback: CallbackQuery,
     state: FSMContext,
-    ws: WizardState,
     signer: CallbackSigner,
     translate: Translator,
     locale: str,
 ) -> None:
+    """Safely exit the wizard from any step (#5).
+
+    Cancel (``w/cx``) is a *read*-tier action, so it is routed here from the panel's read
+    handler rather than the wizard dispatch — the old code let the read handler's blanket
+    ``state.clear()`` wipe the wizard and then render nothing, so Cancel looked dead. This
+    reads the kind *before* clearing, drops the FSM state, and returns to the originating
+    section menu (Advertisements / Broadcast) with a confirmation. Resilient when the state
+    was already lost: it falls back to editing the current message directly.
+    """
+    data = await state.get_data()
+    ws = _load(data)
     await state.clear()
-    section = _SECTION_FOR_KIND.get(ws.kind, "a")
+    section = _SECTION_FOR_KIND.get(ws.kind, "a") if ws is not None else "a"
     if isinstance(callback.message, Message):
-        await _edit(
-            callback.bot,  # type: ignore[arg-type]
-            ws,
-            build_section_menu(section, UserRole.OWNER, signer, locale),
-            translate("panel.wizard.cancelled", locale),
+        markup = build_section_menu(section, UserRole.OWNER, signer, locale)
+        text = translate("panel.wizard.cancelled", locale)
+        # Prefer the wizard's own message coordinates; fall back to the callback's message
+        # when the state (and thus ws) was already lost.
+        chat_id = ws.chat_id if ws and ws.chat_id is not None else callback.message.chat.id
+        message_id = (
+            ws.message_id if ws and ws.message_id is not None else callback.message.message_id
         )
+        try:
+            await callback.bot.edit_message_text(  # type: ignore[union-attr]
+                text, chat_id=chat_id, message_id=message_id, reply_markup=markup
+            )
+        except TelegramBadRequest:
+            pass
     await callback.answer(translate("panel.wizard.cancelled_toast", locale))
+
+
+_POST_DOWNLOAD = "post_download"
+
+
+async def _post_download_conflicts(
+    ws: WizardState, session: AsyncSession, ad_service_factory: AdServiceFactory
+) -> list[object]:
+    """Other active post-download ads that would coexist with this one on Save (#9).
+
+    Only ads (not broadcasts) that are being enabled on the post-download placement can
+    conflict, and the admin is asked at most once (``conflict_ack``).
+    """
+    if ws.kind != "ad" or not ws.enabled or ws.conflict_ack:
+        return []
+    if _POST_DOWNLOAD not in ws.placements:
+        return []
+    ads = ad_service_factory(session)
+    return list(await ads.active_conflicts(_POST_DOWNLOAD, exclude_id=ws.editing_ad_id))
+
+
+def _wizard_conflict_text(
+    ws: WizardState, conflicts: list[object], translate: Translator, locale: str
+) -> str:
+    active_lines = "\n".join(
+        translate(
+            "panel.ads.conflict.active_row",
+            locale,
+            id=getattr(ad, "id", "?"),
+            title=escape(str(getattr(ad, "title", ""))),
+        )
+        for ad in conflicts
+    )
+    return "\n".join(
+        [
+            f"⚠️ <b>{escape(translate('panel.ads.conflict.title', locale))}</b>",
+            "",
+            translate("panel.ads.conflict.body", locale),
+            "",
+            translate("panel.ads.conflict.already_active", locale),
+            active_lines,
+            "",
+            translate(
+                "panel.ads.conflict.about_to_create",
+                locale,
+                title=escape(ws.internal_name or "Untitled ad"),
+            ),
+        ]
+    )
 
 
 async def _save(
@@ -642,6 +787,24 @@ async def _save(
             validate_step(ws, invalid) or translate("panel.wizard.incomplete", locale),
             show_alert=True,
         )
+        return
+    conflicts = await _post_download_conflicts(ws, session, ad_service_factory)
+    if conflicts:  # warn before a second post-download ad goes live (#9)
+        await _persist(state, ws)
+        if isinstance(callback.message, Message):
+            await _edit(
+                callback.bot,  # type: ignore[arg-type]
+                ws,
+                build_ad_conflict_confirm(
+                    signer,
+                    locale,
+                    keep=("w", "svk", None),
+                    replace=("w", "svr", None),
+                    cancel=("w", "go", step_index(STEP_PREVIEW)),
+                ),
+                _wizard_conflict_text(ws, conflicts, translate, locale),
+            )
+        await callback.answer()
         return
     try:
         toast = (
@@ -725,6 +888,8 @@ async def _save_ad(
         await ads.add_button(ad.id, text=text, url=url)
     if not ws.enabled:
         await ads.set_active(ad.id, False)
+    elif ws.conflict_replace:  # "Replace existing" answer to the post-download warning (#9)
+        await ads.replace_active_on_placement(_POST_DOWNLOAD, keep_id=ad.id)
     return translate("panel.wizard.ad_created", locale, id=ad.id)
 
 
@@ -755,6 +920,8 @@ async def _update_ad(
     for text, url in ws.buttons:
         await ads.add_button(ad_id, text=text, url=url)
     await ads.set_active(ad_id, ws.enabled)
+    if ws.enabled and ws.conflict_replace:  # "Replace existing" answer (#9)
+        await ads.replace_active_on_placement(_POST_DOWNLOAD, keep_id=ad_id)
     return translate("panel.wizard.ad_updated", locale, id=ad_id)
 
 

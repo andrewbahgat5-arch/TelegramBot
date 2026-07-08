@@ -60,6 +60,11 @@ class Advertisement(Base):
     # Scheduling (Sprint 9.5.10): NULL = eligible immediately. Set → not selected for any
     # placement until now ≥ this (a "starts showing at" gate, checked at selection time).
     scheduled_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Fair-rotation cursor (UX sprint #10): the instant this ad was last delivered. Among
+    # equal-priority ads that are due for the same download, selection prefers the one shown
+    # longest ago (least-recently-shown), so they share exposure evenly. NULL = never shown,
+    # which sorts first. Stamped on each successful impression.
+    last_shown_at: Mapped[datetime.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

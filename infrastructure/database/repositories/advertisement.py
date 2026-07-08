@@ -49,7 +49,14 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         return result.scalars().all()
 
     async def list_active_for_placement(self, placement: str) -> Sequence[Advertisement]:
-        """Active ads for a placement, ranked priority DESC then id ASC (Sprint 9.5).
+        """Active ads for a placement, ranked for fair selection (Sprint 9.5; UX sprint #10).
+
+        Ordering **is** the scheduling strategy (priority tier + least-recently-shown):
+        ``priority`` DESC, then ``last_shown_at`` ASC with NULLs first, then ``id`` ASC. The
+        caller walks candidates in this order and delivers the first that is due + audience-
+        matching, so among equal-priority ads that are all due, the one shown longest ago
+        (or never) wins — a deterministic, self-correcting round-robin. Swapping this ORDER
+        BY is how a future strategy (weighted, A/B, …) would plug in.
 
         Multi-placement dual-read (Sprint 9.6, D-056): an ad matches when it has an
         ``ad_placements`` row for ``placement``, *or* — for legacy ads with no placement
@@ -67,7 +74,11 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
                 Advertisement.is_active.is_(True),
                 or_(has_link, and_(~has_any_link, Advertisement.placement == placement)),
             )
-            .order_by(Advertisement.priority.desc(), Advertisement.id.asc())
+            .order_by(
+                Advertisement.priority.desc(),
+                Advertisement.last_shown_at.asc().nulls_first(),
+                Advertisement.id.asc(),
+            )
         )
         return result.scalars().all()
 
@@ -144,10 +155,12 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         return ad
 
     async def increment_impressions(self, ad_id: int) -> None:
+        # Stamp last_shown_at in the same write so the fair-rotation cursor (#10) advances
+        # exactly when an impression is recorded — no extra round-trip on the delivery path.
         await self.session.execute(
             update(Advertisement)
             .where(Advertisement.id == ad_id)
-            .values(impressions=Advertisement.impressions + 1)
+            .values(impressions=Advertisement.impressions + 1, last_shown_at=_now())
         )
         await self.session.flush()
 

@@ -9,7 +9,6 @@ from bot.panel.wizard import (
     STEP_PLACEMENT,
     STEP_PREVIEW,
     STEP_SETTINGS,
-    STEP_TYPE,
     WizardState,
     applicable_steps,
     first_invalid_step,
@@ -22,9 +21,9 @@ from bot.panel.wizard import (
 
 
 def test_ad_flow_visits_every_step_in_order() -> None:
+    # No "Type" step: the kind is fixed by the entry section, so Audience is first (#1/#2).
     ids = [s.step_id for s in applicable_steps("ad")]
     assert ids == [
-        STEP_TYPE,
         STEP_AUDIENCE,
         STEP_PLACEMENT,
         STEP_SETTINGS,
@@ -33,25 +32,29 @@ def test_ad_flow_visits_every_step_in_order() -> None:
     ]
 
 
-def test_broadcast_flow_skips_placement() -> None:
+def test_broadcast_flow_skips_placement_and_settings() -> None:
+    # Broadcast has no Placement (ads-only) and no Settings (Enabled/Priority are ad-only):
+    # Audience -> Content -> Preview (UX sprint #11).
     ids = [s.step_id for s in applicable_steps("broadcast")]
-    assert STEP_PLACEMENT not in ids
-    assert ids == [STEP_TYPE, STEP_AUDIENCE, STEP_SETTINGS, STEP_CONTENT, STEP_PREVIEW]
+    assert STEP_PLACEMENT not in ids and STEP_SETTINGS not in ids
+    assert ids == [STEP_AUDIENCE, STEP_CONTENT, STEP_PREVIEW]
     assert not has_step("broadcast", STEP_PLACEMENT)
+    assert not has_step("broadcast", STEP_SETTINGS)
 
 
 def test_next_and_prev_skip_inapplicable_steps() -> None:
-    # Broadcast: Audience -> (skip Placement) -> Settings, and back.
-    assert next_step("broadcast", STEP_AUDIENCE) == STEP_SETTINGS
-    assert prev_step("broadcast", STEP_SETTINGS) == STEP_AUDIENCE
-    # Ad keeps Placement between Audience and Settings.
+    # Broadcast: Audience -> (skip Placement + Settings) -> Content, and back.
+    assert next_step("broadcast", STEP_AUDIENCE) == STEP_CONTENT
+    assert prev_step("broadcast", STEP_CONTENT) == STEP_AUDIENCE
+    # Ad keeps Placement + Settings between Audience and Content.
     assert next_step("ad", STEP_AUDIENCE) == STEP_PLACEMENT
     assert prev_step("ad", STEP_SETTINGS) == STEP_PLACEMENT
 
 
 def test_first_and_last_step_edges() -> None:
-    assert first_step("ad") == STEP_TYPE
-    assert prev_step("ad", STEP_TYPE) is None
+    assert first_step("ad") == STEP_AUDIENCE
+    assert first_step("broadcast") == STEP_AUDIENCE
+    assert prev_step("ad", STEP_AUDIENCE) is None
     assert next_step("ad", STEP_PREVIEW) is None
 
 

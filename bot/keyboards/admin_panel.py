@@ -290,6 +290,45 @@ def build_confirm(
     )
 
 
+def build_ad_conflict_confirm(
+    signer: CallbackSigner,
+    locale: str,
+    *,
+    keep: tuple[str, str, int | None],
+    replace: tuple[str, str, int | None],
+    cancel: tuple[str, str, int | None],
+) -> InlineKeyboardMarkup:
+    """The Keep both / Replace existing / Cancel screen for a placement conflict (#9).
+
+    Keep both is listed first as the recommended, non-destructive default; Replace disables
+    the currently-active ad(s); Cancel aborts without changing anything. Each tuple is
+    (section, action, arg) carrying the resolution to perform.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                _btn(
+                    signer,
+                    translate("panel.ads.conflict.keep_both", locale),
+                    keep[0],
+                    keep[1],
+                    keep[2],
+                )
+            ],
+            [
+                _btn(
+                    signer,
+                    translate("panel.ads.conflict.replace", locale),
+                    replace[0],
+                    replace[1],
+                    replace[2],
+                )
+            ],
+            [_btn(signer, translate("common.cancel", locale), cancel[0], cancel[1], cancel[2])],
+        ]
+    )
+
+
 def build_user_list(
     users: list[UserSnapshot], signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
@@ -438,20 +477,6 @@ def _wizard_controls(
         ]
     )
     return rows
-
-
-def build_wizard_type(signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
-    rows = [
-        [
-            _w(signer, translate("panel.wizard.persistent_ad", locale), "ty", 0),
-            _w(signer, translate("panel.wizard.broadcast_type", locale), "ty", 1),
-        ],
-        [
-            _w(signer, translate("common.cancel", locale), "cx"),
-            _btn(signer, translate("common.home", locale), "mn", "hm"),
-        ],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _mark(active: bool) -> str:
@@ -613,9 +638,15 @@ def build_wizard_preview(
                 step_index(STEP_PLACEMENT),
             )
         )
-    edits.append(
-        _w(signer, translate("panel.wizard.edit_settings", locale), "ed", step_index(STEP_SETTINGS))
-    )
+    if has_step(state.kind, STEP_SETTINGS):
+        edits.append(
+            _w(
+                signer,
+                translate("panel.wizard.edit_settings", locale),
+                "ed",
+                step_index(STEP_SETTINGS),
+            )
+        )
     edits.append(
         _w(signer, translate("panel.wizard.edit_content", locale), "ed", step_index(STEP_CONTENT))
     )

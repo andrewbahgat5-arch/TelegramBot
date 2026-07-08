@@ -999,6 +999,9 @@ class FakeFileSender:
         self.uploads: list[tuple[int, Path]] = []
         self.filenames: list[str] = []
         self.sent: list[tuple[int, str]] = []
+        # Caption-layer ads: record the caption + buttons each send carried (two-layer ads).
+        self.captions: list[str | None] = []
+        self.button_sets: list[tuple[Any, ...]] = []
         self._next_message_id = 7000
 
     def _message_id(self) -> int:
@@ -1014,11 +1017,14 @@ class FakeFileSender:
         chat_id: int,
         filename: str,
         caption: str | None = None,
+        buttons: Any = (),
     ) -> Any:
         from domain.protocols.file_sender import UploadedFile
 
         self.uploads.append((chat_id, path))
         self.filenames.append(filename)
+        self.captions.append(caption)
+        self.button_sets.append(tuple(buttons))
         size = path.stat().st_size if path.exists() else None
         return UploadedFile(
             file_id=self._file_id,
@@ -1035,10 +1041,13 @@ class FakeFileSender:
         format_: MediaFormat,
         quality: Quality,
         caption: str | None = None,
+        buttons: Any = (),
     ) -> int | None:
         if self._send_cached_error is not None:
             raise self._send_cached_error
         self.sent.append((telegram_id, file_id))
+        self.captions.append(caption)
+        self.button_sets.append(tuple(buttons))
         return self._message_id()
 
 
@@ -1259,6 +1268,7 @@ class FakeAdRow:
     parse_mode: str | None = None
     audience_mode: str = "all"
     scheduled_at: datetime.datetime | None = None
+    last_shown_at: datetime.datetime | None = None
     internal_name: str | None = None
     internal_notes: str | None = None
 
@@ -1304,7 +1314,10 @@ class FakeAdRepo:
             links = self.placements.get(a.id)
             if (links and placement in links) or (not links and a.placement == placement):
                 matching.append(a)
-        return self._ranked(matching)
+        # Fair-rotation order (#10): priority DESC, then least-recently-shown (NULLs first),
+        # then id — mirrors AdRepository.list_active_for_placement's ORDER BY.
+        epoch = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+        return sorted(matching, key=lambda a: (-a.priority, a.last_shown_at or epoch, a.id))
 
     async def list_placements(self, ad_id: int) -> list[str]:
         return sorted(self.placements.get(ad_id, []))
@@ -1374,6 +1387,7 @@ class FakeAdRepo:
         row = self.by_id.get(ad_id)
         if row is not None:
             row.impressions += 1
+            row.last_shown_at = datetime.datetime.now(datetime.UTC)  # advance rotation (#10)
 
     async def increment_clicks(self, ad_id: int) -> None:
         row = self.by_id.get(ad_id)

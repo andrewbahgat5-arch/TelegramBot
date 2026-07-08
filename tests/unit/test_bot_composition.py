@@ -81,6 +81,11 @@ def _health_checker_factory(bot: Bot) -> UserHealthChecker:
 
 
 def test_build_dispatcher_wires_middlewares_and_routers() -> None:
+    # A durable FSM store is threaded through so the compose wizard survives restarts (#6);
+    # the module-level routers can only attach to one Dispatcher, so this is asserted here.
+    from aiogram.fsm.storage.memory import MemoryStorage
+
+    storage = MemoryStorage()
     dp = build_dispatcher(
         load_settings(),
         user_service_factory=_user_factory,
@@ -100,7 +105,9 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         notification_service=NotificationService(FakeMessageSender()),
         callback_signer=CallbackSigner("test-secret"),
         session_factory=cast(async_sessionmaker[AsyncSession], lambda: None),
+        storage=storage,
     )
     assert isinstance(dp, Dispatcher)
     # start + help + admin + admin_panel + ads + download + history routers.
     assert len(dp.sub_routers) == 7
+    assert dp.fsm.storage is storage

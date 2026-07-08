@@ -51,7 +51,7 @@ from domain.exceptions import (
     InfrastructureError,
     TelegramUploadError,
 )
-from domain.protocols.advertising import AdShowProtocol
+from domain.protocols.advertising import AdButtonSpec, AdShowProtocol
 from domain.protocols.downloader import DownloaderProtocol, ProviderRetryElsewhere
 from domain.protocols.file_sender import FileSenderProtocol, UploadedFile
 from domain.protocols.repositories import (
@@ -64,6 +64,7 @@ from domain.protocols.repositories import (
 )
 from domain.protocols.transcoder import TranscoderProtocol
 from services.cache_service import CacheService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.notification_service import NotificationService, ProgressStage
 from services.settings_service import SettingNotFoundError, SettingsService
 from services.url_analyzer import URLAnalyzerService
@@ -122,6 +123,7 @@ class DownloadService:
         settings_service: SettingsService,
         settings: Settings,
         ad_service: AdShowProtocol | None = None,
+        caption_mixer: CaptionAdMixer | None = None,
     ) -> None:
         self._jobs = job_repo
         self._cached = cached_file_repo
@@ -138,6 +140,15 @@ class DownloadService:
         self._settings_service = settings_service
         self._settings = settings
         self._ad_service = ad_service
+        self._caption_mixer = caption_mixer
+
+    async def _caption(
+        self, user: Any, total_downloads: int, base: str | None
+    ) -> tuple[str | None, tuple[AdButtonSpec, ...]]:
+        """Base caption + any due caption-layer ad (text + buttons) for ``user`` (two-layer)."""
+        if self._caption_mixer is None:
+            return base, ()
+        return await self._caption_mixer.decorate_for_user(user, base, total_downloads)
 
     async def process(self, job_id_str: str) -> None:
         """Run a job to completion (flow 16.1 W1-W12). Raises on failure."""
@@ -282,13 +293,17 @@ class DownloadService:
             # Mint the file_id by uploading to the first waiter who has not already
             # received it on a prior attempt — that upload is their delivery.
             target = next((p for p in pairs if p[0].user_id not in delivered), pairs[0])
+            target_caption, target_buttons = await self._caption(
+                target[1], target[1].total_downloads + 1, info.title
+            )
             uploaded = await self._file_sender.upload(
                 produced,
                 format_=format_,
                 quality=quality,
                 chat_id=target[1].telegram_id,
                 filename=_safe_filename(info.title, produced.suffix),
-                caption=info.title,
+                caption=target_caption,
+                buttons=target_buttons,
             )
             file_id, unique_file_id = uploaded.file_id, uploaded.unique_file_id
             delivered.add(target[0].user_id)
@@ -329,13 +344,17 @@ class DownloadService:
             await self._cache.delete_user(user.telegram_id)
             if waiter.user_id in delivered:
                 continue  # already received it (via the upload, or a prior attempt)
+            waiter_caption, waiter_buttons = await self._caption(
+                user, post_totals[waiter.user_id], info.title
+            )
             try:
                 sent_message_id = await self._file_sender.send_cached(
                     user.telegram_id,
                     file_id,
                     format_=format_,
                     quality=quality,
-                    caption=info.title,
+                    caption=waiter_caption,
+                    buttons=waiter_buttons,
                 )
             except CachedFileExpiredError as exc:
                 # The just-minted file_id was rejected — treat as an upload failure so

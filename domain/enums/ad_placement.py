@@ -14,13 +14,16 @@ from enum import StrEnum
 class AdPlacement(StrEnum):
     """Where an ad is shown (``advertisements.placement``)."""
 
-    POST_DOWNLOAD = "post_download"  # Sprint 9 compat: after any delivery
+    POST_DOWNLOAD = "post_download"  # Sprint 9 compat: a standalone "follow-up" message
     VIDEO_DELIVERY = "video_delivery"
     AUDIO_DELIVERY = "audio_delivery"
     QUALITY_SELECT = "quality_select"
     HOME = "home"
     HISTORY = "history"
     BROADCAST = "broadcast"  # never auto-shown; delivered only via /ad_broadcast
+    # Caption layer: text + inline buttons injected into a delivered media's own caption
+    # (same message). Captions cannot carry media, so a caption ad is text-only + buttons.
+    CAPTION = "caption"
 
 
 class AdDeliveryMode(StrEnum):

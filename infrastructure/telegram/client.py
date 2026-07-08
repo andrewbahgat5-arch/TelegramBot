@@ -3,6 +3,13 @@
 Builds the aiogram ``Bot`` used by both the bot and worker composition roots. When
 ``BOT_API_BASE_URL`` is set, the client targets a self-hosted Telegram Bot API
 server (2 GB upload cap); otherwise it uses the public api.telegram.org (50 MB).
+
+The aiohttp session's per-request timeout is raised from aiogram's 60 s default to the
+per-job budget (``WORKER_JOB_TIMEOUT``, 300 s by default). Uploading even a modest video
+(e.g. ~20 MB on a slow uplink at a few hundred KB/s) can take well over a minute, so the
+60 s default made ``send_video`` time out — a valid file failed to deliver, was counted as
+a (retryable) upload error, and retried repeatedly, blocking the user. One timeout for the
+whole job budget matches how long a download+upload is allowed to take.
 """
 
 from __future__ import annotations
@@ -16,9 +23,13 @@ from core.config import Settings
 
 
 def build_bot(settings: Settings) -> Bot:
-    session: AiohttpSession | None = None
+    timeout = float(settings.worker_job_timeout)
     if settings.use_local_bot_api:
-        session = AiohttpSession(api=TelegramAPIServer.from_base(settings.bot_api_base_url))
+        session = AiohttpSession(
+            api=TelegramAPIServer.from_base(settings.bot_api_base_url), timeout=timeout
+        )
+    else:
+        session = AiohttpSession(timeout=timeout)
     return Bot(
         token=settings.bot_token.get_secret_value(),
         session=session,

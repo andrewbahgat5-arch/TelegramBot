@@ -22,7 +22,9 @@ from typing import Any, Literal
 WizardKind = Literal["ad", "broadcast"]
 
 # Step ids (also the ``arg`` carried in a signed "go to step" callback — kept tiny).
-STEP_TYPE = "type"
+# There is deliberately no "Type" step: the wizard's ``kind`` (Ad vs Broadcast) is fixed
+# by the section the admin entered from (Advertisements → ad, Broadcast → broadcast), so
+# the admin is never asked to choose it again (UX sprint #1/#2).
 STEP_AUDIENCE = "audience"
 STEP_PLACEMENT = "placement"
 STEP_SETTINGS = "settings"
@@ -40,15 +42,17 @@ class Step:
 
 
 # Ordered registry. Placement is ads-only, so Broadcast skips it; Preview is the hub.
-# Steps are *registered* here — the Audience (C6), Placement (C7), and Content (C8) steps
-# are inserted into this tuple as they land, with no change to the engine (D-059).
+# Steps are *registered* here — a new step (Scheduling / Country / A-B / …) is inserted
+# into this tuple with no change to the engine (D-059). The flow starts at Audience: the
+# wizard kind is decided by the entry section, so there is no "Type" step (UX sprint #1).
 _BOTH = frozenset({"ad", "broadcast"})
 _ADS = frozenset({"ad"})
 STEPS: tuple[Step, ...] = (
-    Step(STEP_TYPE, "Type", _BOTH),
     Step(STEP_AUDIENCE, "Audience", _BOTH),
     Step(STEP_PLACEMENT, "Placement", _ADS),
-    Step(STEP_SETTINGS, "Settings", _BOTH),
+    # Settings (Enabled / Priority / Every-N / internal name) only apply to a persistent ad;
+    # a one-shot broadcast has no on/off or priority, so it skips this step (UX sprint #11).
+    Step(STEP_SETTINGS, "Settings", _ADS),
     Step(STEP_CONTENT, "Content", _BOTH),
     Step(STEP_PREVIEW, "Preview", _BOTH),
 )
@@ -60,7 +64,7 @@ class WizardState:
     """The in-progress composition (JSON-serializable for FSM storage / future drafts)."""
 
     kind: WizardKind = "ad"
-    step: str = STEP_TYPE
+    step: str = STEP_AUDIENCE
     return_to: str = "flow"  # "flow" (first pass) or "preview" (edit-hub)
     audience_mode: str = "all"
     rules: list[list[str]] = field(default_factory=list)  # [effect, dimension, value]
@@ -81,6 +85,14 @@ class WizardState:
     chat_id: int | None = None
     message_id: int | None = None
     editing_ad_id: int | None = None
+    # Cached audience size shown on the Preview step (#7); recomputed on each entry, so it
+    # is transient UI state rather than part of the composition.
+    estimated_recipients: int | None = None
+    # Post-download conflict resolution (#9): set once the admin has answered the "already
+    # active" warning on Save, so it is asked at most once. ``conflict_replace`` records the
+    # Replace choice (disable the other active post-download ads on save).
+    conflict_ack: bool = False
+    conflict_replace: bool = False
 
     def to_data(self) -> dict[str, Any]:
         return {
@@ -104,6 +116,9 @@ class WizardState:
             "chat_id": self.chat_id,
             "message_id": self.message_id,
             "editing_ad_id": self.editing_ad_id,
+            "estimated_recipients": self.estimated_recipients,
+            "conflict_ack": self.conflict_ack,
+            "conflict_replace": self.conflict_replace,
         }
 
     @classmethod

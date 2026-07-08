@@ -27,14 +27,17 @@ from enum import StrEnum, auto
 from typing import Any
 
 from core.logging import get_logger
+from domain.entities.user import UserSnapshot
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import CachedFileExpiredError
+from domain.protocols.advertising import AdButtonSpec
 from domain.protocols.file_sender import FileSenderProtocol
 from domain.protocols.repositories import (
     CachedFileRepositoryProtocol,
     DownloadRepositoryProtocol,
 )
 from services.cache_service import CacheService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.job_service import JobService, RequestKind
 from services.settings_service import SettingNotFoundError, SettingsService
 from services.url_analyzer import URLAnalyzerService
@@ -75,6 +78,7 @@ class HistoryService:
         file_sender: FileSenderProtocol,
         cache_service: CacheService,
         settings_service: SettingsService,
+        caption_mixer: CaptionAdMixer | None = None,
     ) -> None:
         self._downloads = download_repo
         self._cached = cached_file_repo
@@ -83,6 +87,7 @@ class HistoryService:
         self._file_sender = file_sender
         self._cache = cache_service
         self._settings = settings_service
+        self._caption_mixer = caption_mixer
 
     async def list_history(self, user_id: int, *, page: int = 0) -> HistoryPage:
         """Read one page of history (newest first). Over-reads by one to detect a next page."""
@@ -104,6 +109,14 @@ class HistoryService:
             return _DEFAULT_PAGE_SIZE
         return size
 
+    async def _caption_addon(
+        self, user: UserSnapshot | None
+    ) -> tuple[str | None, tuple[AdButtonSpec, ...]]:
+        """Any due caption-layer ad for the requester (a resend has no base title caption)."""
+        if self._caption_mixer is None or user is None:
+            return None, ()
+        return await self._caption_mixer.decorate_for_user(user, None, user.total_downloads)
+
     async def resend(
         self,
         *,
@@ -111,8 +124,13 @@ class HistoryService:
         user_id: int,
         telegram_id: int,
         progress_message_id: int,
+        user: UserSnapshot | None = None,
     ) -> ResendKind:
-        """Re-send a past download (16.3). Ownership is enforced by ``get_for_user``."""
+        """Re-send a past download (16.3). Ownership is enforced by ``get_for_user``.
+
+        ``user`` (the acting requester) lets the caption-ad layer target this viewer; the
+        ad rides in the resent media's own caption (two-layer ads).
+        """
         download = await self._downloads.get_for_user(download_id, user_id)
         if download is None:
             return ResendKind.NOT_FOUND
@@ -125,13 +143,15 @@ class HistoryService:
 
         format_ = MediaFormat(download.format)
         quality = Quality(download.quality)
+        caption, buttons = await self._caption_addon(user)
         try:
             await self._file_sender.send_cached(
                 telegram_id,
                 cached.telegram_file_id,
                 format_=format_,
                 quality=quality,
-                caption=None,
+                caption=caption,
+                buttons=buttons,
             )
         except CachedFileExpiredError:
             return await self._resend_fallback(

@@ -60,6 +60,7 @@ from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMess
 from services.ad_service import AdService
 from services.audience_service import AudienceService
 from services.cache_service import CacheService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.download_service import DownloadService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
@@ -175,6 +176,7 @@ def make_download_service_factory(
             settings_service=settings_service,
             settings=settings,
             ad_service=ad_service,
+            caption_mixer=CaptionAdMixer(ad_service),
         )
 
     return build

@@ -85,6 +85,7 @@ def _build(
     temp_dir: Path,
     settings_store: FakeSettingsStore | None = None,
     ad_service: Any = None,
+    caption_mixer: Any = None,
 ) -> dict[str, Any]:
     cache_service, _ = make_cache_service()
     settings = load_settings()
@@ -123,6 +124,7 @@ def _build(
         settings_service=settings_service,
         settings=settings,
         ad_service=ad_service,
+        caption_mixer=caption_mixer,
     )
     return env
 
@@ -174,6 +176,31 @@ async def test_video_happy_path(tmp_path: Path) -> None:
 
     jobs: FakeJobRepo = env["jobs"]
     assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.COMPLETED.value
+
+
+async def test_caption_ad_rides_on_the_delivered_media(tmp_path: Path) -> None:
+    # Two-layer ads: a caption ad's text + button are injected into the delivered media's
+    # own caption/keyboard (same message), via the shared mixer — no separate message.
+    from domain.protocols.advertising import AdButtonSpec
+    from services.ad_service import CaptionAd
+    from services.caption_ad_mixer import CaptionAdMixer
+
+    class _CaptionAds:
+        async def select_caption_ad(self, **_kw: Any) -> CaptionAd:
+            return CaptionAd(text="Subscribe!", buttons=(AdButtonSpec("Go", url="https://x"),))
+
+    env = _build(
+        downloader=FakeFileDownloader(),
+        temp_dir=tmp_path,
+        caption_mixer=CaptionAdMixer(_CaptionAds()),  # type: ignore[arg-type]
+    )
+    job_id = await _seed_job(env, MediaFormat.VIDEO, Quality.P720)
+
+    await env["service"].process(job_id)
+
+    sender: Any = env["sender"]
+    assert any(c and "Subscribe!" in c for c in sender.captions)  # ad text in the caption
+    assert any(bs for bs in sender.button_sets)  # ad button rode on the media
     # Single waiter (the originator) is delivered exactly once — via the upload itself,
     # never a second send_cached (the duplicate-delivery bug).
     assert [chat for chat, _ in env["sender"].uploads] == [555]

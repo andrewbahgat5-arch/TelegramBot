@@ -23,14 +23,22 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
-from bot.keyboards.format_select import build_format_keyboard
+from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
 from domain.enums import UNLIMITED_ROLES
-from domain.exceptions import ExtractionFailedError, URLNotSupportedError, UserFacingError
+from domain.exceptions import (
+    ExtractionFailedError,
+    InfrastructureError,
+    URLNotSupportedError,
+    UserFacingError,
+)
+from domain.protocols.downloader import ProviderRetryElsewhere
+from services.ad_service import AdService
+from services.caption_ad_mixer import CaptionAdMixer
 from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
@@ -42,6 +50,7 @@ _log = get_logger("bot.handlers.download")
 AnalyzerFactory = Callable[[AsyncSession], URLAnalyzerService]
 JobServiceFactory = Callable[[AsyncSession], JobService]
 RateLimitServiceFactory = Callable[[AsyncSession], RateLimitService]
+AdServiceFactory = Callable[[AsyncSession], AdService]
 
 
 def _is_free(user: UserSnapshot) -> bool:
@@ -62,7 +71,9 @@ def _subject_to_free_cap(user: UserSnapshot) -> bool:
 async def handle_url(
     message: Message,
     session: AsyncSession,
+    user: UserSnapshot,
     analyzer_factory: AnalyzerFactory,
+    ad_service_factory: AdServiceFactory,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
@@ -75,6 +86,13 @@ async def handle_url(
     except URLNotSupportedError:
         await ack.edit_text(translate("errors.url_not_supported", locale))
         return
+    except (ProviderRetryElsewhere, InfrastructureError) as exc:
+        # A transient failure that survived the provider's own retries (rate-limit, anti-bot
+        # throttle, a flaky fetch, the binary momentarily unavailable). Tell the user it's
+        # temporary and to try again — never the misleading "private or removed" (#12).
+        _log.warning("analyze_transient_failure", error=str(exc))
+        await ack.edit_text(translate("download.temporary_error", locale))
+        return
     except ExtractionFailedError:
         await ack.edit_text(translate("download.extraction_failed", locale))
         return
@@ -85,6 +103,12 @@ async def handle_url(
 
     keyboard = build_format_keyboard(analyzed.media_id, analyzed.info, callback_signer, locale)
     caption = _media_caption(analyzed.info, translate, locale)
+    # Caption-layer ad (two-layer ads): append the ad text under "Choose a format" + its CTA
+    # button, using the same selector as delivered-media captions. Best-effort.
+    mixer = CaptionAdMixer(ad_service_factory(session))
+    decorated, ad_buttons = await mixer.decorate_for_user(user, caption, user.total_downloads)
+    caption = decorated or caption
+    keyboard = append_ad_buttons(keyboard, ad_buttons)
     thumbnail = analyzed.info.thumbnail_url
     if thumbnail:
         try:
