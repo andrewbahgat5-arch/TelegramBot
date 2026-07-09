@@ -1,4 +1,4 @@
-"""Unit tests for NotificationService single-bar progress (MASTER_PLAN Task 6.9 + UX)."""
+"""Unit tests for NotificationService progress messaging (MASTER_PLAN Task 6.9 + UX)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from services.notification_service import NotificationService, ProgressStage
 from tests.unit._fakes import FakeMessageSender
 
 
-async def test_send_initial_returns_id_and_shows_one_progress_bar() -> None:
+async def test_send_initial_shows_one_clean_status_line() -> None:
+    # Item #6: a single clean status line (analysis-stage style), no block/percentage bar.
     sender = FakeMessageSender()
     service = NotificationService(sender)
 
@@ -16,21 +17,18 @@ async def test_send_initial_returns_id_and_shows_one_progress_bar() -> None:
     assert len(sender.sent) == 1
     text = sender.sent[0][1]
     assert "Preparing your file" in text  # one neutral label, no internal stage names
-    assert "%" in text  # a percentage bar
+    assert "%" not in text and "█" not in text and "░" not in text  # no progress bar
 
 
-async def test_stage_advances_the_percentage_in_place() -> None:
+async def test_stage_transitions_do_not_rerender_the_line() -> None:
+    # The status line is static; stage transitions are a no-op (no wasteful edits).
     sender = FakeMessageSender()
     service = NotificationService(sender)
 
     for stage in (ProgressStage.DOWNLOADING, ProgressStage.PROCESSING, ProgressStage.UPLOADING):
         await service.notify_stage(chat_id=10, message_id=99, stage=stage, locale="en")
 
-    percents = [int(e[2].split()[-1].rstrip("%")) for e in sender.edits]
-    assert percents == sorted(percents)  # monotonically increasing
-    assert percents[-1] == 90
-    # Internal stage names are never shown to the user.
-    assert all("Downloading" not in e[2] and "Processing" not in e[2] for e in sender.edits)
+    assert sender.edits == []  # no per-stage edits at all
 
 
 async def test_completed_and_failed_edits() -> None:

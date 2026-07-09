@@ -1,10 +1,10 @@
 """NotificationService (MASTER_PLAN Component 9.2, Task 6.9 + UX follow-up + Sprint 11.5 i18n).
 
 User-facing job messaging. The pipeline has several internal stages (download,
-transcode, upload), but the user only ever sees **one message with a single progress
-bar** that advances in place — internal stage names are not surfaced (Owner UX
-request). The bar advances as the job moves through its stages and finishes at ✅ or
-❌.
+transcode, upload), but the user only ever sees **one clean status line** — the same
+single emoji + text style used by the analysis stage (``🔍 Analyzing link…``), for a
+consistent progress design across both stages (item #6). Internal stage names are not
+surfaced (Owner UX request); the line finishes by being deleted on ✅ or edited to ❌.
 
 Framework-agnostic: depends on ``MessageSenderProtocol`` (raw text transport),
 injected at the composition root. Progress edits are best-effort — a failed edit
@@ -33,26 +33,10 @@ class ProgressStage(StrEnum):
     UPLOADING = "uploading"
 
 
-# A coarse percentage per stage — enough to show steady forward motion without
-# exposing the underlying step to the user.
-_STAGE_PERCENT: dict[ProgressStage, int] = {
-    ProgressStage.QUEUED: 5,
-    ProgressStage.DOWNLOADING: 35,
-    ProgressStage.PROCESSING: 65,
-    ProgressStage.UPLOADING: 90,
-}
-
-_BAR_WIDTH = 10
-
-
-def _bar(percent: int) -> str:
-    percent = max(0, min(100, percent))
-    filled = round(percent / 100 * _BAR_WIDTH)
-    return f"{'█' * filled}{'░' * (_BAR_WIDTH - filled)} {percent}%"
-
-
-def _progress_text(percent: int, locale: str) -> str:
-    return f"{translate('notification.preparing', locale)}\n{_bar(percent)}"
+def _progress_text(locale: str) -> str:
+    """The single clean status line shown while a job runs (item #6 — matches the
+    analysis stage's ``🔍 Analyzing link…`` style: one emoji + text, no block bar)."""
+    return translate("notification.preparing", locale)
 
 
 class NotificationService:
@@ -63,16 +47,16 @@ class NotificationService:
         self, chat_id: int, locale: str, stage: ProgressStage = ProgressStage.QUEUED
     ) -> int:
         """Send the first progress message; return its id for later in-place edits."""
-        return await self._sender.send_message(
-            chat_id, _progress_text(_STAGE_PERCENT[stage], locale)
-        )
+        return await self._sender.send_message(chat_id, _progress_text(locale))
 
     async def notify_stage(
         self, chat_id: int, message_id: int, stage: ProgressStage, locale: str
     ) -> None:
-        await self._sender.edit_message(
-            chat_id, message_id, _progress_text(_STAGE_PERCENT[stage], locale)
-        )
+        """No-op: the progress message is a single static status line (item #6), so
+        internal stage transitions no longer re-render it. Kept for call-site
+        compatibility (``DownloadService`` reports stages) and as the hook if a future
+        design reintroduces per-stage text."""
+        return None
 
     async def notify_text(self, chat_id: int, message_id: int, text: str) -> None:
         """Edit the progress message to an arbitrary, already-localized status line
