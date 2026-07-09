@@ -369,6 +369,8 @@
   "panel.section.templates": "📝 القوالب",
   "panel.templates.title": "قوالب الرسائل",
   "panel.templates.subtitle": "اضغط على رسالة لتخصيصها. القوالب المخصّصة معلّمة بـ ✏️.",
+  "panel.templates.pick_language": "اختر لغة لتحرير قوالبها:",
+  "panel.templates.language_label": "اللغة",
   "panel.templates.edit_title": "تعديل: {template}",
   "panel.templates.content_label": "المحتوى الحالي:",
   "panel.templates.placeholders": "المتغيّرات",

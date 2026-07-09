@@ -369,6 +369,8 @@
   "panel.section.templates": "📝 Templates",
   "panel.templates.title": "Message Templates",
   "panel.templates.subtitle": "Tap a message to customize it. Custom ones are marked ✏️.",
+  "panel.templates.pick_language": "Choose a language to edit its templates:",
+  "panel.templates.language_label": "Language",
   "panel.templates.edit_title": "Edit: {template}",
   "panel.templates.content_label": "Current content:",
   "panel.templates.placeholders": "Placeholders",

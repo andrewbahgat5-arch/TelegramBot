@@ -1128,13 +1128,22 @@ async def _render(
     if section == "r":  # Referral analytics dashboard (Sprint 13.7)
         text = await _referral_dashboard_text(referral_factory(session), translate, locale)
         return text, build_section_menu("r", role, signer, locale)
-    if section == "tp":  # Message templates (Sprint 13.8)
-        if action == "inf" and panel.arg is not None and 0 <= panel.arg < len(TEMPLATE_DEFS):
-            return await _template_detail_view(
-                template_service, panel.arg, signer, translate, locale
+    if section == "tp":  # Message templates — pick locale, then list/detail (Sprint 13.8 / 14)
+        if action == "ls" and panel.arg is not None:  # list for the chosen locale (arg=locale idx)
+            target = _locale_at(panel.arg, locale)
+            views = await template_service.list_all(target)
+            return _templates_list_text(translate, locale, target), build_template_list(
+                views, signer, locale, panel.arg
             )
-        views = await template_service.list_all(locale)
-        return _templates_list_text(translate, locale), build_template_list(views, signer, locale)
+        if action == "inf" and panel.arg is not None and 0 <= panel.arg < len(TEMPLATE_DEFS):
+            target = _locale_at(panel.value, locale)
+            return await _template_detail_view(
+                template_service, panel.arg, signer, translate, locale, target, panel.value
+            )
+        # Section entry (op) or any fallthrough: choose the language first (data-driven).
+        return _templates_pick_language_text(translate, locale), build_language_chooser(
+            "tp", "ls", signer, locale
+        )
     if section == "u":
         users = user_factory(session)
         if action == "inf" and panel.arg is not None:
@@ -1503,14 +1512,40 @@ async def _moderation_health_write(
     await callback.answer(toast)
 
 
-def _templates_list_text(translate: Translator, locale: str) -> str:
+def _locale_at(index: int | None, fallback: str) -> str:
+    """Resolve a ``list_enabled_locales()`` index to its code (data-driven); fallback if invalid."""
+    if index is not None:
+        locales = list_enabled_locales()
+        if 0 <= index < len(locales):
+            return locales[index].code
+    return fallback
+
+
+def _templates_pick_language_text(translate: Translator, locale: str) -> str:
     return "\n".join(
         [
             ui.header(translate("panel.templates.title", locale), icon=ui.emoji("templates")),
             "",
-            translate("panel.templates.subtitle", locale),
+            translate("panel.templates.pick_language", locale),
         ]
     )
+
+
+def _templates_list_text(
+    translate: Translator, locale: str, target_locale: str | None = None
+) -> str:
+    lines = [
+        ui.header(translate("panel.templates.title", locale), icon=ui.emoji("templates")),
+        "",
+        translate("panel.templates.subtitle", locale),
+    ]
+    if target_locale is not None:
+        name = next(
+            (m.native_name for m in list_enabled_locales() if m.code == target_locale),
+            target_locale,
+        )
+        lines += ["", ui.metric("🌐", translate("panel.templates.language_label", locale), name)]
+    return "\n".join(lines)
 
 
 def _template_detail_text(
@@ -1574,24 +1609,29 @@ async def _template_detail_view(
     index: int,
     signer: CallbackSigner,
     translate: Translator,
-    locale: str,
+    ui_locale: str,
+    target_locale: str,
+    locale_index: int | None,
 ) -> tuple[str, InlineKeyboardMarkup]:
-    """Build a single template's edit screen (custom content or shipped default)."""
+    """Build a template's edit screen for ``target_locale`` (labels rendered in ``ui_locale``)."""
     definition = TEMPLATE_DEFS[index]
-    content = template_service.full_content(definition.key, locale)
-    is_custom = await template_service.get(definition.key, locale) is not None
+    content = template_service.full_content(definition.key, target_locale)
+    is_custom = await template_service.get(definition.key, target_locale) is not None
     buttons = (
-        template_service.buttons_for(definition.key, locale) if definition.allow_buttons else None
+        template_service.buttons_for(definition.key, target_locale)
+        if definition.allow_buttons
+        else None
     )
     text = _template_detail_text(
-        definition, content or "", is_custom, translate, locale, buttons=buttons
+        definition, content or "", is_custom, translate, ui_locale, buttons=buttons
     )
     return text, build_template_detail(
         index,
         is_custom=is_custom,
         allow_buttons=definition.allow_buttons,
         signer=signer,
-        locale=locale,
+        locale=ui_locale,
+        locale_index=locale_index,
     )
 
 
@@ -1611,12 +1651,15 @@ async def _templates_write(
         await callback.answer()
         return
     definition = TEMPLATE_DEFS[index]
+    loc_index = panel.value  # chosen target-locale index (Sprint 14), threaded via value
+    target = _locale_at(loc_index, locale)
     if panel.action == "ed":  # arm the content-edit FSM
         if isinstance(callback.message, Message):
             await state.set_state(PanelStates.template_edit)
             await state.update_data(
                 key=definition.key,
-                locale=locale,
+                locale=target,  # edit the CHOSEN locale's copy, not the admin's UI locale
+                locale_index=loc_index,
                 index=index,
                 chat_id=callback.message.chat.id,
                 message_id=callback.message.message_id,
@@ -1625,7 +1668,7 @@ async def _templates_write(
                 callback.message,
                 translate("panel.templates.edit_prompt", locale, template=definition.key),
                 build_input_prompt(
-                    signer, locale, back=("tp", "inf", index), cancel=("tp", "inf", index)
+                    signer, locale, back=("tp", "ls", loc_index), cancel=("tp", "ls", loc_index)
                 ),
             )
         await callback.answer()
@@ -1635,7 +1678,8 @@ async def _templates_write(
             await state.set_state(PanelStates.template_button_edit)
             await state.update_data(
                 key=definition.key,
-                locale=locale,
+                locale=target,
+                locale_index=loc_index,
                 index=index,
                 chat_id=callback.message.chat.id,
                 message_id=callback.message.message_id,
@@ -1644,7 +1688,7 @@ async def _templates_write(
                 callback.message,
                 translate("panel.templates.buttons_prompt", locale),
                 build_input_prompt(
-                    signer, locale, back=("tp", "inf", index), cancel=("tp", "inf", index)
+                    signer, locale, back=("tp", "ls", loc_index), cancel=("tp", "ls", loc_index)
                 ),
             )
         await callback.answer()
@@ -1655,15 +1699,18 @@ async def _templates_write(
                 callback.message,
                 translate("panel.templates.reset_confirm", locale, template=definition.key),
                 build_confirm(
-                    signer, locale, confirm=("tp", "rsc", index, None), cancel=("tp", "inf", index)
+                    signer,
+                    locale,
+                    confirm=("tp", "rsc", index, loc_index),
+                    cancel=("tp", "ls", loc_index),
                 ),
             )
         await callback.answer()
         return
     if panel.action == "rsc":  # confirmed reset
-        await template_service.reset(definition.key, locale)
+        await template_service.reset(definition.key, target)
         text, markup = await _template_detail_view(
-            template_service, index, signer, translate, locale
+            template_service, index, signer, translate, locale, target, loc_index
         )
         if isinstance(callback.message, Message):
             await _safe_edit(callback.message, text, markup)
@@ -1716,8 +1763,15 @@ async def on_template_edit(
             return
     await state.clear()
     await template_service.set(key, tlocale, content, updated_by=user.id)
+    loc_index = data.get("locale_index")
     text, markup = await _template_detail_view(
-        template_service, index, callback_signer, translate, tlocale
+        template_service,
+        index,
+        callback_signer,
+        translate,
+        locale,
+        tlocale,
+        loc_index if isinstance(loc_index, int) else None,
     )
     await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
 
@@ -1771,8 +1825,15 @@ async def on_template_button_edit(
             buttons = None
     await state.clear()
     await template_service.set_buttons(key, tlocale, buttons)
+    loc_index = data.get("locale_index")
     text, markup = await _template_detail_view(
-        template_service, index, callback_signer, translate, tlocale
+        template_service,
+        index,
+        callback_signer,
+        translate,
+        locale,
+        tlocale,
+        loc_index if isinstance(loc_index, int) else None,
     )
     await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
 

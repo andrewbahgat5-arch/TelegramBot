@@ -153,9 +153,13 @@ def build_platform_stats(
 
 
 def build_template_list(
-    views: Sequence[Any], signer: CallbackSigner, locale: str
+    views: Sequence[Any], signer: CallbackSigner, locale: str, locale_index: int | None = None
 ) -> InlineKeyboardMarkup:
-    """One tappable row per editable template (Sprint 13.8); custom rows marked ✏️."""
+    """One tappable row per editable template (Sprint 13.8); custom rows marked ✏️.
+
+    ``locale_index`` (the chosen target locale, Sprint 14) rides in each button's ``value``
+    so the detail/edit screens edit that locale's copy, not the admin's own UI language.
+    """
     rows = [
         [
             _btn(
@@ -164,11 +168,12 @@ def build_template_list(
                 "tp",
                 "inf",
                 index,
+                locale_index,
             )
         ]
         for index, view in enumerate(views)
     ]
-    rows.append(nav_row(signer, locale, back=("mn", "op")))
+    rows.append(nav_row(signer, locale, back=("tp", "op")))  # back to the language chooser
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -179,16 +184,48 @@ def build_template_detail(
     allow_buttons: bool = False,
     signer: CallbackSigner,
     locale: str,
+    locale_index: int | None = None,
 ) -> InlineKeyboardMarkup:
-    """A template's edit screen: Edit Content, Edit Buttons (if allowed), Reset, Back."""
-    rows = [[_btn(signer, translate("panel.templates.edit", locale), "tp", "ed", index)]]
+    """A template's edit screen: Edit Content, Edit Buttons (if allowed), Reset, Back.
+
+    ``locale_index`` is threaded through every action's ``value`` so edits target the
+    chosen locale; Back returns to that locale's template list.
+    """
+    rows = [
+        [_btn(signer, translate("panel.templates.edit", locale), "tp", "ed", index, locale_index)]
+    ]
     if allow_buttons:
         rows.append(
-            [_btn(signer, translate("panel.templates.edit_buttons", locale), "tp", "edb", index)]
+            [
+                _btn(
+                    signer,
+                    translate("panel.templates.edit_buttons", locale),
+                    "tp",
+                    "edb",
+                    index,
+                    locale_index,
+                )
+            ]
         )
     if is_custom:
-        rows.append([_btn(signer, translate("panel.templates.reset", locale), "tp", "rs", index)])
-    rows.append(nav_row(signer, locale, back=("tp", "op")))
+        rows.append(
+            [
+                _btn(
+                    signer,
+                    translate("panel.templates.reset", locale),
+                    "tp",
+                    "rs",
+                    index,
+                    locale_index,
+                )
+            ]
+        )
+    rows.append(
+        [
+            _btn(signer, translate("common.back", locale), "tp", "ls", locale_index),
+            _btn(signer, translate("common.home", locale), "mn", "hm"),
+        ]
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

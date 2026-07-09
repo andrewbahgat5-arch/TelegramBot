@@ -670,12 +670,26 @@ async def test_health_purge_blocked_confirmed() -> None:
     assert users.calls == [("purge_blocked",)]
 
 
-async def test_navigate_templates_list() -> None:
+async def test_navigate_templates_entry_shows_language_chooser() -> None:
+    # Item #5: opening Templates asks for the language first (data-driven), not the list.
     signer = _signer()
     callback = _callback(signer, "tp", "op")
     await _navigate(callback, ParsedPanel("tp", "op"), _user(), signer)
     text = callback.message.edit_text.await_args.args[0]
     assert "Templates" in text
+    assert "language" in text.lower()  # the pick-a-language prompt
+
+
+async def test_navigate_templates_list_for_chosen_locale() -> None:
+    signer = _signer()
+    callback = _callback(signer, "tp", "ls")
+    await _navigate(callback, ParsedPanel("tp", "ls", 0), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    from services.template_service import TEMPLATE_DEFS
+
+    assert "Language" in text  # the chosen-locale indicator
+    assert len(kb.inline_keyboard) >= len(TEMPLATE_DEFS)  # one row per template (+ nav)
 
 
 async def _twrite(callback: Any, panel: ParsedPanel, templates: _FakeTemplates) -> None:
@@ -722,6 +736,37 @@ async def test_template_edit_arms_fsm() -> None:
         _LOCALE,
     )
     state.set_state.assert_awaited_once()
+
+
+async def test_template_edit_targets_chosen_locale() -> None:
+    # Item #5: the locale index carried in the callback ``value`` must drive which locale's
+    # copy the edit FSM writes to (not the admin's own UI locale).
+    from core.i18n import list_enabled_locales
+
+    callback = _callback(_signer(), "tp", "ed")
+    templates = _FakeTemplates()
+    state = _state()
+    await panel_write(
+        callback,
+        ParsedPanel("tp", "ed", 0, 1),  # value=1 -> second enabled locale
+        _session(),
+        _user(),
+        state,
+        lambda s: _FakeUsersRW(),
+        lambda s: _FakeSettingsRW(),
+        lambda s: _FakeAdmin(),
+        lambda s: _FakeAds(),
+        lambda s: _FakeBroadcasts(),
+        lambda s: _FakeAudience(),
+        templates,
+        lambda bot: _FakeHealthChecker(),
+        _signer(),
+        translate,
+        _LOCALE,
+    )
+    expected = list_enabled_locales()[1].code
+    assert state.update_data.await_args.kwargs["locale"] == expected
+    assert state.update_data.await_args.kwargs["locale_index"] == 1
 
 
 async def test_template_reset_confirmed_reverts() -> None:
