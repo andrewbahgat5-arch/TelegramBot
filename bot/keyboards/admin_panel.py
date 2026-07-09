@@ -592,31 +592,18 @@ def build_wizard_audience(
     from bot.panel.wizard import STEP_AUDIENCE
 
     rows: list[list[InlineKeyboardButton]] = []
-    modes = [
-        ("all", translate("panel.audience.mode.all", locale)),
-        ("include", translate("panel.audience.mode.include", locale)),
-        ("exclude", translate("panel.audience.mode.exclude", locale)),
-    ]
-    rows.append(
-        [
-            _w(signer, f"{'•' if state.audience_mode == code else ' '} {label}", "am", idx)
-            for idx, (code, label) in enumerate(modes)
-        ]
-    )
-    taken = {(e, d, v) for e, d, v in state.rules}
     option_buttons: list[InlineKeyboardButton] = []
     for opt in AUDIENCE_OPTIONS:
         opt_label = translate(opt.label_key, locale)
-        if opt.value is None:  # typed sub-input: show how many such rules exist
-            count = sum(1 for e, d, _v in state.rules if e == opt.effect and d == opt.dimension)
+        if opt.dimension == "__all__":
+            active = not state.rules
+            label = f"{_mark(active)} {opt_label}"
+        elif opt.value is None:
+            count = sum(
+                1 for e, d, _v in state.rules if e == opt.effect and d == opt.dimension
+            )
             label = f"{opt_label}" + (f" ({count})" if count else "")
         else:
-            # Mutual exclusivity: hide a target already chosen on the opposite side, so the
-            # admin can never create an Include+Exclude conflict (Owner #1/#2/#3). It
-            # reappears the moment the opposite selection is removed.
-            opposite = "exclude" if opt.effect == "include" else "include"
-            if (opposite, opt.dimension, opt.value) in taken:
-                continue
             active = [opt.effect, opt.dimension, opt.value] in state.rules
             label = f"{_mark(active)} {opt_label}"
         option_buttons.append(_w(signer, label, "atg", opt.index))

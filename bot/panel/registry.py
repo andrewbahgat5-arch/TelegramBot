@@ -303,16 +303,12 @@ class AudienceOption:
 
 
 AUDIENCE_OPTIONS: tuple[AudienceOption, ...] = (
-    AudienceOption(0, "panel.audience.free", "include", "plan", "free"),
-    AudienceOption(1, "panel.audience.premium", "include", "plan", "premium"),
-    AudienceOption(2, "panel.audience.users_role", "include", "role", "user"),
-    AudienceOption(3, "panel.audience.language", "include", "language", None),
-    AudienceOption(4, "panel.audience.user_id", "include", "user_id", None),
-    AudienceOption(5, "panel.audience.exclude_premium", "exclude", "plan", "premium"),
-    AudienceOption(6, "panel.audience.exclude_free", "exclude", "plan", "free"),
-    AudienceOption(7, "panel.audience.exclude_owner", "exclude", "role", "owner"),
-    AudienceOption(8, "panel.audience.exclude_moderators", "exclude", "role", "moderator"),
-    AudienceOption(9, "panel.audience.exclude_user_id", "exclude", "user_id", None),
+    AudienceOption(0, "panel.audience.all", "include", "__all__", "__all__"),
+    AudienceOption(1, "panel.audience.free", "include", "plan", "free"),
+    AudienceOption(2, "panel.audience.premium", "include", "plan", "premium"),
+    AudienceOption(3, "panel.audience.moderators", "include", "role", "moderator"),
+    AudienceOption(4, "panel.audience.owner", "include", "role", "owner"),
+    AudienceOption(5, "panel.audience.user_id", "include", "user_id", None),
 )
 
 

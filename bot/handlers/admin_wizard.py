@@ -68,7 +68,7 @@ BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
 
 _DATA_KEY = "wizard"
-_AUDIENCE_MODES = ("all", "include", "exclude")
+_AUDIENCE_MODES = ("all", "include")
 _SECTION_FOR_KIND = {"ad": "a", "broadcast": "b"}
 
 
@@ -357,6 +357,10 @@ def _recompute_audience_mode(ws: WizardState) -> None:
 def _toggle_audience(ws: WizardState, arg: int | None) -> None:
     opt = audience_option(arg)
     if opt is None or opt.value is None:
+        return
+    if opt.dimension == "__all__":
+        ws.rules.clear()
+        ws.audience_mode = "all"
         return
     rule = [opt.effect, opt.dimension, opt.value]
     if rule in ws.rules:

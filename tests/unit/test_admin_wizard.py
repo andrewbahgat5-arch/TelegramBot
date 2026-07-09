@@ -291,13 +291,13 @@ async def test_toggle_audience_preset_adds_rule_and_switches_mode() -> None:
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "atg", 1),
+        ParsedPanel("w", "atg", 1),  # index 1 = Free
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
     )
     ws = WizardState.from_data(fsm.data["wizard"])
-    assert ["include", "plan", "premium"] in ws.rules
+    assert ["include", "plan", "free"] in ws.rules
     assert ws.audience_mode == "include"
 
 
@@ -317,22 +317,22 @@ async def test_toggle_placement_selects_code() -> None:
 
 
 # --- typed input + content capture ----------------------------------------
-async def test_typed_language_value_becomes_a_rule() -> None:
+async def test_typed_user_id_value_becomes_a_rule() -> None:
     fsm = _FSM()
     _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
-    # Arming via a typed audience option (3 = include language…).
+    # Arming via a typed audience option (5 = include user_id…).
     cb = _callback()
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "atg", 3),
+        ParsedPanel("w", "atg", 5),
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
     )
     assert fsm.state == admin_wizard.PanelStates.wizard_text
     msg: Any = AsyncMock(spec=Message)
-    msg.text = "en"
+    msg.text = "12345"
     await admin_wizard.on_text(
         msg,
         fsm,  # type: ignore[arg-type]
@@ -344,7 +344,7 @@ async def test_typed_language_value_becomes_a_rule() -> None:
         _LOCALE,
     )
     ws = WizardState.from_data(fsm.data["wizard"])
-    assert ["include", "language", "en"] in ws.rules
+    assert ["include", "user_id", "12345"] in ws.rules
 
 
 async def test_content_text_sets_fields_mode() -> None:
@@ -667,42 +667,38 @@ async def test_save_edit_updates_existing_ad() -> None:
     assert fsm.data == {}
 
 
-# --- audience mutual exclusivity (Owner UX #1/#2/#3) ----------------------
-async def test_audience_selecting_opposite_side_swaps_not_conflicts() -> None:
+# --- audience: All Users + collapse (Owner UX) ----------------------------
+async def test_audience_all_users_clears_rules() -> None:
     fsm, cb = _FSM(), _callback()
-    _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
-    # Include Premium (opt 1), then Exclude Premium (opt 5) for the SAME target.
-    await _dispatch(
-        cb,
+    _seed(
         fsm,
-        ParsedPanel("w", "atg", 1),
-        ads=_FakeAds(),
-        casts=_FakeBroadcasts(),
-        aud=_FakeAudience(),
+        WizardState(
+            kind="broadcast",
+            step=STEP_AUDIENCE,
+            audience_mode="include",
+            rules=[["include", "plan", "free"]],
+        ),
     )
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "atg", 5),
+        ParsedPanel("w", "atg", 0),  # index 0 = All Users
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
     )
     ws = WizardState.from_data(fsm.data["wizard"])
-    assert ws.rules == [["exclude", "plan", "premium"]]  # never both — the side swapped
-    assert ws.audience_mode == "all"  # no include rule remains
-    assert ws.step == STEP_AUDIENCE  # stayed on the same screen (Owner #4/#5)
+    assert ws.rules == []
+    assert ws.audience_mode == "all"
 
 
 async def test_audience_free_plus_premium_collapses_to_all() -> None:
-    # Selecting both Free (opt 0) and Premium (opt 1) targets everyone, so the redundant
-    # pair collapses back to the All audience (#3).
     fsm, cb = _FSM(), _callback()
     _seed(fsm, WizardState(kind="broadcast", step=STEP_AUDIENCE))
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "atg", 0),
+        ParsedPanel("w", "atg", 1),  # index 1 = Free
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
@@ -710,7 +706,7 @@ async def test_audience_free_plus_premium_collapses_to_all() -> None:
     await _dispatch(
         cb,
         fsm,
-        ParsedPanel("w", "atg", 1),
+        ParsedPanel("w", "atg", 2),  # index 2 = Premium
         ads=_FakeAds(),
         casts=_FakeBroadcasts(),
         aud=_FakeAudience(),
@@ -720,22 +716,17 @@ async def test_audience_free_plus_premium_collapses_to_all() -> None:
     assert ws.audience_mode == "all"
 
 
-def test_audience_keyboard_hides_the_opposite_side() -> None:
+def test_audience_keyboard_shows_all_users_checked_when_no_rules() -> None:
     from bot.keyboards.admin_panel import build_wizard_audience
 
     signer = _signer()
-    ws = WizardState(
-        kind="broadcast",
-        step=STEP_AUDIENCE,
-        audience_mode="include",
-        rules=[["include", "plan", "premium"]],
-    )
+    ws = WizardState(kind="broadcast", step=STEP_AUDIENCE, audience_mode="all", rules=[])
     markup = build_wizard_audience(ws, signer, _LOCALE)
-    shown = {
-        p.arg
-        for row in markup.inline_keyboard
-        for b in row
-        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "atg"
-    }
-    assert 1 in shown  # Include Premium still offered (and marked)
-    assert 5 not in shown  # Exclude Premium hidden while Premium is included
+    all_btn = None
+    for row in markup.inline_keyboard:
+        for b in row:
+            p = signer.unpack_panel(b.callback_data)
+            if p is not None and p.action == "atg" and p.arg == 0:
+                all_btn = b
+    assert all_btn is not None
+    assert "☑" in all_btn.text
