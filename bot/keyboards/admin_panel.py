@@ -423,6 +423,20 @@ def build_ad_detail(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def build_placement_list(
+    states: dict[str, bool], signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """Placement toggle screen: one row per placement, ✅/❌ + label (Phase 5)."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for opt in PLACEMENT_OPTIONS:
+        on = states.get(opt.code, False)
+        icon = "✅" if on else "❌"
+        label = f"{icon} {translate(opt.label_key, locale)}"
+        rows.append([_btn(signer, label, "a", "plt", opt.index)])
+    rows.append(nav_row(signer, locale, back=("a", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def _broadcast_button_label(broadcast: Any) -> str:
     """One saved-broadcast row: a status glyph, id, and a short content preview."""
     icon = {"draft": "📝", "pending": "⏳", "in_progress": "🚀", "completed": "✅"}.get(

@@ -23,13 +23,14 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
+from bot.handlers.ads import show_placement_ad
 from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
-from domain.enums import UNLIMITED_ROLES
+from domain.enums import UNLIMITED_ROLES, AdPlacement
 from domain.exceptions import (
     ExtractionFailedError,
     InfrastructureError,
@@ -114,10 +115,14 @@ async def handle_url(
         try:
             await message.answer_photo(thumbnail, caption=caption, reply_markup=keyboard)
             await ack.delete()
+            await show_placement_ad(
+                ad_service_factory(session), user, AdPlacement.ANALYSIS.value
+            )
             return
         except Exception as exc:  # bad/blocked thumbnail URL → fall back to editing the ack
             _log.debug("thumbnail_send_failed", error=str(exc))
     await ack.edit_text(caption, reply_markup=keyboard)
+    await show_placement_ad(ad_service_factory(session), user, AdPlacement.ANALYSIS.value)
 
 
 def _build_caption(info: MediaInfo, footer: str) -> str:
@@ -258,6 +263,7 @@ async def handle_quality_choice(
     analyzer_factory: AnalyzerFactory,
     job_service_factory: JobServiceFactory,
     rate_limit_service_factory: RateLimitServiceFactory,
+    ad_service_factory: AdServiceFactory,
     notification_service: NotificationService,
     callback_signer: CallbackSigner,
     translate: Translator,
@@ -303,6 +309,9 @@ async def handle_quality_choice(
         await notification_service.notify_text(
             user.telegram_id, progress_message_id, translate("download.busy", locale)
         )
+    await show_placement_ad(
+        ad_service_factory(session), user, AdPlacement.QUALITY_SELECT.value
+    )
 
 
 async def _edit_chooser(message: object, text: str, keyboard: object) -> None:

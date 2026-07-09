@@ -464,11 +464,13 @@ class _FakeSettingsRW:
     async def list_all(self) -> list[SettingView]:
         return [SettingView(key="worker_count", value=self.value, value_type="int")]
 
-    async def set_validated(self, key: str, value: str, *, updated_by: int | None = None) -> int:
+    async def set_validated(self, key: str, value: str, *, updated_by: int | None = None) -> Any:
         if self.raise_on_save:
             raise InvalidSettingValueError("bad value")
         self.saved.append((key, value, updated_by))
         self.value = value
+        if value in ("true", "false"):
+            return value == "true"
         return int(value)
 
     async def get(self, key: str) -> Any:
@@ -1041,6 +1043,24 @@ async def test_ad_per_ad_stats_not_found() -> None:
     await _navigate(callback, ParsedPanel("a", "ast", 999), _user(), signer)
     text = callback.message.edit_text.await_args.args[0]
     assert "not found" in text.lower()
+
+
+async def test_ads_placements_renders() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "pl")
+    await _navigate(callback, ParsedPanel("a", "pl"), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Placements" in text
+    assert "Follow-up" in text
+
+
+async def test_ads_placement_toggle_writes() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "plt")
+    settings = _FakeSettingsRW()
+    await _write(callback, ParsedPanel("a", "plt", 0), settings)
+    assert len(settings.saved) == 1
+    assert settings.saved[0][0] == "ad_placement_post_download_enabled"
 
 
 async def test_ads_overall_stats_renders() -> None:

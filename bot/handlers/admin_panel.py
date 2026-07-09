@@ -57,6 +57,7 @@ from bot.keyboards.admin_panel import (
     build_input_prompt,
     build_language_chooser,
     build_main_menu,
+    build_placement_list,
     build_platform_stats,
     build_section_menu,
     build_setting_stepper,
@@ -68,7 +69,14 @@ from bot.keyboards.admin_panel import (
 )
 from bot.keyboards.language_select import build_language_picker
 from bot.panel import ui
-from bot.panel.registry import SECTIONS, SETTING_FIELDS, SettingField, setting_field
+from bot.panel.registry import (
+    PLACEMENT_OPTIONS,
+    SECTIONS,
+    SETTING_FIELDS,
+    SettingField,
+    placement_option,
+    setting_field,
+)
 from bot.panel.states import PanelStates
 from core.i18n import Translator, catalog_template, list_enabled_locales
 from core.logging import get_logger
@@ -440,6 +448,28 @@ async def panel_write(
         await _templates_write(
             callback, panel, template_service, user, callback_signer, state, translate, locale
         )
+        return
+    if panel.section == "a" and panel.action == "plt" and panel.arg is not None:
+        opt = placement_option(panel.arg)
+        if opt is None:
+            await callback.answer()
+            return
+        settings = settings_service_factory(session)
+        key = f"ad_placement_{opt.code}_enabled"
+        try:
+            current: bool = await settings.get(key)
+        except SettingNotFoundError:
+            current = False
+        new_val = "false" if current else "true"
+        await settings.set_validated(key, new_val, updated_by=user.id)
+        states = await _placement_states(settings)
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                _placements_text(states, translate, locale),
+                build_placement_list(states, callback_signer, locale),
+            )
+        await callback.answer()
         return
     if panel.section == "a":  # Advertisements management (9.6.9)
         await _ads_write(
@@ -1173,6 +1203,12 @@ async def _render(
             ), build_ad_detail(
                 await ads.get(panel.arg), role, signer, locale
             )
+        if action == "pl":
+            settings = settings_factory(session)
+            states = await _placement_states(settings)
+            return _placements_text(
+                states, translate, locale
+            ), build_placement_list(states, signer, locale)
         if action == "stt":
             return await _overall_stats_text(
                 ads, translate, locale
@@ -1949,6 +1985,33 @@ def _ad_detail_text(ad: Any, translate: Translator, locale: str) -> str:
         ],
         icon=ui.emoji("ads"),
     )
+
+
+async def _placement_states(settings: SettingsService) -> dict[str, bool]:
+    """Read the on/off state of each registered placement from settings."""
+    states: dict[str, bool] = {}
+    for opt in PLACEMENT_OPTIONS:
+        key = f"ad_placement_{opt.code}_enabled"
+        try:
+            states[opt.code] = bool(await settings.get(key))
+        except SettingNotFoundError:
+            states[opt.code] = opt.code in ("post_download", "caption")
+    return states
+
+
+def _placements_text(
+    states: dict[str, bool], translate: Translator, locale: str
+) -> str:
+    lines = [
+        ui.header(translate("panel.ads.placements_title", locale), icon=ui.emoji("ads")),
+        "",
+        translate("panel.ads.placements_subtitle", locale),
+    ]
+    for opt in PLACEMENT_OPTIONS:
+        icon = "✅" if states.get(opt.code) else "❌"
+        lines.append(f"  {icon} {translate(opt.label_key, locale)}")
+    lines.extend(["", ui.footer()])
+    return "\n".join(lines)
 
 
 def _ads_list_text(rows: Sequence[Any], translate: Translator, locale: str) -> str:

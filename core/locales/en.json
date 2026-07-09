@@ -136,6 +136,7 @@
   "panel.placement.home": "🏠 Home",
   "panel.placement.history": "📂 History",
   "panel.placement.caption": "📝 In media caption",
+  "panel.placement.analysis": "🔍 After URL analysis",
   "panel.placement.caption_warning": "ℹ️ A caption ad is <b>text + buttons only</b> — Telegram captions can't hold photos, videos or other media. It rides inside the media's own caption. Use a Follow-up message for media ads.",
 
   "panel.wizard.done": "✅ Done",
@@ -263,6 +264,8 @@
   "panel.ads.list_empty": "No ads yet. Create one with the wizard.",
   "panel.ads.count_label": "Campaigns",
   "panel.ads.stats_title": "Ad Totals",
+  "panel.ads.placements_title": "Placements",
+  "panel.ads.placements_subtitle": "Toggle where ads appear. Each placement is an independent layer.",
   "panel.ads.state_active": "✅ active",
   "panel.ads.state_disabled": "⏸ disabled",
   "panel.ads.target_all": "all",

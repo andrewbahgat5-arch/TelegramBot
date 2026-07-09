@@ -136,6 +136,7 @@
   "panel.placement.home": "🏠 الرئيسية",
   "panel.placement.history": "📂 السجل",
   "panel.placement.caption": "📝 داخل تعليق الميديا",
+  "panel.placement.analysis": "🔍 بعد تحليل الرابط",
   "panel.placement.caption_warning": "ℹ️ إعلان التعليق <b>نص + أزرار فقط</b> — تعليقات تيليجرام لا تحتوي صور أو فيديو أو ميديا. بيظهر داخل تعليق الميديا نفسها. للإعلانات بالميديا استخدم رسالة المتابعة.",
 
   "panel.wizard.done": "✅ تم",
@@ -263,6 +264,8 @@
   "panel.ads.list_empty": "لا توجد إعلانات بعد. أنشئ واحدًا عبر المعالج.",
   "panel.ads.count_label": "الحملات",
   "panel.ads.stats_title": "إجمالي الإعلانات",
+  "panel.ads.placements_title": "مواقع العرض",
+  "panel.ads.placements_subtitle": "تبديل أماكن ظهور الإعلانات. كل موقع طبقة مستقلة.",
   "panel.ads.state_active": "✅ نشط",
   "panel.ads.state_disabled": "⏸ معطّل",
   "panel.ads.target_all": "الجميع",

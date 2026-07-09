@@ -74,6 +74,9 @@ class _NoCaptionAds:
     async def select_caption_ad(self, **_kw: object) -> None:
         return None
 
+    async def maybe_show(self, **_kw: object) -> bool:
+        return False
+
 
 def _no_ads(_session: AsyncSession) -> object:
     return _NoCaptionAds()
@@ -443,6 +446,7 @@ async def test_quality_choice_enqueues_job() -> None:
         lambda s: analyzer,
         lambda s: job_service,
         lambda s: _rate_limit_service(),
+        _no_ads,
         notifier,
         signer,
         translate,
@@ -483,6 +487,7 @@ async def test_quality_choice_blocked_when_over_daily_limit() -> None:
         lambda s: analyzer,
         lambda s: job_service,
         lambda s: _rate_limit_service_at_limit(),
+        _no_ads,
         NotificationService(FakeMessageSender()),
         signer,
         translate,
@@ -509,6 +514,7 @@ async def test_quality_choice_forged_ignored() -> None:
         lambda s: _analyzer(),
         lambda s: job_service,
         lambda s: _rate_limit_service(),
+        _no_ads,
         NotificationService(FakeMessageSender()),
         CallbackSigner("k"),
         translate,

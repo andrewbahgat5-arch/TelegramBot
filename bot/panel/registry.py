@@ -41,6 +41,7 @@ READ_ACTIONS: frozenset[str] = frozenset(
         "lsd",  # list deleted-account users (Sprint 13.5, read-only)
         "ast",  # per-ad statistics screen (Sprint 14, Phase 4)
         "lsl",  # list ads filtered by language (Sprint 14, Phase 2.2)
+        "pl",   # placements overview (Sprint 14, Phase 5)
     }
 )
 
@@ -338,6 +339,7 @@ PLACEMENT_OPTIONS: tuple[PlacementOption, ...] = (
     # Caption layer (two-layer ads): text + buttons injected into the delivered media's own
     # caption. Appended (index 6) so the existing option ids stay stable.
     PlacementOption(6, "caption", "panel.placement.caption"),
+    PlacementOption(7, "analysis", "panel.placement.analysis"),
 )
 
 

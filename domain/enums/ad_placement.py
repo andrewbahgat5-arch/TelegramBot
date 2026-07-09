@@ -20,6 +20,7 @@ class AdPlacement(StrEnum):
     QUALITY_SELECT = "quality_select"
     HOME = "home"
     HISTORY = "history"
+    ANALYSIS = "analysis"  # after URL analysis / chooser message
     BROADCAST = "broadcast"  # never auto-shown; delivered only via /ad_broadcast
     # Caption layer: text + inline buttons injected into a delivered media's own caption
     # (same message). Captions cannot carry media, so a caption ad is text-only + buttons.
