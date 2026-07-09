@@ -32,6 +32,7 @@ class FakeHistoryRow:
     duration_seconds: int | None = 112
     size_bytes: int | None = 1_900_000
     file_size: int | None = None
+    source_url: str | None = None
     created_at: datetime.datetime = datetime.datetime(2026, 6, 24, tzinfo=datetime.UTC)
 
 
@@ -339,6 +340,44 @@ async def test_render_detail_lines() -> None:
         text = str(message.answer.await_args)
     assert "01:52" in text or "1:52" in text
     assert "1.8" in text or "1.9" in text
+
+
+async def test_render_title_hyperlink_and_number_badge() -> None:
+    # Item #8: the title links to the source (http/https only) and rows use number badges.
+    page = HistoryPage(
+        [FakeHistoryRow(1, title="Rick Astley", source_url="https://youtu.be/dQw4w9WgXcQ")],
+        0, False, False,
+        audio_count=0, video_count=1,
+    )
+    history = FakeHistoryService(page=page)
+    message = AsyncMock(spec=Message)
+    message.answer = AsyncMock()
+
+    await handle_history(
+        message, _session(), _user(), lambda s: history, CallbackSigner("k"), translate, "en"
+    )
+
+    text = message.answer.await_args.args[0]
+    assert '<a href="https://youtu.be/dQw4w9WgXcQ">Rick Astley</a>' in text  # clickable title
+    assert "1️⃣" in text and "1. " not in text  # keycap badge, not plain "1."
+
+
+async def test_render_title_not_linked_for_unsafe_or_missing_url() -> None:
+    # A non-http(s) scheme or a NULL source_url must render as plain (unlinked) text.
+    page = HistoryPage(
+        [FakeHistoryRow(1, title="No Link", source_url="javascript:alert(1)")],
+        0, False, False,
+    )
+    history = FakeHistoryService(page=page)
+    message = AsyncMock(spec=Message)
+    message.answer = AsyncMock()
+
+    await handle_history(
+        message, _session(), _user(), lambda s: history, CallbackSigner("k"), translate, "en"
+    )
+
+    text = message.answer.await_args.args[0]
+    assert "<a href=" not in text and "javascript:" not in text  # unsafe scheme not linked
 
 
 async def test_render_null_duration_size() -> None:

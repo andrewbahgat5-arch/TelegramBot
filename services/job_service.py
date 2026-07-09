@@ -261,6 +261,7 @@ class JobService:
             quality=quality.value,
             file_size=file_size,
             title=info.title,
+            source_url=info.source_url,
             duration_seconds=info.duration,
             size_bytes=file_size,
         )

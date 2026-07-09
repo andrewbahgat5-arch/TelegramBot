@@ -27,6 +27,7 @@ class Download(Base):
     format: Mapped[str] = mapped_column(String(50), nullable=False)
     quality: Mapped[str] = mapped_column(String(20), nullable=False)
     title: Mapped[str | None] = mapped_column(Text)
+    source_url: Mapped[str | None] = mapped_column(Text)  # original link (history title href)
     file_size: Mapped[int | None] = mapped_column(BigInteger)
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)

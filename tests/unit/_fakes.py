@@ -891,6 +891,7 @@ class FakeDownloadRow:
     file_size: int | None
     status: str = "completed"
     title: str | None = None
+    source_url: str | None = None
     duration_seconds: int | None = None
     size_bytes: int | None = None
     id: int = 0
@@ -953,6 +954,7 @@ class FakeDownloadRepo:
         file_size: int | None,
         status: str = "completed",
         title: str | None = None,
+        source_url: str | None = None,
         duration_seconds: int | None = None,
         size_bytes: int | None = None,
     ) -> FakeDownloadRow:
@@ -965,6 +967,7 @@ class FakeDownloadRepo:
             file_size=file_size,
             status=status,
             title=title,
+            source_url=source_url,
             duration_seconds=duration_seconds,
             size_bytes=size_bytes,
             id=self._next_id,

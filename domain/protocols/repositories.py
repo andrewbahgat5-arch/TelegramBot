@@ -351,6 +351,7 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
         file_size: int | None,
         status: str = "completed",
         title: str | None = None,
+        source_url: str | None = None,
         duration_seconds: int | None = None,
         size_bytes: int | None = None,
     ) -> T:

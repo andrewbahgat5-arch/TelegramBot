@@ -54,6 +54,13 @@ _PLATFORM_EMOJI: dict[str, str] = {
 _FILTER_LABELS = {0: None, 1: "audio", 2: "video"}
 _FILTER_INDEX = {v: k for k, v in _FILTER_LABELS.items()}
 
+# Clean numbered badges for history rows (item #8) — keycap emoji for 1 to 10.
+_NUM_BADGES = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
+
+
+def _badge(n: int) -> str:
+    return _NUM_BADGES[n - 1] if 1 <= n <= len(_NUM_BADGES) else f"{n}."
+
 
 def _platform_emoji(platform: str | None) -> str:
     return _PLATFORM_EMOJI.get((platform or "").lower(), "🔗")
@@ -188,8 +195,16 @@ def _render(
     lines = [header, subtitle, ""]
     for index, row in enumerate(page.rows, start=1):
         platform_emoji = _platform_emoji(row.platform)
-        title = escape(row.title[:40]) if row.title else escape(row.format)
-        lines.append(f"{index}. {title}")
+        title_text = escape(row.title[:40]) if row.title else escape(row.format)
+        # Clickable title → original source (item #8). Only http(s) to avoid unsafe
+        # schemes; href is attribute-escaped. Old rows (no source_url) render as plain text.
+        source_url = getattr(row, "source_url", None)
+        title = (
+            f'<a href="{escape(source_url, quote=True)}">{title_text}</a>'
+            if source_url and source_url.startswith(("http://", "https://"))
+            else title_text
+        )
+        lines.append(f"{_badge(index)} {title}")
         detail_parts: list[str] = []
         duration = getattr(row, "duration_seconds", None)
         if duration is not None:
