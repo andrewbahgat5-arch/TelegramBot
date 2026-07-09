@@ -21,20 +21,30 @@ from core.i18n import list_enabled_locales, translate
 OPEN_PICKER_SENTINEL = ""
 
 
-def build_change_language_button(signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
-    """A single "Change Language" button that opens the picker (e.g. under /start)."""
+def build_change_language_button(
+    signer: CallbackSigner, locale: str, origin: str = "s"
+) -> InlineKeyboardMarkup:
+    """A single "Change Language" button that opens the picker (e.g. under /start).
+
+    ``origin`` records the calling screen so the pick reopens it in the new locale (#7).
+    """
     builder = InlineKeyboardBuilder()
     builder.button(
         text=translate("language.change_button", locale),
-        callback_data=signer.pack_language(OPEN_PICKER_SENTINEL),
+        callback_data=signer.pack_language(OPEN_PICKER_SENTINEL, origin),
     )
     return builder.as_markup()
 
 
-def build_language_picker(signer: CallbackSigner) -> InlineKeyboardMarkup:
-    """One button per enabled locale, labeled with its native name."""
+def build_language_picker(signer: CallbackSigner, origin: str = "s") -> InlineKeyboardMarkup:
+    """One button per enabled locale, labeled with its native name.
+
+    ``origin`` is threaded onto each pick so the handler can reopen the source screen (#7).
+    """
     builder = InlineKeyboardBuilder()
     for meta in list_enabled_locales():
-        builder.button(text=meta.native_name, callback_data=signer.pack_language(meta.code))
+        builder.button(
+            text=meta.native_name, callback_data=signer.pack_language(meta.code, origin)
+        )
     builder.adjust(2)
     return builder.as_markup()

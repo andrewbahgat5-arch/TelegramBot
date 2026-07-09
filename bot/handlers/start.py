@@ -30,6 +30,7 @@ from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import AdPlacement
 from services.ad_service import AdService
+from services.queue_service import QueueService
 from services.referral_service import ReferralService
 from services.settings_service import SettingsService
 from services.user_service import UserService
@@ -150,18 +151,20 @@ async def handle_language_callback(
     user_service_factory: UserServiceFactory,
     session: AsyncSession,
     user: UserSnapshot,
+    queue_service: QueueService | None = None,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "l" or parsed.language is None:
         await callback.answer()  # forged/garbled → ignore silently (Section 14.2)
         return
 
+    origin = parsed.origin or "s"  # default to Start for legacy 3-part callbacks (#7)
     if not parsed.language:  # open-picker sentinel
         await callback.answer()
         await _edit_text(
             callback,
             translate("language.picker_prompt", locale),
-            build_language_picker(callback_signer),
+            build_language_picker(callback_signer, origin),
         )
         return
 
@@ -172,6 +175,9 @@ async def handle_language_callback(
         user_service_factory=user_service_factory,
         session=session,
         user=user,
+        signer=callback_signer,
+        origin=origin,
+        queue_service=queue_service,
     )
 
 
@@ -183,11 +189,14 @@ async def apply_language_pick(
     user_service_factory: UserServiceFactory,
     session: AsyncSession,
     user: UserSnapshot,
+    signer: CallbackSigner,
+    origin: str = "s",
+    queue_service: QueueService | None = None,
 ) -> None:
-    """Validate + persist a language pick, then confirm **in the newly chosen
-    locale** — not the request's already-resolved ``data["locale"]``, which
-    reflects the value from *before* this update ran. Shared by the regular
-    ``/start`` entry point and the admin panel's "Language" section.
+    """Validate + persist a language pick, then **reopen the screen it was launched from**
+    in the newly chosen locale (item #7) — Start (``origin="s"``) or the admin panel home
+    (``origin="p"``) — instead of a dead-end confirmation. All text is rendered in ``code``
+    (the new locale), never the request's already-resolved ``data["locale"]`` (pre-update).
     """
     enabled = {meta.code: meta.native_name for meta in list_enabled_locales()}
     if code not in enabled:
@@ -195,8 +204,24 @@ async def apply_language_pick(
         return
 
     await user_service_factory(session).set_language(user.telegram_id, code)
-    await callback.answer()
-    await _edit_text(callback, translate("language.updated", code, native_name=enabled[code]))
+    await callback.answer(translate("language.updated", code, native_name=enabled[code]))
+
+    if origin == "p" and queue_service is not None:
+        from bot.handlers.admin_panel import main_menu_view  # lazy: avoid import cycle
+
+        text, markup = await main_menu_view(
+            user_service_factory(session), queue_service, user.role, signer, translate, code
+        )
+        await _edit_text(callback, text, markup)
+        return
+
+    name = user.first_name or None
+    welcome = (
+        translate("start.welcome_named", code, name=name)
+        if name
+        else translate("start.welcome_anonymous", code)
+    )
+    await _edit_text(callback, welcome, build_change_language_button(signer, code, "s"))
 
 
 async def _edit_text(

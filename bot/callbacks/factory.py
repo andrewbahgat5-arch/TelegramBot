@@ -48,6 +48,7 @@ class ParsedCallback:
     arg: int | None = None  # download_id for "r"; page index for "h"; ad_id for "a"
     button_id: int | None = None  # ad button id for "a" (None = legacy single button)
     language: str | None = None  # locale code for "l"
+    origin: str | None = None  # where the language picker opened from ("s"/"p"), for #7
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,8 +100,10 @@ class CallbackSigner:
         payload = f"hx{_SEP}0"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
-    def pack_language(self, code: str) -> str:
-        payload = f"l{_SEP}{code}"
+    def pack_language(self, code: str, origin: str = "") -> str:
+        # ``origin`` (empty by default) records which screen opened the picker so the pick
+        # can reopen it in the new locale (item #7); legacy 3-part callbacks stay valid.
+        payload = f"l{_SEP}{code}{_SEP}{origin}" if origin else f"l{_SEP}{code}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
     def pack_ad_click(self, ad_id: int, button_id: int | None = None) -> str:
@@ -165,6 +168,8 @@ class CallbackSigner:
                 return ParsedCallback(action="h", arg=int(parts[1]))
             if action == "hx" and len(parts) == 3:
                 return ParsedCallback(action="hx", arg=int(parts[1]))
+            if action == "l" and len(parts) == 4:
+                return ParsedCallback(action="l", language=parts[1], origin=parts[2] or None)
             if action == "l" and len(parts) == 3:
                 return ParsedCallback(action="l", language=parts[1])
             if action == "a" and len(parts) == 3:

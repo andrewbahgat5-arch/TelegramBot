@@ -160,6 +160,21 @@ async def _main_menu_text(
     )
 
 
+async def main_menu_view(
+    users: UserService,
+    queue: QueueService,
+    role: UserRole,
+    signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """(text, keyboard) for the panel home — reused to reopen the panel after a language
+    change (item #7), so the acting staff member lands back where they were."""
+    return await _main_menu_text(users, queue, translate, locale), build_main_menu(
+        role, signer, locale
+    )
+
+
 @router.message(Command("settings"), StaffFilter)
 async def open_settings(
     message: Message,
@@ -1102,7 +1117,8 @@ async def _render(
         text = await _main_menu_text(user_factory(session), queue, translate, locale)
         return text, build_main_menu(role, signer, locale)
     if section == "l":  # personal language preference (Sprint 11.5) — same picker as /start
-        return translate("language.picker_prompt", locale), build_language_picker(signer)
+        # origin "p" so the pick reopens the panel home in the new locale (#7).
+        return translate("language.picker_prompt", locale), build_language_picker(signer, "p")
     if section == "s":
         if action == "inf":
             return _settings_info_text(panel.arg, translate, locale), build_settings_menu(

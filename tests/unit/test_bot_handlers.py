@@ -154,8 +154,10 @@ async def test_language_open_sentinel_shows_picker() -> None:
     assert repo.by_tid[1].language == "en"  # unchanged — this was just "open", not a pick
 
 
-async def test_language_pick_persists_and_confirms_in_new_locale() -> None:
-    callback = _callback(_SIGNER.pack_language("ar"))
+async def test_language_pick_persists_and_reopens_start_in_new_locale() -> None:
+    # Item #7: a pick from Start persists, toasts the confirmation in the new locale, and
+    # reopens the Start screen (in the new locale) instead of a dead-end confirmation.
+    callback = _callback(_SIGNER.pack_language("ar"))  # legacy 3-part -> origin defaults to Start
     repo = FakeUserRepo()
     repo.by_tid[1] = FakeUser(id=1, telegram_id=1, language="en")
     user = UserSnapshot.from_row(repo.by_tid[1])
@@ -165,8 +167,19 @@ async def test_language_pick_persists_and_confirms_in_new_locale() -> None:
     )
 
     assert repo.by_tid[1].language == "ar"
-    confirmation = callback.message.edit_text.await_args.args[0]
-    assert confirmation == translate("language.updated", "ar", native_name="العربية")
+    callback.answer.assert_awaited_with(translate("language.updated", "ar", native_name="العربية"))
+    reopened = callback.message.edit_text.await_args.args[0]
+    assert reopened == translate("start.welcome_anonymous", "ar")  # Start reopened in Arabic
+    kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    assert kb.inline_keyboard[0][0].text == translate("language.change_button", "ar")
+
+
+async def test_language_pick_origin_survives_pack_unpack() -> None:
+    # The picker's origin rides through the signed callback so the pick knows where to return.
+    parsed = _SIGNER.unpack(_SIGNER.pack_language("ar", "p"))
+    assert parsed is not None and parsed.language == "ar" and parsed.origin == "p"
+    legacy = _SIGNER.unpack(_SIGNER.pack_language("ar"))  # 3-part -> no origin
+    assert legacy is not None and legacy.language == "ar" and legacy.origin is None
 
 
 async def test_language_pick_rejects_disabled_or_unknown_code() -> None:
