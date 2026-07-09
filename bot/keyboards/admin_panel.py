@@ -173,10 +173,19 @@ def build_template_list(
 
 
 def build_template_detail(
-    index: int, *, is_custom: bool, signer: CallbackSigner, locale: str
+    index: int,
+    *,
+    is_custom: bool,
+    allow_buttons: bool = False,
+    signer: CallbackSigner,
+    locale: str,
 ) -> InlineKeyboardMarkup:
-    """A template's edit screen: Edit Content, Reset (only if custom), Back (13.8)."""
+    """A template's edit screen: Edit Content, Edit Buttons (if allowed), Reset, Back."""
     rows = [[_btn(signer, translate("panel.templates.edit", locale), "tp", "ed", index)]]
+    if allow_buttons:
+        rows.append(
+            [_btn(signer, translate("panel.templates.edit_buttons", locale), "tp", "edb", index)]
+        )
     if is_custom:
         rows.append([_btn(signer, translate("panel.templates.reset", locale), "tp", "rs", index)])
     rows.append(nav_row(signer, locale, back=("tp", "op")))

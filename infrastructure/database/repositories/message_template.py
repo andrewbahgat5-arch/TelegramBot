@@ -52,6 +52,19 @@ class MessageTemplateRepository(SqlAlchemyRepository[MessageTemplate]):
             )
         await self.session.flush()
 
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
+    ) -> None:
+        """Update the buttons JSONB column for a template."""
+        existing = await self.get(key, locale)
+        if existing is not None:
+            await self.session.execute(
+                update(MessageTemplate)
+                .where(MessageTemplate.key == key, MessageTemplate.locale == locale)
+                .values(buttons=buttons)
+            )
+            await self.session.flush()
+
     async def delete_template(self, key: str, locale: str) -> None:
         """Remove a custom template (revert to the shipped i18n default)."""
         await self.session.execute(

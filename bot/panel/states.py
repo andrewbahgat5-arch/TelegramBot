@@ -35,3 +35,4 @@ class PanelStates(StatesGroup):
     wizard_content = State()
     import_subscribers = State()
     template_edit = State()
+    template_button_edit = State()

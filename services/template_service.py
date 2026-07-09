@@ -31,19 +31,38 @@ class TemplateDef:
     key: str
     i18n_key: str
     placeholders: tuple[str, ...]
+    placeholder_help: tuple[tuple[str, str], ...] = ()
+    allow_buttons: bool = False
 
 
-# The V1 editable set (SPRINT_13_PLAN §13.8 table) — the messages users see most.
 TEMPLATE_DEFS: tuple[TemplateDef, ...] = (
-    TemplateDef("welcome", "user.welcome", ("name",)),
+    TemplateDef(
+        "welcome", "user.welcome", ("name",),
+        placeholder_help=(("name", "Andrew"),),
+    ),
     TemplateDef("help", "user.help", ()),
-    TemplateDef("download_started", "download.started", ("title", "platform")),
-    TemplateDef("download_complete", "download.complete", ("title", "format", "quality")),
-    TemplateDef("download_failed", "download.failed", ("error",)),
-    TemplateDef("daily_limit_reached", "limit.daily_reached", ("limit", "reset_in")),
-    TemplateDef("banned_message", "user.banned", ("reason",)),
-    TemplateDef("cooldown_message", "limit.cooldown", ("seconds",)),
-    TemplateDef("maintenance", "system.maintenance", ()),
+    TemplateDef(
+        "download_started", "download.started", ("title", "platform"),
+        placeholder_help=(("title", "My Video"), ("platform", "YouTube")),
+    ),
+    TemplateDef(
+        "download_failed", "download.failed", ("error",),
+        placeholder_help=(("error", "File too large"),),
+    ),
+    TemplateDef(
+        "daily_limit_reached", "limit.daily_reached", ("limit", "reset_in"),
+        placeholder_help=(("limit", "10"), ("reset_in", "6h")),
+    ),
+    TemplateDef(
+        "banned_message", "user.banned", ("reason",),
+        placeholder_help=(("reason", "Spam"),),
+        allow_buttons=True,
+    ),
+    TemplateDef(
+        "cooldown_message", "limit.cooldown", ("seconds",),
+        placeholder_help=(("seconds", "30"),),
+    ),
+    TemplateDef("maintenance", "system.maintenance", (), allow_buttons=True),
 )
 
 _DEF_BY_KEY: dict[str, TemplateDef] = {d.key: d for d in TEMPLATE_DEFS}
@@ -56,6 +75,9 @@ class MessageTemplateStore(Protocol):
     async def get(self, key: str, locale: str) -> Any | None: ...
     async def upsert(
         self, key: str, locale: str, content: str, *, updated_by: int | None = None
+    ) -> None: ...
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
     ) -> None: ...
     async def delete_template(self, key: str, locale: str) -> None: ...
 
@@ -74,8 +96,8 @@ class TemplateView:
 class TemplateService:
     def __init__(self, store: MessageTemplateStore) -> None:
         self._store = store
-        # (key, locale) -> (content, updated_at) for every custom row.
         self._cache: dict[tuple[str, str], tuple[str, datetime.datetime | None]] = {}
+        self._buttons_cache: dict[tuple[str, str], list[dict[str, str]]] = {}
 
     async def load(self) -> None:
         """Warm the cache from the store and push overrides into core.i18n (startup)."""
@@ -84,6 +106,11 @@ class TemplateService:
             (row.key, row.locale): (row.content, getattr(row, "updated_at", None))
             for row in rows
             if row.key in _DEF_BY_KEY
+        }
+        self._buttons_cache = {
+            (row.key, row.locale): row.buttons
+            for row in rows
+            if row.key in _DEF_BY_KEY and getattr(row, "buttons", None)
         }
         self._sync_overrides()
 
@@ -144,6 +171,40 @@ class TemplateService:
     def definition(self, key: str) -> TemplateDef | None:
         """The registry entry for an editable template key, or None."""
         return _DEF_BY_KEY.get(key)
+
+    def full_content(self, key: str, locale: str) -> str:
+        """Exact stored custom content, or the shipped i18n default (never truncated)."""
+        entry = self._cache.get((key, locale))
+        if entry is not None:
+            return entry[0]
+        definition = _DEF_BY_KEY.get(key)
+        if definition is None:
+            return ""
+        return i18n.catalog_template(definition.i18n_key, locale) or ""
+
+    def buttons_for(self, key: str, locale: str) -> list[dict[str, str]]:
+        """Cached buttons for a template (list of ``{"text":…,"url":…}``); empty if none."""
+        return list(self._buttons_cache.get((key, locale)) or [])
+
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
+    ) -> None:
+        if key not in _DEF_BY_KEY:
+            raise KeyError(f"unknown template key: {key}")
+        await self._store.set_buttons(key, locale, buttons)
+        if buttons:
+            self._buttons_cache[(key, locale)] = buttons
+        else:
+            self._buttons_cache.pop((key, locale), None)
+        _log.info("template_buttons_set", key=key, locale=locale, count=len(buttons or []))
+
+    @staticmethod
+    def validate_placeholders(content: str, definition: TemplateDef) -> list[str]:
+        """Return unknown placeholder names found in ``content``."""
+        import re
+
+        found = set(re.findall(r"\{(\w+)\}", content))
+        return sorted(found - set(definition.placeholders))
 
     def _sync_overrides(self) -> None:
         """Rebuild core.i18n's override map from the current cache (keyed by i18n key)."""

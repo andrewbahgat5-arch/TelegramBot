@@ -145,6 +145,9 @@ async def test_auth_creates_user_with_configured_default_locale_not_telegram_cod
 
 
 async def test_auth_blocks_banned_user() -> None:
+    from bot.middlewares.auth import _reply_timestamps
+
+    _reply_timestamps.clear()
     repo = FakeUserRepo()
     repo.by_tid[1] = FakeUser(id=1, telegram_id=1, is_banned=True)
     mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
@@ -156,10 +159,13 @@ async def test_auth_blocks_banned_user() -> None:
     result = await mw(_ok_handler(calls), cast(TelegramObject, event), data)
     assert result is None
     assert calls == []  # handler skipped
-    event.answer.assert_awaited_once_with(translate("errors.permission_denied", "en"))
+    event.answer.assert_awaited_once_with(translate("user.banned", "en"), reply_markup=None)
 
 
 async def test_auth_banned_callback_query_gets_alert() -> None:
+    from bot.middlewares.auth import _reply_timestamps
+
+    _reply_timestamps.clear()
     repo = FakeUserRepo()
     repo.by_tid[1] = FakeUser(id=1, telegram_id=1, is_banned=True)
     mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")
@@ -171,7 +177,7 @@ async def test_auth_banned_callback_query_gets_alert() -> None:
     result = await mw(_ok_handler(calls), cast(TelegramObject, event), data)
     assert result is None and calls == []
     event.answer.assert_awaited_once_with(
-        translate("errors.permission_denied", "en"), show_alert=True
+        translate("user.banned", "en"), show_alert=True
     )
 
 

@@ -10,6 +10,9 @@
   "errors.file_too_large": "الملف كبير جدًا بحيث لا يمكن إرساله.",
   "errors.rate_limit_exceeded": "طلبات كثيرة جدًا. يرجى الإبطاء.",
 
+  "user.banned": "🚫 أنت محظور من استخدام هذا البوت.",
+  "system.maintenance": "🔧 البوت تحت الصيانة حاليًا. يرجى المحاولة مرة أخرى لاحقًا.",
+
   "notification.preparing": "⏳ جارٍ تجهيز ملفك…",
   "notification.failed": "❌ عذرًا، فشل التنزيل. يرجى المحاولة مرة أخرى.",
 
@@ -378,6 +381,16 @@
   "panel.templates.reset_confirm": "🔴 إعادة <b>{template}</b> إلى الافتراضي؟ سيُحذف النص المخصّص.",
   "panel.templates.reset_done": "تمت الإعادة للافتراضي",
   "panel.templates.empty_content": "لا يمكن أن يكون القالب فارغًا. أرسل نصًا.",
+  "panel.templates.placeholder_legend": "المتغيرات:",
+  "panel.templates.example_label": "مثال:",
+  "panel.templates.example_error": "⚠️ متغير غير صالح في القالب",
+  "panel.templates.unknown_placeholders": "متغيرات غير معروفة: {names}. المسموح: {allowed}",
+  "panel.templates.buttons_label": "الأزرار",
+  "panel.templates.buttons_none": "لا يوجد",
+  "panel.templates.edit_buttons": "🔘 تعديل الأزرار",
+  "panel.templates.buttons_prompt": "أرسل الأزرار (واحد في كل سطر: النص | https://url).\nحد أقصى 3 أزرار. أرسل شرطة (-) للمسح.",
+  "panel.templates.buttons_saved": "تم تحديث الأزرار",
+  "panel.templates.buttons_invalid": "تنسيق غير صالح. استخدم: النص | https://url (واحد في كل سطر، حد أقصى 3).",
 
   "panel.menu.m.check_status": "🔍 فحص الحالة",
   "panel.menu.m.blocked_list": "🚫 المحظورون",

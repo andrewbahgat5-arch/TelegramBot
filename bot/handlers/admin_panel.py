@@ -78,7 +78,7 @@ from bot.panel.registry import (
     setting_field,
 )
 from bot.panel.states import PanelStates
-from core.i18n import Translator, catalog_template, list_enabled_locales
+from core.i18n import Translator, list_enabled_locales
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
@@ -1514,33 +1514,59 @@ def _templates_list_text(translate: Translator, locale: str) -> str:
 
 
 def _template_detail_text(
-    definition: Any, content: str, is_custom: bool, translate: Translator, locale: str
+    definition: Any,
+    content: str,
+    is_custom: bool,
+    translate: Translator,
+    locale: str,
+    *,
+    buttons: list[dict[str, str]] | None = None,
 ) -> str:
-    """Edit screen body: the raw template source, its placeholders, and custom/default."""
+    """Edit screen body: full template content, placeholder legend, example, buttons."""
+    from services.template_service import TemplateDef
+
+    defn: TemplateDef = definition
     status = translate(
         "panel.templates.status_custom" if is_custom else "panel.templates.status_default", locale
     )
-    placeholders = ", ".join(f"{{{name}}}" for name in definition.placeholders) or "—"
-    return "\n".join(
-        [
-            ui.header(
-                translate("panel.templates.edit_title", locale, template=definition.key),
-                icon=ui.emoji("note"),
-            ),
-            "",
-            f"  {translate('panel.templates.content_label', locale)}",
-            "  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
-            escape(content) or "—",
-            "  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄",
-            "",
+    lines = [
+        ui.header(
+            translate("panel.templates.edit_title", locale, template=defn.key),
+            icon=ui.emoji("note"),
+        ),
+        "",
+        f"  {translate('panel.templates.content_label', locale)}",
+        f"<blockquote>{escape(content) or '—'}</blockquote>",
+        "",
+        ui.metric(ui.emoji("check"), translate("panel.templates.status", locale), status),
+    ]
+    if defn.placeholder_help:
+        lines.append("")
+        lines.append(f"  {translate('panel.templates.placeholder_legend', locale)}")
+        for name, example in defn.placeholder_help:
+            lines.append(f"  <code>{{{name}}}</code> → e.g. {escape(example)}")
+        lines.append("")
+        lines.append(f"  {translate('panel.templates.example_label', locale)}")
+        try:
+            example_vals = dict(defn.placeholder_help)
+            lines.append(f"  <i>{escape(content.format(**example_vals))}</i>")
+        except (KeyError, IndexError, ValueError):
+            lines.append(f"  {translate('panel.templates.example_error', locale)}")
+    if defn.allow_buttons:
+        btn_text = (
+            ", ".join(b.get("text", "?") for b in buttons)
+            if buttons
+            else translate("panel.templates.buttons_none", locale)
+        )
+        lines.append("")
+        lines.append(
             ui.metric(
                 ui.emoji("settings"),
-                translate("panel.templates.placeholders", locale),
-                placeholders,
-            ),
-            ui.metric(ui.emoji("check"), translate("panel.templates.status", locale), status),
-        ]
-    )
+                translate("panel.templates.buttons_label", locale),
+                btn_text,
+            )
+        )
+    return "\n".join(lines)
 
 
 async def _template_detail_view(
@@ -1552,11 +1578,21 @@ async def _template_detail_view(
 ) -> tuple[str, InlineKeyboardMarkup]:
     """Build a single template's edit screen (custom content or shipped default)."""
     definition = TEMPLATE_DEFS[index]
-    custom = await template_service.get(definition.key, locale)
-    is_custom = custom is not None
-    content = custom if is_custom else (catalog_template(definition.i18n_key, locale) or "")
-    text = _template_detail_text(definition, content or "", is_custom, translate, locale)
-    return text, build_template_detail(index, is_custom=is_custom, signer=signer, locale=locale)
+    content = template_service.full_content(definition.key, locale)
+    is_custom = await template_service.get(definition.key, locale) is not None
+    buttons = (
+        template_service.buttons_for(definition.key, locale) if definition.allow_buttons else None
+    )
+    text = _template_detail_text(
+        definition, content or "", is_custom, translate, locale, buttons=buttons
+    )
+    return text, build_template_detail(
+        index,
+        is_custom=is_custom,
+        allow_buttons=definition.allow_buttons,
+        signer=signer,
+        locale=locale,
+    )
 
 
 async def _templates_write(
@@ -1579,7 +1615,7 @@ async def _templates_write(
         if isinstance(callback.message, Message):
             await state.set_state(PanelStates.template_edit)
             await state.update_data(
-                template=definition.key,
+                key=definition.key,
                 locale=locale,
                 index=index,
                 chat_id=callback.message.chat.id,
@@ -1588,6 +1624,25 @@ async def _templates_write(
             await _safe_edit(
                 callback.message,
                 translate("panel.templates.edit_prompt", locale, template=definition.key),
+                build_input_prompt(
+                    signer, locale, back=("tp", "inf", index), cancel=("tp", "inf", index)
+                ),
+            )
+        await callback.answer()
+        return
+    if panel.action == "edb" and definition.allow_buttons:  # arm button-edit FSM
+        if isinstance(callback.message, Message):
+            await state.set_state(PanelStates.template_button_edit)
+            await state.update_data(
+                key=definition.key,
+                locale=locale,
+                index=index,
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+            )
+            await _safe_edit(
+                callback.message,
+                translate("panel.templates.buttons_prompt", locale),
                 build_input_prompt(
                     signer, locale, back=("tp", "inf", index), cancel=("tp", "inf", index)
                 ),
@@ -1644,9 +1699,78 @@ async def on_template_edit(
     content = (message.text or "").strip()
     if not content:
         await message.reply(translate("panel.templates.empty_content", locale))
-        return  # keep the state for the next attempt
+        return
+    defn = template_service.definition(key)
+    if defn is not None:
+        unknown = TemplateService.validate_placeholders(content, defn)
+        if unknown:
+            allowed = ", ".join(f"{{{p}}}" for p in defn.placeholders) or "—"
+            await message.reply(
+                translate(
+                    "panel.templates.unknown_placeholders",
+                    locale,
+                    names=", ".join(f"{{{n}}}" for n in unknown),
+                    allowed=allowed,
+                )
+            )
+            return
     await state.clear()
     await template_service.set(key, tlocale, content, updated_by=user.id)
+    text, markup = await _template_detail_view(
+        template_service, index, callback_signer, translate, tlocale
+    )
+    await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup)
+
+
+@router.message(PanelStates.template_button_edit, OwnerFilter)
+async def on_template_button_edit(
+    message: Message,
+    state: FSMContext,
+    bot: Bot,
+    user: UserSnapshot,
+    template_service: TemplateService,
+    callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Parse button lines (Text | url), validate, and persist."""
+    data = await state.get_data()
+    key, tlocale, index = data.get("key"), data.get("locale"), data.get("index")
+    chat_id, message_id = data.get("chat_id"), data.get("message_id")
+    if (
+        not isinstance(key, str)
+        or not isinstance(tlocale, str)
+        or not isinstance(index, int)
+        or chat_id is None
+        or message_id is None
+    ):
+        await state.clear()
+        return
+    raw = (message.text or "").strip()
+    if raw == "-":
+        buttons: list[dict[str, str]] | None = None
+    else:
+        buttons = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|", 1)
+            if len(parts) != 2:
+                await message.reply(translate("panel.templates.buttons_invalid", locale))
+                return
+            text_part, url_part = parts[0].strip(), parts[1].strip()
+            if not text_part or not url_part.startswith(("http://", "https://")):
+                await message.reply(translate("panel.templates.buttons_invalid", locale))
+                return
+            buttons.append({"text": text_part, "url": url_part})
+        if len(buttons) > 3:
+            await message.reply(translate("panel.templates.buttons_invalid", locale))
+            return
+        if not buttons:
+            buttons = None
+    await state.clear()
+    await template_service.set_buttons(key, tlocale, buttons)
     text, markup = await _template_detail_view(
         template_service, index, callback_signer, translate, tlocale
     )

@@ -8,8 +8,10 @@ absent the default is used (the row is deleted on "reset to default").
 from __future__ import annotations
 
 import datetime
+from typing import Any
 
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.database.models.base import Base
@@ -22,6 +24,7 @@ class MessageTemplate(Base):
     locale: Mapped[str] = mapped_column(String(10), primary_key=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    buttons: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
     updated_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )

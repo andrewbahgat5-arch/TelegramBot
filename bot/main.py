@@ -155,7 +155,12 @@ def build_dispatcher(
     dp.update.outer_middleware(LoggingMiddleware())
     dp.update.outer_middleware(DbSessionMiddleware(session_factory))
 
-    auth = AuthMiddleware(user_service_factory, default_locale=settings.default_locale)
+    auth = AuthMiddleware(
+        user_service_factory,
+        default_locale=settings.default_locale,
+        settings_service_factory=settings_service_factory,
+        template_service=template_service,
+    )
     locale = LocaleMiddleware()
     throttle = ThrottleMiddleware(rate_limit_service_factory)
     for observer in (dp.message, dp.callback_query):

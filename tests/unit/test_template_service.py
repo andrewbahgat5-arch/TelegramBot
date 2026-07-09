@@ -20,6 +20,7 @@ class _Row:
         self.key = key
         self.locale = locale
         self.content = content
+        self.buttons: list[dict[str, str]] | None = None
         self.updated_at = datetime.datetime(2026, 7, 5, tzinfo=datetime.UTC)
 
 
@@ -37,6 +38,13 @@ class FakeTemplateStore:
         self, key: str, locale: str, content: str, *, updated_by: int | None = None
     ) -> None:
         self.rows[(key, locale)] = _Row(key, locale, content)
+
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
+    ) -> None:
+        row = self.rows.get((key, locale))
+        if row is not None:
+            row.buttons = buttons
 
     async def delete_template(self, key: str, locale: str) -> None:
         self.rows.pop((key, locale), None)
@@ -121,4 +129,42 @@ async def test_list_all_marks_custom_vs_default(tmp_path: Path) -> None:
     assert views["welcome"].content_preview == "Custom welcome"
     assert views["help"].is_custom is False
     assert views["help"].content_preview == "Default help text."
-    assert len(views) == 9  # every editable key present
+    assert len(views) == 8  # every editable key present
+
+
+async def test_full_content_returns_custom_when_set() -> None:
+    svc = TemplateService(FakeTemplateStore())
+    await svc.set("welcome", "en", "Hi {name}!", updated_by=1)
+    assert svc.full_content("welcome", "en") == "Hi {name}!"
+
+
+async def test_full_content_falls_back_to_catalog(tmp_path: Path) -> None:
+    _configure_temp_catalog(tmp_path)
+    svc = TemplateService(FakeTemplateStore())
+    assert svc.full_content("welcome", "en") == "Welcome {name}!"
+
+
+async def test_validate_placeholders_detects_unknown() -> None:
+    from services.template_service import TEMPLATE_DEFS
+
+    defn = next(d for d in TEMPLATE_DEFS if d.key == "welcome")
+    assert TemplateService.validate_placeholders("Hi {name}!", defn) == []
+    assert TemplateService.validate_placeholders("Hi {name} {foo}!", defn) == ["foo"]
+
+
+async def test_buttons_for_round_trip() -> None:
+    store = FakeTemplateStore()
+    svc = TemplateService(store)
+    await svc.set("banned_message", "en", "Banned: {reason}", updated_by=1)
+    buttons = [{"text": "Appeal", "url": "https://example.com"}]
+    await svc.set_buttons("banned_message", "en", buttons)
+    assert svc.buttons_for("banned_message", "en") == buttons
+    await svc.set_buttons("banned_message", "en", None)
+    assert svc.buttons_for("banned_message", "en") == []
+
+
+async def test_download_complete_removed_from_defs() -> None:
+    from services.template_service import TEMPLATE_DEFS
+
+    keys = {d.key for d in TEMPLATE_DEFS}
+    assert "download_complete" not in keys

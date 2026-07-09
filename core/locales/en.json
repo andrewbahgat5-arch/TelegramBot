@@ -10,6 +10,9 @@
   "errors.file_too_large": "The file is too large to send.",
   "errors.rate_limit_exceeded": "Too many requests. Please slow down.",
 
+  "user.banned": "🚫 You are banned from using this bot.",
+  "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",
+
   "notification.preparing": "⏳ Preparing your file…",
   "notification.failed": "❌ Sorry, that download failed. Please try again.",
 
@@ -378,6 +381,16 @@
   "panel.templates.reset_confirm": "🔴 Reset <b>{template}</b> to the built-in default? This deletes the custom text.",
   "panel.templates.reset_done": "Reverted to default",
   "panel.templates.empty_content": "The template can't be empty. Send some text.",
+  "panel.templates.placeholder_legend": "Placeholders:",
+  "panel.templates.example_label": "Example result:",
+  "panel.templates.example_error": "⚠️ Invalid placeholder in template",
+  "panel.templates.unknown_placeholders": "Unknown placeholders: {names}. Allowed: {allowed}",
+  "panel.templates.buttons_label": "Buttons",
+  "panel.templates.buttons_none": "None",
+  "panel.templates.edit_buttons": "🔘 Edit Buttons",
+  "panel.templates.buttons_prompt": "Send buttons (one per line: Text | https://url).\nMax 3 buttons. Send a single dash (-) to clear.",
+  "panel.templates.buttons_saved": "Buttons updated",
+  "panel.templates.buttons_invalid": "Invalid format. Use: Text | https://url (one per line, max 3).",
 
   "panel.menu.m.check_status": "🔍 Check Status",
   "panel.menu.m.blocked_list": "🚫 Blocked",

@@ -157,6 +157,7 @@ class _FakeTemplates:
         self.custom: dict[tuple[str, str], str] = {}
         self.saved: list[tuple[str, str, str, int]] = []
         self.reset_calls: list[tuple[str, str]] = []
+        self._buttons: dict[tuple[str, str], list[dict[str, str]]] = {}
 
     async def list_all(self, locale: str) -> list[Any]:
         from services.template_service import TEMPLATE_DEFS
@@ -182,6 +183,25 @@ class _FakeTemplates:
     async def reset(self, key: str, locale: str) -> None:
         self.reset_calls.append((key, locale))
         self.custom.pop((key, locale), None)
+
+    def full_content(self, key: str, locale: str) -> str:
+        return self.custom.get((key, locale), "default content")
+
+    def buttons_for(self, key: str, locale: str) -> list[dict[str, str]]:
+        return list(self._buttons.get((key, locale)) or [])
+
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
+    ) -> None:
+        if buttons:
+            self._buttons[(key, locale)] = buttons
+        else:
+            self._buttons.pop((key, locale), None)
+
+    def definition(self, key: str) -> Any:
+        from services.template_service import TEMPLATE_DEFS
+
+        return next((d for d in TEMPLATE_DEFS if d.key == key), None)
 
 
 class _FakeHealthChecker:
