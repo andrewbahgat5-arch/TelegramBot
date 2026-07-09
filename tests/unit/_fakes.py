@@ -1212,6 +1212,22 @@ class FakeBroadcastRepo:
     async def list_all(self) -> Sequence[Any]:
         return list(reversed(self.rows))
 
+    async def list_by_language(
+        self, language: str | None, *, limit: int, offset: int
+    ) -> Sequence[FakeBroadcastRow]:
+        filtered = [b for b in reversed(self.rows) if b.target_language == language]
+        return filtered[offset : offset + limit]
+
+    async def count_by_language(self, language: str | None) -> int:
+        return sum(1 for b in self.rows if b.target_language == language)
+
+    async def delete_broadcast(self, broadcast_id: int) -> bool:
+        row = await self.get_by_id(broadcast_id)
+        if row is None:
+            return False
+        self.rows.remove(row)
+        return True
+
     async def get_next_pending(
         self, *, now: datetime.datetime | None = None
     ) -> FakeBroadcastRow | None:

@@ -5,7 +5,8 @@ from __future__ import annotations
 import datetime
 from collections.abc import Sequence
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import func, or_, select, update
 
 from infrastructure.database.models import Broadcast
 from infrastructure.database.repositories.base import SqlAlchemyRepository
@@ -58,6 +59,37 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
         """Every saved broadcast (draft + pending + completed), newest first (Save/Publish flow)."""
         result = await self.session.execute(select(Broadcast).order_by(Broadcast.id.desc()))
         return result.scalars().all()
+
+    async def list_by_language(
+        self, language: str | None, *, limit: int, offset: int
+    ) -> Sequence[Broadcast]:
+        clause = (
+            Broadcast.target_language.is_(None)
+            if language is None
+            else Broadcast.target_language == language
+        )
+        result = await self.session.execute(
+            select(Broadcast).where(clause).order_by(Broadcast.id.desc()).limit(limit).offset(offset)
+        )
+        return result.scalars().all()
+
+    async def count_by_language(self, language: str | None) -> int:
+        clause = (
+            Broadcast.target_language.is_(None)
+            if language is None
+            else Broadcast.target_language == language
+        )
+        result = await self.session.execute(
+            select(func.count()).select_from(Broadcast).where(clause)
+        )
+        return result.scalar_one()
+
+    async def delete_broadcast(self, broadcast_id: int) -> bool:
+        result = await self.session.execute(
+            sa_delete(Broadcast).where(Broadcast.id == broadcast_id)
+        )
+        await self.session.flush()
+        return (result.rowcount or 0) > 0
 
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> Broadcast | None:
         """Oldest **due** ``pending`` broadcast, FIFO by id (16.8 step 1; 9.5.10 due-poller).

@@ -279,12 +279,17 @@
 
   "panel.broadcast.title": "Broadcast",
   "panel.broadcast.subtitle": "Choose a language, then compose your message.",
-  "panel.broadcast.en_header": "🇬🇧 English Broadcasts",
-  "panel.broadcast.ar_header": "🇸🇦 Arabic Broadcasts",
   "panel.broadcast.list_title": "Saved Broadcasts",
   "panel.broadcast.list_empty": "No saved broadcasts yet.",
   "panel.broadcast.detail_title": "Broadcast #{id}",
   "panel.broadcast.publish_btn": "📢 Publish Now",
+  "panel.broadcast.publish_confirm": "Publish broadcast #{id}? This will send it to all matching users.",
+  "panel.broadcast.delete_confirm": "Delete broadcast #{id}?",
+  "panel.broadcast.deleted": "🗑 Deleted broadcast #{id}",
+  "panel.broadcast.not_found": "Broadcast not found.",
+  "panel.broadcast.not_draft": "Only drafts can be published.",
+  "panel.broadcast.cannot_delete_active": "Cannot delete while sending.",
+  "panel.broadcast.pick_language": "Pick a language to view broadcasts:",
 
   "panel.stats.body": "📊 <b>Statistics</b>\nUsers: <b>{total}</b> (⭐ {premium} premium · 🛡 {staff} staff · 🚫 {banned} banned)\nJoined today: <b>{today}</b> · last 7 days: {week}\nActive today: <b>{active_today}</b>\nLifetime downloads: <b>{downloads}</b>\nQueue: <b>{depth}</b> waiting · {active} in flight",
 

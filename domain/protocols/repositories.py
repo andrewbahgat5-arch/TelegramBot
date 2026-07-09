@@ -386,6 +386,20 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         """Every saved broadcast (draft + pending + completed), newest first."""
         ...
 
+    async def list_by_language(
+        self, language: str | None, *, limit: int, offset: int
+    ) -> Sequence[T]:
+        """Broadcasts filtered by target_language, paginated, newest first."""
+        ...
+
+    async def count_by_language(self, language: str | None) -> int:
+        """Count broadcasts for a language filter."""
+        ...
+
+    async def delete_broadcast(self, broadcast_id: int) -> bool:
+        """Delete a broadcast by id. Returns True if deleted."""
+        ...
+
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> T | None:
         """Oldest **due** ``pending`` broadcast for the worker (16.8; 9.5.10 due-poller).
 

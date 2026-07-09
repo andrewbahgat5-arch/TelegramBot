@@ -279,12 +279,17 @@
 
   "panel.broadcast.title": "البث",
   "panel.broadcast.subtitle": "اختر اللغة، ثم أنشئ رسالتك.",
-  "panel.broadcast.en_header": "🇬🇧 البث الإنجليزي",
-  "panel.broadcast.ar_header": "🇸🇦 البث العربي",
   "panel.broadcast.list_title": "البث المحفوظ",
   "panel.broadcast.list_empty": "لا يوجد بث محفوظ بعد.",
   "panel.broadcast.detail_title": "البث #{id}",
   "panel.broadcast.publish_btn": "📢 نشر الآن",
+  "panel.broadcast.publish_confirm": "نشر البث #{id}؟ سيتم إرساله لجميع المستخدمين المطابقين.",
+  "panel.broadcast.delete_confirm": "حذف البث #{id}؟",
+  "panel.broadcast.deleted": "🗑 تم حذف البث #{id}",
+  "panel.broadcast.not_found": "البث غير موجود.",
+  "panel.broadcast.not_draft": "يمكن نشر المسودات فقط.",
+  "panel.broadcast.cannot_delete_active": "لا يمكن الحذف أثناء الإرسال.",
+  "panel.broadcast.pick_language": "اختر لغة لعرض البث:",
 
   "panel.stats.body": "📊 <b>الإحصائيات</b>\nالمستخدمون: <b>{total}</b> (⭐ {premium} بريميوم · 🛡 {staff} طاقم · 🚫 {banned} محظور)\nانضم اليوم: <b>{today}</b> · آخر 7 أيام: {week}\nنشط اليوم: <b>{active_today}</b>\nإجمالي التنزيلات: <b>{downloads}</b>\nقائمة الانتظار: <b>{depth}</b> بالانتظار · {active} قيد التنفيذ",
 

@@ -436,43 +436,50 @@ def _broadcast_button_label(broadcast: Any) -> str:
 
 
 def build_broadcast_list(
-    broadcasts: Sequence[Any], signer: CallbackSigner, locale: str
+    broadcasts: Sequence[Any],
+    signer: CallbackSigner,
+    locale: str,
+    *,
+    lang_index: int = 0,
+    page: int = 0,
+    has_prev: bool = False,
+    has_next: bool = False,
 ) -> InlineKeyboardMarkup:
-    """Saved broadcasts (Broadcast section "Saved"), grouped by language (Publish/Save flow).
+    """Paginated broadcast list for a single language filter."""
+    from bot.callbacks.paging import encode_filter_page
 
-    Each language gets its own header + rows, so an admin composing for one audience never
-    has to scan the other's campaigns; broadcasts with no language recorded (legacy, before
-    the language-first flow) render ungrouped at the end.
-    """
-    en_rows = [b for b in broadcasts if getattr(b, "target_language", None) == "en"]
-    ar_rows = [b for b in broadcasts if getattr(b, "target_language", None) == "ar"]
-    other_rows = [b for b in broadcasts if getattr(b, "target_language", None) not in ("en", "ar")]
-    rows: list[list[InlineKeyboardButton]] = []
-    if en_rows:
-        hdr = translate("panel.broadcast.en_header", locale)
-        rows.append(
-            [InlineKeyboardButton(text=hdr, callback_data="P|noop")]
-        )
-        rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in en_rows]
-    if ar_rows:
-        hdr = translate("panel.broadcast.ar_header", locale)
-        rows.append(
-            [InlineKeyboardButton(text=hdr, callback_data="P|noop")]
-        )
-        rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in ar_rows]
-    rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in other_rows]
-    rows.append(nav_row(signer, locale, back=("b", "op")))
+    rows: list[list[InlineKeyboardButton]] = [
+        [_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in broadcasts
+    ]
+    nav: list[InlineKeyboardButton] = []
+    if has_prev:
+        arg_prev = encode_filter_page(lang_index, page - 1)
+        nav.append(_btn(signer, translate("common.prev", locale), "b", "lsl", arg_prev))
+    if has_next:
+        arg_next = encode_filter_page(lang_index, page + 1)
+        nav.append(_btn(signer, translate("common.next", locale), "b", "lsl", arg_next))
+    if nav:
+        rows.append(nav)
+    rows.append(nav_row(signer, locale, back=("b", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_broadcast_detail(
     broadcast: Any, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
-    """A saved broadcast's detail screen: Publish Now (drafts only) + Back to the list."""
+    """A broadcast's management page: Publish/Edit (drafts), Delete (non-active), Back."""
+    bid = broadcast.id
+    status = getattr(broadcast, "status", "")
     rows: list[list[InlineKeyboardButton]] = []
-    if getattr(broadcast, "status", None) == "draft":
-        label = translate("panel.broadcast.publish_btn", locale)
-        rows.append([_btn(signer, label, "b", "pbd", broadcast.id)])
+    if status == "draft":
+        rows.append([
+            _btn(signer, translate("panel.broadcast.publish_btn", locale), "b", "pbd", bid),
+            _btn(signer, translate("panel.action.edit", locale), "b", "bed", bid),
+        ])
+    if status not in ("pending", "in_progress"):
+        rows.append([
+            _btn(signer, translate("panel.action.delete", locale), "b", "bde", bid),
+        ])
     rows.append(nav_row(signer, locale, back=("b", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -202,6 +202,31 @@ class BroadcastService:
         """Every saved broadcast (draft + pending + completed), newest first."""
         return list(await self._broadcasts.list_all())
 
+    async def list_saved_page(
+        self,
+        language: str | None,
+        *,
+        page: int = 0,
+        page_size: int = 5,
+    ) -> tuple[list[Any], int, bool, bool]:
+        """Paginated broadcasts for a language. Returns (rows, page, has_prev, has_next)."""
+        offset = page * page_size
+        rows = list(
+            await self._broadcasts.list_by_language(language, limit=page_size + 1, offset=offset)
+        )
+        has_next = len(rows) > page_size
+        if has_next:
+            rows = rows[:page_size]
+        return rows, page, page > 0, has_next
+
+    async def delete_broadcast(self, broadcast_id: int) -> bool:
+        broadcast = await self._broadcasts.get_by_id(broadcast_id)
+        if broadcast is None:
+            return False
+        if broadcast.status in ("pending", "in_progress"):
+            raise InvalidBroadcastError("Cannot delete while sending.")
+        return await self._broadcasts.delete_broadcast(broadcast_id)
+
     async def create_from_ad(
         self,
         *,

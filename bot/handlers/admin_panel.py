@@ -309,21 +309,81 @@ async def panel_write(
         )
         return
     if panel.section == "b" and panel.action == "pbd" and panel.arg is not None:
+        bc_svc = broadcast_service_factory(session)
+        bc = await bc_svc.get_broadcast(panel.arg)
+        if bc is None or bc.status != "draft":
+            await callback.answer(translate("panel.broadcast.not_draft", locale), show_alert=True)
+            return
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.broadcast.publish_confirm", locale, id=bc.id),
+                build_confirm(
+                    callback_signer,
+                    locale,
+                    confirm=("b", "pbc", panel.arg, None),
+                    cancel=("b", "inf", panel.arg),
+                ),
+            )
+        await callback.answer()
+        return
+    if panel.section == "b" and panel.action == "pbc" and panel.arg is not None:
         try:
             bc = await broadcast_service_factory(session).publish_draft(panel.arg)
         except InvalidBroadcastError as exc:
             await callback.answer(str(exc), show_alert=True)
             return
-        if isinstance(callback.message, Message):
-            broadcasts = await broadcast_service_factory(session).list_saved()
-            await _safe_edit(
-                callback.message,
-                _broadcast_list_text(broadcasts, translate, locale),
-                build_broadcast_list(broadcasts, callback_signer, locale),
-            )
         await callback.answer(
             translate("panel.wizard.broadcast_published", locale, id=bc.id, count=bc.expected_total)
         )
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                _broadcast_detail_text(bc, translate, locale),
+                build_broadcast_detail(bc, callback_signer, locale),
+            )
+        return
+    if panel.section == "b" and panel.action == "bde" and panel.arg is not None:
+        bc = await broadcast_service_factory(session).get_broadcast(panel.arg)
+        if bc is None:
+            await callback.answer(translate("panel.broadcast.not_found", locale), show_alert=True)
+            return
+        if bc.status in ("pending", "in_progress"):
+            await callback.answer(
+                translate("panel.broadcast.cannot_delete_active", locale), show_alert=True
+            )
+            return
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.broadcast.delete_confirm", locale, id=bc.id),
+                build_confirm(
+                    callback_signer,
+                    locale,
+                    confirm=("b", "bdc", panel.arg, None),
+                    cancel=("b", "inf", panel.arg),
+                ),
+            )
+        await callback.answer()
+        return
+    if panel.section == "b" and panel.action == "bdc" and panel.arg is not None:
+        try:
+            deleted = await broadcast_service_factory(session).delete_broadcast(panel.arg)
+        except InvalidBroadcastError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        toast = (
+            translate("panel.broadcast.deleted", locale, id=panel.arg)
+            if deleted
+            else translate("panel.broadcast.not_found", locale)
+        )
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                _broadcast_text(translate, locale),
+                build_language_chooser("b", "lsl", callback_signer, locale),
+            )
+        await callback.answer(toast)
         return
     if panel.section == "s":  # Settings stepper / guided entry (9.6.5, 9.6.7)
         await _settings_write(
@@ -1107,9 +1167,30 @@ async def _render(
         )
     if section == "b":
         if action == "ls":
-            broadcasts = await broadcast_factory(session).list_saved()
-            return _broadcast_list_text(broadcasts, translate, locale), build_broadcast_list(
-                broadcasts, signer, locale
+            return _broadcast_text(translate, locale), build_language_chooser(
+                "b", "lsl", signer, locale
+            )
+        if action == "lsl" and panel.arg is not None:
+            from bot.callbacks.paging import decode_filter_page
+
+            lang_index, page = decode_filter_page(panel.arg)
+            locales = list_enabled_locales()
+            bc_lang: str | None
+            if 0 <= lang_index < len(locales):
+                bc_lang = locales[lang_index].code
+            elif lang_index == len(locales):
+                bc_lang = None
+            else:
+                return _broadcast_text(translate, locale), build_section_menu(
+                    "b", role, signer, locale
+                )
+            bc_svc = broadcast_factory(session)
+            rows, pg, has_prev, has_next = await bc_svc.list_saved_page(
+                bc_lang, page=page, page_size=5
+            )
+            return _broadcast_list_text(rows, translate, locale), build_broadcast_list(
+                rows, signer, locale,
+                lang_index=lang_index, page=pg, has_prev=has_prev, has_next=has_next,
             )
         if action == "inf" and panel.arg is not None:
             broadcast = await broadcast_factory(session).get_broadcast(panel.arg)
@@ -2029,26 +2110,13 @@ def _broadcast_list_text(
     hdr = ui.header(translate("panel.broadcast.list_title", locale), icon=ui.emoji("broadcast"))
     if not broadcasts:
         return f"{hdr}\n\n{translate('panel.broadcast.list_empty', locale)}"
-    en = [b for b in broadcasts if getattr(b, "target_language", None) == "en"]
-    ar = [b for b in broadcasts if getattr(b, "target_language", None) == "ar"]
-    other = [b for b in broadcasts if getattr(b, "target_language", None) not in ("en", "ar")]
     lines: list[str] = [hdr, ""]
-    for label_key, group in (
-        ("panel.broadcast.en_header", en),
-        ("panel.broadcast.ar_header", ar),
-    ):
-        if group:
-            lines.append(f"<b>{translate(label_key, locale)}</b>")
-            for b in group:
-                status_icon = {"draft": "📝", "pending": "⏳", "completed": "✅"}.get(
-                    getattr(b, "status", ""), "📣"
-                )
-                preview = (getattr(b, "message_text", "") or "")[:40].strip() or "—"
-                lines.append(f"  {status_icon} #{b.id} {escape(preview)}")
-            lines.append("")
-    for b in other:
-        lines.append(f"  📣 #{b.id}")
-    lines.append(ui.footer())
+    lines.append(
+        ui.metric(
+            ui.emoji("broadcast"), translate("panel.ads.count_label", locale), len(broadcasts)
+        )
+    )
+    lines += ["", ui.footer()]
     return "\n".join(lines)
 
 
