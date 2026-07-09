@@ -890,6 +890,7 @@ class FakeDownloadRow:
     quality: str
     file_size: int | None
     status: str = "completed"
+    title: str | None = None
     id: int = 0
     created_at: datetime.datetime = field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
@@ -935,6 +936,7 @@ class FakeDownloadRepo:
         quality: str,
         file_size: int | None,
         status: str = "completed",
+        title: str | None = None,
     ) -> FakeDownloadRow:
         row = FakeDownloadRow(
             user_id=user_id,
@@ -944,6 +946,7 @@ class FakeDownloadRepo:
             quality=quality,
             file_size=file_size,
             status=status,
+            title=title,
             id=self._next_id,
         )
         self._next_id += 1
@@ -1162,6 +1165,7 @@ class FakeBroadcastRepo:
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
         audience_expression_id: int | None = None,
+        status: str = "pending",
     ) -> FakeBroadcastRow:
         row = FakeBroadcastRow(
             id=self._next_id,
@@ -1173,11 +1177,14 @@ class FakeBroadcastRepo:
             advertisement_id=advertisement_id,
             scheduled_at=scheduled_at,
             audience_expression_id=audience_expression_id,
-            status="pending",
+            status=status,
         )
         self._next_id += 1
         self.rows.append(row)
         return row
+
+    async def list_all(self) -> Sequence[Any]:
+        return list(reversed(self.rows))
 
     async def get_next_pending(
         self, *, now: datetime.datetime | None = None
@@ -1271,6 +1278,7 @@ class FakeAdRow:
     last_shown_at: datetime.datetime | None = None
     internal_name: str | None = None
     internal_notes: str | None = None
+    target_language: str | None = None
 
 
 class FakeAdRepo:
@@ -1350,6 +1358,7 @@ class FakeAdRepo:
         scheduled_at: datetime.datetime | None = None,
         internal_name: str | None = None,
         internal_notes: str | None = None,
+        target_language: str | None = None,
     ) -> FakeAdRow:
         row = FakeAdRow(
             id=self._next_id,
@@ -1372,6 +1381,7 @@ class FakeAdRepo:
             scheduled_at=scheduled_at,
             internal_name=internal_name,
             internal_notes=internal_notes,
+            target_language=target_language,
         )
         self._next_id += 1
         self.by_id[row.id] = row

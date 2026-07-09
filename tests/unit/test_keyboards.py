@@ -59,7 +59,9 @@ def test_quality_keyboard_lists_qualities_for_format() -> None:
 class _HistRow:
     id: int
     platform: str = "youtube"
+    format: str = "video"
     quality: str = "720p"
+    title: str | None = "A Clip"
     created_at: datetime.datetime = datetime.datetime(2026, 6, 24, tzinfo=datetime.UTC)
 
 

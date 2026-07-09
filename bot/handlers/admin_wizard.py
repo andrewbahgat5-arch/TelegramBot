@@ -71,24 +71,6 @@ _DATA_KEY = "wizard"
 _AUDIENCE_MODES = ("all", "include", "exclude")
 _SECTION_FOR_KIND = {"ad": "a", "broadcast": "b"}
 
-# Broadcast-menu audience shortcuts (#1): the Free / Premium / All / By-language buttons
-# open the same wizard with the audience pre-seeded, so the admin lands ready to compose
-# instead of re-picking a target they already chose from the menu. "By language" seeds no
-# rule (the admin taps the Language option once on the Audience screen). "cr" (Create) and
-# any unknown action start from a clean All audience.
-_BROADCAST_PRESETS: dict[str, tuple[str, list[list[str]]]] = {
-    "bf": ("include", [["include", "plan", "free"]]),
-    "bp": ("include", [["include", "plan", "premium"]]),
-    "ba": ("all", []),
-    "bl": ("all", []),
-    "cr": ("all", []),
-}
-
-
-def _preset_audience(preset: str | None) -> tuple[str, list[list[str]]]:
-    mode, rules = _BROADCAST_PRESETS.get(preset or "cr", ("all", []))
-    return mode, [list(rule) for rule in rules]
-
 
 # --- state plumbing -------------------------------------------------------
 def _load(data: dict[str, object]) -> WizardState | None:
@@ -118,24 +100,25 @@ async def start(
     locale: str,
     *,
     kind: WizardKind,
-    preset: str | None = None,
+    target_language: str | None = None,
 ) -> None:
     """Open the wizard at its first real step (Audience).
 
     The ``kind`` (Ad vs Broadcast) is fixed by the section the admin entered from, so the
-    wizard never re-asks it (#1/#2). ``preset`` seeds the audience from a Broadcast-menu
-    shortcut (Free / Premium / All / By-language).
+    wizard never re-asks it (#1/#2). ``target_language`` seeds the language picked on the
+    Ads/Broadcast menu before the wizard opened (language-first creation) — never re-asked;
+    for broadcasts it also scopes delivery to that language (see :func:`_save_broadcast`).
+    The wizard always opens on a clean ``all`` audience; the admin narrows it (plan, extra
+    rules) on the Audience screen.
     """
     if not isinstance(callback.message, Message):
         await callback.answer()
         return
     await state.set_state(None)
-    mode, rules = _preset_audience(preset)
     ws = WizardState(
         kind=kind,
         step=first_step(kind),
-        audience_mode=mode,
-        rules=rules,
+        target_language=target_language,
         chat_id=callback.message.chat.id,
         message_id=callback.message.message_id,
     )
@@ -234,10 +217,14 @@ async def dispatch(
     if action == "cx":  # defensive: Cancel is a read action, normally routed via cancel()
         await cancel(callback, state, signer, translate, locale)
         return
-    if action in {"sv", "svk", "svr"}:
+    if action in {"sv", "svk", "svr", "pb"}:
         if action in {"svk", "svr"}:  # answer to the post-download conflict warning (#9)
             ws.conflict_ack = True
             ws.conflict_replace = action == "svr"
+        if action == "pb":  # Publish (broadcasts only): send now, and save automatically
+            ws.publish = True
+        elif action == "sv":  # Save (broadcasts: draft, never sent; ads: the only Save)
+            ws.publish = False
         await _save(
             callback,
             state,
@@ -477,7 +464,7 @@ def _apply_text(
     if field == "no":
         ws.internal_notes = raw or None
         return None
-    if field == "button":
+    if field == "ba":
         text, _, url = raw.partition("|")
         text, url = text.strip(), url.strip()
         if not text or not url.startswith(("http://", "https://", "tg://")):
@@ -848,6 +835,8 @@ def _ad_fields(ws: WizardState) -> dict[str, str]:
         fields["internal_name"] = ws.internal_name
     if ws.internal_notes:
         fields["notes"] = ws.internal_notes
+    if ws.target_language:
+        fields["language"] = ws.target_language
     if ws.content_mode == "copy":
         fields["delivery"] = "copy"
     else:
@@ -934,8 +923,21 @@ async def _save_broadcast(
     translate: Translator,
     locale: str,
 ) -> str:
+    """Publish (send now) or Save (draft, never sent) — both persist the composition.
+
+    Publish also saves automatically: the only difference is the stored ``status``
+    (``pending`` vs ``draft``), so the same audience/content assembly below covers both.
+    """
     casts = broadcast_service_factory(session)
     rules = [AudienceRuleSpec(e, d, v) for e, d, v in ws.rules]
+    # Language-first delivery: the language picked before the wizard opened scopes the
+    # audience, so an English broadcast reaches only English users. Injected as an INCLUDE
+    # language rule (ANDed with any plan/other includes the admin added); it activates the
+    # include path even when the admin left the mode on "all". (An admin who deliberately
+    # switches to "exclude" mode overrides this — includes are ignored there by design.)
+    if ws.target_language and not any(r.dimension == "language" for r in rules):
+        rules.append(AudienceRuleSpec("include", "language", ws.target_language))
+    status = "pending" if ws.publish else "draft"
     if ws.content_mode == "copy":
         ads = ad_service_factory(session)
         # "Broadcast" fallback title: same reasoning as _ad_fields — a fixed literal, not
@@ -951,16 +953,25 @@ async def _save_broadcast(
         broadcast = await casts.create_from_ad(
             created_by_user_id=user.id,
             advertisement_id=ad.id,
+            target_language=ws.target_language,
             audience_mode=ws.audience_mode,
             audience_rules=rules,
+            status=status,
         )
     else:
         broadcast = await casts.create(
             created_by_user_id=user.id,
             message_text=ws.content_text or "",
+            target_language=ws.target_language,
             audience_mode=ws.audience_mode,
             audience_rules=rules,
+            status=status,
         )
-    return translate(
-        "panel.wizard.broadcast_queued", locale, id=broadcast.id, count=broadcast.expected_total
-    )
+    if ws.publish:
+        return translate(
+            "panel.wizard.broadcast_published",
+            locale,
+            id=broadcast.id,
+            count=broadcast.expected_total,
+        )
+    return translate("panel.wizard.broadcast_saved", locale, id=broadcast.id)

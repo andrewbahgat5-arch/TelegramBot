@@ -338,3 +338,21 @@ async def test_select_caption_ad_skips_ad_with_no_text() -> None:
     service, repo, _, _, _ = _build()
     repo.by_id[1] = FakeAdRow(id=1, title="C", content_text=None, placement="caption")
     assert await _select_caption(service) is None
+
+
+async def test_select_caption_ad_respects_target_language() -> None:
+    # Language-first ads: an English-targeted ad shows only to English viewers; an untargeted
+    # ad (target_language IS NULL) is unaffected. Mirrors the target_role scalar filter.
+    service, repo, _, _, _ = _build()
+    repo.by_id[1] = FakeAdRow(
+        id=1,
+        title="C",
+        content_text="Subscribe!",
+        placement="caption",
+        show_every_n_downloads=1,
+        target_language="en",
+    )
+    assert await _select_caption(service, language="ar") is None  # wrong language: skipped
+    assert await _select_caption(service, language=None) is None  # unknown language: skipped
+    ad = await _select_caption(service, language="en")  # right language: shows
+    assert ad is not None and ad.text == "Subscribe!"

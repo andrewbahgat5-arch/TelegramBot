@@ -31,6 +31,10 @@ class Advertisement(Base):
     button_text: Mapped[str | None] = mapped_column(String(100))
     button_url: Mapped[str | None] = mapped_column(Text)
     target_role: Mapped[str | None] = mapped_column(String(20))
+    # Language-first ad creation: the admin picks English/Arabic before composing, so each
+    # language has its own campaigns (listing groups by this). NULL = untargeted (legacy ads
+    # created before this field, or a deliberately language-agnostic ad).
+    target_language: Mapped[str | None] = mapped_column(String(10))
     # Ads v2 (Sprint 9.5): placement, delivery mode, copy-mode source, rich text, audience.
     placement: Mapped[str] = mapped_column(
         String(30), nullable=False, server_default="post_download"

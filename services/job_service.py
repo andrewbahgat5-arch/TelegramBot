@@ -260,6 +260,7 @@ class JobService:
             format_=format_.value,
             quality=quality.value,
             file_size=file_size,
+            title=info.title,
         )
         await self._users.increment_download_counters(user_id)
         # Invalidate the user snapshot so the next rate-limit read sees the new count

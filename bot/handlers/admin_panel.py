@@ -50,6 +50,8 @@ from bot.keyboards.admin_panel import (
     build_ad_conflict_confirm,
     build_ad_detail,
     build_ad_list,
+    build_broadcast_detail,
+    build_broadcast_list,
     build_confirm,
     build_export_formats,
     build_input_prompt,
@@ -176,6 +178,7 @@ async def panel_navigate(
     ad_service_factory: AdServiceFactory,
     admin_service_factory: AdminServiceFactory,
     referral_service_factory: ReferralServiceFactory,
+    broadcast_service_factory: BroadcastServiceFactory,
     template_service: TemplateService,
     queue_service: QueueService,
     callback_signer: CallbackSigner,
@@ -212,6 +215,7 @@ async def panel_navigate(
         referral_service_factory,
         template_service,
         queue_service,
+        broadcast_service_factory,
         translate,
         locale,
     )
@@ -258,8 +262,12 @@ async def panel_write(
         return
     await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
     # Compose-wizard entry points (9.6.10): Ads "Create" / Broadcast "Create" + presets.
-    if panel.section == "a" and panel.action == "cr":
-        await admin_wizard.start(callback, state, callback_signer, translate, locale, kind="ad")
+    if panel.section == "a" and panel.action in ("cen", "car"):
+        lang = "en" if panel.action == "cen" else "ar"
+        await admin_wizard.start(
+            callback, state, callback_signer, translate, locale,
+            kind="ad", target_language=lang,
+        )
         return
     if panel.section == "a" and panel.action == "ed" and panel.arg is not None:
         # Full edit-in-wizard: load the existing ad into the compose wizard (Bug-fix sprint).
@@ -274,7 +282,8 @@ async def panel_write(
             audience=audience_service_factory(session),
         )
         return
-    if panel.section == "b" and panel.action in ("cr", "bf", "bp", "ba", "bl"):
+    if panel.section == "b" and panel.action in ("cen", "car"):
+        lang = "en" if panel.action == "cen" else "ar"
         await admin_wizard.start(
             callback,
             state,
@@ -282,7 +291,24 @@ async def panel_write(
             translate,
             locale,
             kind="broadcast",
-            preset=panel.action,
+            target_language=lang,
+        )
+        return
+    if panel.section == "b" and panel.action == "pbd" and panel.arg is not None:
+        try:
+            bc = await broadcast_service_factory(session).publish_draft(panel.arg)
+        except InvalidBroadcastError as exc:
+            await callback.answer(str(exc), show_alert=True)
+            return
+        if isinstance(callback.message, Message):
+            broadcasts = await broadcast_service_factory(session).list_saved()
+            await _safe_edit(
+                callback.message,
+                _broadcast_list_text(broadcasts, translate, locale),
+                build_broadcast_list(broadcasts, callback_signer, locale),
+            )
+        await callback.answer(
+            translate("panel.wizard.broadcast_published", locale, id=bc.id, count=bc.expected_total)
         )
         return
     if panel.section == "s":  # Settings stepper / guided entry (9.6.5, 9.6.7)
@@ -961,6 +987,7 @@ async def _render(
     referral_factory: ReferralServiceFactory,
     template_service: TemplateService,
     queue: QueueService,
+    broadcast_factory: BroadcastServiceFactory,
     translate: Translator,
     locale: str,
 ) -> tuple[str, InlineKeyboardMarkup] | None:
@@ -1050,6 +1077,17 @@ async def _render(
             "a", role, signer, locale
         )
     if section == "b":
+        if action == "ls":
+            broadcasts = await broadcast_factory(session).list_saved()
+            return _broadcast_list_text(broadcasts, translate, locale), build_broadcast_list(
+                broadcasts, signer, locale
+            )
+        if action == "inf" and panel.arg is not None:
+            broadcast = await broadcast_factory(session).get_broadcast(panel.arg)
+            if broadcast is not None:
+                return _broadcast_detail_text(broadcast, translate, locale), build_broadcast_detail(
+                    broadcast, signer, locale
+                )
         return _broadcast_text(translate, locale), build_section_menu("b", role, signer, locale)
     if section == "m":
         users_svc = user_factory(session)
@@ -1983,6 +2021,63 @@ def _broadcast_text(translate: Translator, locale: str) -> str:
             translate("panel.broadcast.subtitle", locale),
         ]
     )
+
+
+def _broadcast_list_text(
+    broadcasts: list[Any], translate: Translator, locale: str
+) -> str:
+    hdr = ui.header(translate("panel.broadcast.list_title", locale), icon=ui.emoji("broadcast"))
+    if not broadcasts:
+        return f"{hdr}\n\n{translate('panel.broadcast.list_empty', locale)}"
+    en = [b for b in broadcasts if getattr(b, "target_language", None) == "en"]
+    ar = [b for b in broadcasts if getattr(b, "target_language", None) == "ar"]
+    other = [b for b in broadcasts if getattr(b, "target_language", None) not in ("en", "ar")]
+    lines: list[str] = [hdr, ""]
+    for label_key, group in (
+        ("panel.broadcast.en_header", en),
+        ("panel.broadcast.ar_header", ar),
+    ):
+        if group:
+            lines.append(f"<b>{translate(label_key, locale)}</b>")
+            for b in group:
+                status_icon = {"draft": "📝", "pending": "⏳", "completed": "✅"}.get(
+                    getattr(b, "status", ""), "📣"
+                )
+                preview = (getattr(b, "message_text", "") or "")[:40].strip() or "—"
+                lines.append(f"  {status_icon} #{b.id} {escape(preview)}")
+            lines.append("")
+    for b in other:
+        lines.append(f"  📣 #{b.id}")
+    lines.append(ui.footer())
+    return "\n".join(lines)
+
+
+def _broadcast_detail_text(
+    broadcast: Any, translate: Translator, locale: str
+) -> str:
+    status = getattr(broadcast, "status", "unknown")
+    status_label = {"draft": "📝 Draft", "pending": "⏳ Pending", "completed": "✅ Sent"}.get(
+        status, status
+    )
+    preview = (getattr(broadcast, "message_text", "") or "")[:200].strip() or "—"
+    fields = [
+        ("Status", status_label),
+        ("Language", (getattr(broadcast, "target_language", None) or "—").upper()),
+        ("Expected", str(getattr(broadcast, "expected_total", 0))),
+    ]
+    if status == "completed":
+        fields.append(("Sent", str(getattr(broadcast, "total_sent", 0))))
+        fields.append(("Failed", str(getattr(broadcast, "total_failed", 0))))
+    return "\n".join([
+        ui.header(
+            translate("panel.broadcast.detail_title", locale, id=broadcast.id),
+            icon=ui.emoji("broadcast"),
+        ),
+        "",
+        ui.card("", fields),
+        "",
+        f"<blockquote>{escape(preview)}</blockquote>",
+    ])
 
 
 async def _queue_text(queue: QueueService, translate: Translator, locale: str) -> str:

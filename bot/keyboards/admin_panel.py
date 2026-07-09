@@ -395,6 +395,60 @@ def build_ad_detail(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def _broadcast_button_label(broadcast: Any) -> str:
+    """One saved-broadcast row: a status glyph, id, and a short content preview."""
+    icon = {"draft": "📝", "pending": "⏳", "in_progress": "🚀", "completed": "✅"}.get(
+        getattr(broadcast, "status", ""), "📣"
+    )
+    preview = (getattr(broadcast, "message_text", "") or "").strip()
+    if not preview:
+        ad_id = getattr(broadcast, "advertisement_id", None)
+        preview = f"Ad #{ad_id}" if ad_id is not None else "—"
+    return f"{icon} #{broadcast.id} {preview}"[:60]
+
+
+def build_broadcast_list(
+    broadcasts: Sequence[Any], signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """Saved broadcasts (Broadcast section "Saved"), grouped by language (Publish/Save flow).
+
+    Each language gets its own header + rows, so an admin composing for one audience never
+    has to scan the other's campaigns; broadcasts with no language recorded (legacy, before
+    the language-first flow) render ungrouped at the end.
+    """
+    en_rows = [b for b in broadcasts if getattr(b, "target_language", None) == "en"]
+    ar_rows = [b for b in broadcasts if getattr(b, "target_language", None) == "ar"]
+    other_rows = [b for b in broadcasts if getattr(b, "target_language", None) not in ("en", "ar")]
+    rows: list[list[InlineKeyboardButton]] = []
+    if en_rows:
+        hdr = translate("panel.broadcast.en_header", locale)
+        rows.append(
+            [InlineKeyboardButton(text=hdr, callback_data="P|noop")]
+        )
+        rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in en_rows]
+    if ar_rows:
+        hdr = translate("panel.broadcast.ar_header", locale)
+        rows.append(
+            [InlineKeyboardButton(text=hdr, callback_data="P|noop")]
+        )
+        rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in ar_rows]
+    rows += [[_btn(signer, _broadcast_button_label(b), "b", "inf", b.id)] for b in other_rows]
+    rows.append(nav_row(signer, locale, back=("b", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_broadcast_detail(
+    broadcast: Any, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """A saved broadcast's detail screen: Publish Now (drafts only) + Back to the list."""
+    rows: list[list[InlineKeyboardButton]] = []
+    if getattr(broadcast, "status", None) == "draft":
+        label = translate("panel.broadcast.publish_btn", locale)
+        rows.append([_btn(signer, label, "b", "pbd", broadcast.id)])
+    rows.append(nav_row(signer, locale, back=("b", "ls")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_user_detail(
     snap: UserSnapshot, role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
@@ -651,12 +705,23 @@ def build_wizard_preview(
         _w(signer, translate("panel.wizard.edit_content", locale), "ed", step_index(STEP_CONTENT))
     )
     rows = _chunk(edits)
-    rows.append(
-        [
-            _w(signer, translate("common.save", locale), "sv"),
-            _w(signer, translate("common.cancel", locale), "cx"),
-        ]
-    )
+    if state.kind == "broadcast":
+        # Publish sends now (and saves automatically); Save keeps it as a draft — never
+        # sent until the admin publishes it later from the Saved list.
+        rows.append(
+            [
+                _w(signer, translate("panel.wizard.publish", locale), "pb"),
+                _w(signer, translate("panel.wizard.save_draft", locale), "sv"),
+            ]
+        )
+        rows.append([_w(signer, translate("common.cancel", locale), "cx")])
+    else:
+        rows.append(
+            [
+                _w(signer, translate("common.save", locale), "sv"),
+                _w(signer, translate("common.cancel", locale), "cx"),
+            ]
+        )
     rows.append([_btn(signer, translate("common.home", locale), "mn", "hm")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

@@ -120,11 +120,13 @@ async def handle_url(
     await ack.edit_text(caption, reply_markup=keyboard)
 
 
-def _media_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
-    """Title + duration + source line shown above the format keyboard.
+def _build_caption(info: MediaInfo, footer: str) -> str:
+    """Title + duration + source + media details (description/views/likes) + footer.
 
     ``info.title``/``info.platform`` are user/platform-generated content and are
-    interpolated verbatim, never translated (Sprint 11.5 requirement #3).
+    interpolated verbatim, never translated (Sprint 11.5 requirement #3). Media
+    details come from the raw yt-dlp metadata (``info.raw``) and are best-effort —
+    most providers omit some or all of these fields.
     """
     lines = [f"🎬 <b>{escape(info.title)}</b>"]
     meta: list[str] = []
@@ -134,8 +136,42 @@ def _media_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
         meta.append(f"📺 {info.platform.capitalize()}")
     if meta:
         lines.append("   ".join(meta))
-    lines.append(f"\n{translate('download.choose_format', locale)}")
+    description = (info.raw.get("description") or "")[:100]
+    if description:
+        truncated = "…" if len(info.raw.get("description", "")) > 100 else ""
+        lines.append(f"\n📝 {escape(description)}{truncated}")
+    details: list[str] = []
+    view_count = info.raw.get("view_count")
+    like_count = info.raw.get("like_count")
+    dislike_count = info.raw.get("dislike_count")
+    if view_count is not None:
+        details.append(f"👁 {_fmt_count(view_count)}")
+    if like_count is not None:
+        details.append(f"👍 {_fmt_count(like_count)}")
+    if dislike_count is not None:
+        details.append(f"👎 {_fmt_count(dislike_count)}")
+    if details:
+        lines.append("   ".join(details))
+    lines.append(f"\n{footer}")
     return "\n".join(lines)
+
+
+def _media_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
+    """Caption shown above the format keyboard (choose format)."""
+    return _build_caption(info, translate("download.choose_format", locale))
+
+
+def _quality_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
+    """Caption shown above the quality keyboard (choose quality)."""
+    return _build_caption(info, translate("download.choose_quality", locale))
+
+
+def _fmt_count(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
 
 
 def _format_duration(seconds: int) -> str:
@@ -150,7 +186,9 @@ def _format_duration(seconds: int) -> str:
 async def handle_format_choice(
     callback: CallbackQuery,
     session: AsyncSession,
+    user: UserSnapshot,
     analyzer_factory: AnalyzerFactory,
+    ad_service_factory: AdServiceFactory,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
@@ -168,9 +206,13 @@ async def handle_format_choice(
     keyboard = build_quality_keyboard(
         parsed.media_id, parsed.format, analyzed.info, callback_signer, locale
     )
-    caption = (
-        f"🎬 <b>{escape(analyzed.info.title)}</b>\n{translate('download.choose_quality', locale)}"
-    )
+    caption = _quality_caption(analyzed.info, translate, locale)
+    # Re-decorate with the caption-layer ad (two-layer ads) so it survives the
+    # format → quality step instead of disappearing on the first tap.
+    mixer = CaptionAdMixer(ad_service_factory(session))
+    decorated, ad_buttons = await mixer.decorate_for_user(user, caption, user.total_downloads)
+    caption = decorated or caption
+    keyboard = append_ad_buttons(keyboard, ad_buttons)
     await _edit_chooser(callback.message, caption, keyboard)
     await callback.answer()
 
@@ -179,7 +221,9 @@ async def handle_format_choice(
 async def handle_back(
     callback: CallbackQuery,
     session: AsyncSession,
+    user: UserSnapshot,
     analyzer_factory: AnalyzerFactory,
+    ad_service_factory: AdServiceFactory,
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
@@ -195,9 +239,14 @@ async def handle_back(
         return
 
     keyboard = build_format_keyboard(parsed.media_id, analyzed.info, callback_signer, locale)
-    await _edit_chooser(
-        callback.message, _media_caption(analyzed.info, translate, locale), keyboard
-    )
+    caption = _media_caption(analyzed.info, translate, locale)
+    # Re-decorate with the caption-layer ad (two-layer ads) so it survives the
+    # back-navigation step instead of disappearing.
+    mixer = CaptionAdMixer(ad_service_factory(session))
+    decorated, ad_buttons = await mixer.decorate_for_user(user, caption, user.total_downloads)
+    caption = decorated or caption
+    keyboard = append_ad_buttons(keyboard, ad_buttons)
+    await _edit_chooser(callback.message, caption, keyboard)
     await callback.answer()
 
 

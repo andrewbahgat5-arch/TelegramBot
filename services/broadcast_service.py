@@ -120,12 +120,15 @@ class BroadcastService:
         scheduled_at: datetime.datetime | None = None,
         audience_mode: str | None = None,
         audience_rules: Sequence[AudienceRuleSpec] | None = None,
+        status: str = "pending",
     ) -> Any:
-        """Snapshot the audience size and queue a ``pending`` broadcast (16.8 step 1).
+        """Snapshot the audience size and queue a broadcast (16.8 step 1).
 
         ``scheduled_at`` (9.5.10) defers delivery until due; NULL = sent on the next poll.
         ``audience_rules`` (Sprint 9.6, D-055) targets a unified expression instead of the
-        legacy ``target_role`` / ``target_language`` filter.
+        legacy ``target_role`` / ``target_language`` filter. ``status`` (Publish-vs-Save
+        wizard flow) is ``pending`` (queued for the worker) or ``draft`` (saved, not sent —
+        see :meth:`create_draft` / :meth:`publish_draft`).
         """
         text = message_text.strip()
         if not text:
@@ -144,17 +147,60 @@ class BroadcastService:
             expected_total=expected_total,
             scheduled_at=scheduled_at,
             audience_expression_id=audience_expression_id,
+            status=status,
         )
         _log.info(
-            "broadcast_queued",
+            "broadcast_queued" if status == "pending" else "broadcast_saved",
             broadcast_id=broadcast.id,
             expected_total=expected_total,
             target_role=target_role,
             target_language=target_language,
             audience_expression_id=audience_expression_id,
             scheduled_at=scheduled_at.isoformat() if scheduled_at else None,
+            status=status,
         )
         return broadcast
+
+    async def create_draft(
+        self,
+        *,
+        created_by_user_id: int,
+        message_text: str,
+        target_language: str | None = None,
+        audience_mode: str | None = None,
+        audience_rules: Sequence[AudienceRuleSpec] | None = None,
+    ) -> Any:
+        """Save a broadcast composition without queuing it for delivery (Save-for-later).
+
+        A thin ``status="draft"`` wrapper over :meth:`create` — same audience snapshot and
+        validation, just never picked up by the ``BroadcastWorker`` until
+        :meth:`publish_draft` moves it to ``pending``.
+        """
+        return await self.create(
+            created_by_user_id=created_by_user_id,
+            message_text=message_text,
+            target_language=target_language,
+            audience_mode=audience_mode,
+            audience_rules=audience_rules,
+            status="draft",
+        )
+
+    async def publish_draft(self, broadcast_id: int) -> Any:
+        """Move a saved draft to ``pending`` so the worker picks it up on its next poll."""
+        broadcast = await self._broadcasts.get_by_id(broadcast_id)
+        if broadcast is None:
+            raise InvalidBroadcastError("Broadcast not found.")
+        if broadcast.status != "draft":
+            raise InvalidBroadcastError("Only draft broadcasts can be published.")
+        await self._broadcasts.set_status(broadcast_id, "pending")
+        return await self._broadcasts.get_by_id(broadcast_id)
+
+    async def get_broadcast(self, broadcast_id: int) -> Any | None:
+        return await self._broadcasts.get_by_id(broadcast_id)
+
+    async def list_saved(self) -> list[Any]:
+        """Every saved broadcast (draft + pending + completed), newest first."""
+        return list(await self._broadcasts.list_all())
 
     async def create_from_ad(
         self,
@@ -166,13 +212,15 @@ class BroadcastService:
         scheduled_at: datetime.datetime | None = None,
         audience_mode: str | None = None,
         audience_rules: Sequence[AudienceRuleSpec] | None = None,
+        status: str = "pending",
     ) -> Any:
         """Queue a broadcast that delivers a stored ad via copyMessage (Sprint 9.5, D-045).
 
         Reuses the Sprint 8 audience snapshot + chunked fan-out; the ``BroadcastWorker``
         copies the linked ad to each recipient instead of sending ``message_text``.
         ``scheduled_at`` (9.5.10) defers delivery until due; NULL = sent on the next poll.
-        ``audience_rules`` (Sprint 9.6, D-055) targets a unified expression.
+        ``audience_rules`` (Sprint 9.6, D-055) targets a unified expression. ``status``
+        (Publish-vs-Save wizard flow) is ``pending`` or ``draft`` (see :meth:`create`).
         """
         expected_total, audience_expression_id = await self._resolve_audience(
             audience_mode=audience_mode,
@@ -189,6 +237,7 @@ class BroadcastService:
             advertisement_id=advertisement_id,
             scheduled_at=scheduled_at,
             audience_expression_id=audience_expression_id,
+            status=status,
         )
         _log.info(
             "ad_broadcast_queued",

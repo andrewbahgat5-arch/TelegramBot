@@ -37,6 +37,23 @@ _log = get_logger("bot.handlers.history")
 HistoryServiceFactory = Callable[[AsyncSession], HistoryService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 
+_PLATFORM_EMOJI: dict[str, str] = {
+    "youtube": "▶️",
+    "tiktok": "🎵",
+    "instagram": "📸",
+    "facebook": "📘",
+    "twitter": "🐦",
+    "x": "🐦",
+    "soundcloud": "🎧",
+    "pinterest": "📌",
+    "snapchat": "👻",
+    "reddit": "🔗",
+}
+
+
+def _platform_emoji(platform: str | None) -> str:
+    return _PLATFORM_EMOJI.get((platform or "").lower(), "🔗")
+
 
 @router.message(Command("history"))
 async def handle_history(
@@ -132,6 +149,7 @@ def _render(
     header = translate("history.header", locale, page=page.page + 1)
     lines = [header, ""]
     for index, row in enumerate(page.rows, start=1):
-        platform = escape((row.platform or "link").capitalize())
-        lines.append(f"{index}. {platform} · {escape(row.quality)} · {escape(row.format)}")
+        platform_emoji = _platform_emoji(row.platform)
+        title = escape(row.title[:40]) if row.title else escape(row.format)
+        lines.append(f"{index}. {platform_emoji} {title} · {escape(row.quality)}")
     return "\n".join(lines), keyboard

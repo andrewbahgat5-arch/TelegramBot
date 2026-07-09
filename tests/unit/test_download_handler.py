@@ -224,7 +224,9 @@ async def test_format_choice_expired_media_alerts() -> None:
     callback = AsyncMock(spec=CallbackQuery)
     callback.data = signer.pack_format(123, MediaFormat.VIDEO)
     callback.answer = AsyncMock()
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
+    await handle_format_choice(
+        callback, _session(), _user(), lambda s: analyzer, _no_ads, signer, translate, "en"
+    )
     callback.answer.assert_awaited_once()
     args = callback.answer.await_args
     assert args is not None and args.kwargs.get("show_alert") is True
@@ -242,7 +244,9 @@ async def test_format_choice_shows_quality_keyboard() -> None:
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
+    await handle_format_choice(
+        callback, _session(), _user(), lambda s: analyzer, _no_ads, signer, translate, "en"
+    )
 
     callback.message.edit_text.assert_awaited_once()
     callback.answer.assert_awaited_once()
@@ -260,7 +264,9 @@ async def test_format_choice_edits_caption_for_photo_chooser() -> None:
     callback.message.edit_caption = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_format_choice(callback, _session(), lambda s: analyzer, signer, translate, "en")
+    await handle_format_choice(
+        callback, _session(), _user(), lambda s: analyzer, _no_ads, signer, translate, "en"
+    )
 
     callback.message.edit_caption.assert_awaited_once()
 
@@ -277,7 +283,9 @@ async def test_back_returns_to_format_keyboard() -> None:
     callback.message.edit_text = AsyncMock()
     callback.answer = AsyncMock()
 
-    await handle_back(callback, _session(), lambda s: analyzer, signer, translate, "en")
+    await handle_back(
+        callback, _session(), _user(), lambda s: analyzer, _no_ads, signer, translate, "en"
+    )
 
     callback.message.edit_text.assert_awaited_once()
     call = callback.message.edit_text.await_args
@@ -291,7 +299,14 @@ async def test_back_forged_ignored() -> None:
     callback.data = "b|1|deadbeef00"  # bad signature
     callback.answer = AsyncMock()
     await handle_back(
-        callback, _session(), lambda s: analyzer, CallbackSigner("k"), translate, "en"
+        callback,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
     )
     callback.answer.assert_awaited_once()
 
@@ -309,7 +324,9 @@ async def test_format_choice_forged_data_ignored() -> None:
         called = True
         return analyzer
 
-    await handle_format_choice(callback, _session(), factory, CallbackSigner("k"), translate, "en")
+    await handle_format_choice(
+        callback, _session(), _user(), factory, _no_ads, CallbackSigner("k"), translate, "en"
+    )
 
     callback.answer.assert_awaited_once()
     assert called is False  # forged callback never reaches the analyzer

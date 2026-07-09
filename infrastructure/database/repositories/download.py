@@ -78,6 +78,7 @@ class DownloadRepository(SqlAlchemyRepository[Download]):
         quality: str,
         file_size: int | None,
         status: str = "completed",
+        title: str | None = None,
     ) -> Download:
         """Insert a denormalized history row for a delivered download (10.5, 16.1 W7)."""
         download = Download(
@@ -88,5 +89,6 @@ class DownloadRepository(SqlAlchemyRepository[Download]):
             quality=quality,
             file_size=file_size,
             status=status,
+            title=title,
         )
         return await self.add(download)

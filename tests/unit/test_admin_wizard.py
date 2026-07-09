@@ -201,8 +201,9 @@ async def test_start_opens_audience_step() -> None:
     assert "Audience" in cb.bot.edit_message_text.await_args.args[0]
 
 
-async def test_start_broadcast_preset_seeds_audience() -> None:
-    # The Broadcast-menu "Premium" shortcut opens the wizard with the audience pre-seeded.
+async def test_start_broadcast_language_first_seeds_target() -> None:
+    # Language-first: the Broadcast-menu "English" shortcut opens the wizard with the
+    # language recorded (scopes delivery on save) and a clean All audience to narrow.
     fsm, cb = _FSM(), _callback()
     await admin_wizard.start(
         cb,
@@ -211,12 +212,13 @@ async def test_start_broadcast_preset_seeds_audience() -> None:
         translate,
         _LOCALE,
         kind="broadcast",
-        preset="bp",  # type: ignore[arg-type]
+        target_language="en",
     )
     ws = WizardState.from_data(fsm.data["wizard"])
     assert ws.kind == "broadcast" and ws.step == STEP_AUDIENCE
-    assert ws.audience_mode == "include"
-    assert ws.rules == [["include", "plan", "premium"]]
+    assert ws.target_language == "en"
+    assert ws.audience_mode == "all"
+    assert ws.rules == []
 
 
 async def test_broadcast_preview_shows_recipient_estimate() -> None:
@@ -463,7 +465,34 @@ async def test_save_broadcast_uses_unified_engine() -> None:
     assert casts.created is not None
     assert casts.created["audience_mode"] == "include"
     assert casts.created["message_text"] == "hi all"
-    assert "queued" in cb.answer.await_args.args[0]
+    assert "saved" in cb.answer.await_args.args[0].lower()
+
+
+async def test_save_broadcast_scopes_delivery_to_target_language() -> None:
+    # Language-first: a broadcast composed for English seeds an INCLUDE language rule so the
+    # audience snapshot + worker fan-out only reach English users, even with a clean audience.
+    fsm, cb = _FSM(), _callback()
+    _seed(
+        fsm,
+        WizardState(
+            kind="broadcast",
+            step=STEP_PREVIEW,
+            target_language="en",
+            audience_mode="all",
+            content_mode="fields",
+            content_text="hello",
+        ),
+    )
+    casts = _FakeBroadcasts()
+    await _dispatch(
+        cb, fsm, ParsedPanel("w", "sv"), ads=_FakeAds(), casts=casts, aud=_FakeAudience()
+    )
+    assert casts.created is not None
+    assert casts.created["target_language"] == "en"
+    rules = casts.created["audience_rules"]
+    assert any(
+        r.effect == "include" and r.dimension == "language" and r.value == "en" for r in rules
+    )
 
 
 def _ready_post_download_ad() -> WizardState:

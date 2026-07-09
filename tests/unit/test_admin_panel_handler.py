@@ -315,6 +315,7 @@ async def _navigate(
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
         lambda s: _FakeReferralSvc(),
+        lambda s: _FakeBroadcasts(),
         _FakeTemplates(),
         _FakeQueue(),
         signer,
@@ -816,6 +817,7 @@ async def test_user_detail_renders_via_navigation() -> None:
         lambda s: _FakeAds(),
         lambda s: _FakeAdmin(),
         lambda s: _FakeReferralSvc(),
+        lambda s: _FakeBroadcasts(),
         _FakeTemplates(),
         _FakeQueue(),
         signer,
@@ -828,9 +830,8 @@ async def test_user_detail_renders_via_navigation() -> None:
 # --- compose wizard entry (9.6.10) ----------------------------------------
 async def test_broadcast_create_starts_wizard() -> None:
     signer = _signer()
-    callback = _callback(signer, "b", "cr")
-    await _bwrite(callback, ParsedPanel("b", "cr"))
-    # No Type step anymore: the wizard opens straight on Audience (#1/#2).
+    callback = _callback(signer, "b", "cen")
+    await _bwrite(callback, ParsedPanel("b", "cen"))
     assert "Audience" in callback.bot.edit_message_text.await_args.args[0]
 
 
@@ -989,9 +990,8 @@ async def test_ad_edit_with_target_opens_wizard() -> None:
 
 async def test_ad_create_starts_wizard() -> None:
     signer = _signer()
-    callback = _callback(signer, "a", "cr")
-    await _awrite(callback, ParsedPanel("a", "cr"), _FakeAds())
-    # No Type step anymore: the wizard opens straight on Audience (#1/#2).
+    callback = _callback(signer, "a", "cen")
+    await _awrite(callback, ParsedPanel("a", "cen"), _FakeAds())
     assert "Audience" in callback.bot.edit_message_text.await_args.args[0]
 
 

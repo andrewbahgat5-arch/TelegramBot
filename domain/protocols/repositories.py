@@ -343,6 +343,7 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
         quality: str,
         file_size: int | None,
         status: str = "completed",
+        title: str | None = None,
     ) -> T:
         """Insert a denormalized history row for a delivered download (10.5, 16.1 W7)."""
         ...
@@ -360,13 +361,20 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
         audience_expression_id: int | None = None,
+        status: str = "pending",
     ) -> T:
-        """Insert a ``broadcasts`` row in ``pending`` state for the worker (10.9, 16.8).
+        """Insert a ``broadcasts`` row for the worker (10.9, 16.8).
 
         ``scheduled_at`` (9.5.10) defers delivery until due; NULL = immediate.
         ``audience_expression_id`` (Sprint 9.6, D-055) targets a unified audience
-        expression; NULL = legacy ``target_role`` / ``target_language``.
+        expression; NULL = legacy ``target_role`` / ``target_language``. ``status``
+        (Publish-vs-Save wizard flow) defaults to ``pending``; ``draft`` saves the
+        broadcast without the worker picking it up until :meth:`set_status` moves it on.
         """
+        ...
+
+    async def list_all(self) -> Sequence[T]:
+        """Every saved broadcast (draft + pending + completed), newest first."""
         ...
 
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> T | None:
@@ -439,6 +447,7 @@ class AdRepositoryProtocol(Repository[T], Protocol[T]):
         scheduled_at: datetime.datetime | None = None,
         internal_name: str | None = None,
         internal_notes: str | None = None,
+        target_language: str | None = None,
     ) -> T:
         """Insert an ``advertisements`` row (10.10 + Sprint 9.5). ORM stays in infra.
 

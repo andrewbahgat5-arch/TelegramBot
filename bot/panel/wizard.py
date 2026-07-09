@@ -66,6 +66,13 @@ class WizardState:
     kind: WizardKind = "ad"
     step: str = STEP_AUDIENCE
     return_to: str = "flow"  # "flow" (first pass) or "preview" (edit-hub)
+    # Language-first flow: the Broadcast/Ad menu's language pick seeds this before the
+    # wizard opens (never re-asked). NULL = untargeted (legacy behavior).
+    target_language: str | None = None
+    # Preview's two save actions (Publish vs Save-for-later): set True by the "pb" callback
+    # just before Save runs, so the same save path can create a "pending" (sent) or "draft"
+    # (not sent) broadcast without duplicating the audience/content assembly.
+    publish: bool = False
     audience_mode: str = "all"
     rules: list[list[str]] = field(default_factory=list)  # [effect, dimension, value]
     placements: list[str] = field(default_factory=list)
@@ -99,6 +106,8 @@ class WizardState:
             "kind": self.kind,
             "step": self.step,
             "return_to": self.return_to,
+            "target_language": self.target_language,
+            "publish": self.publish,
             "audience_mode": self.audience_mode,
             "rules": self.rules,
             "placements": self.placements,

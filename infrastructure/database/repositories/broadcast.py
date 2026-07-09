@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+from collections.abc import Sequence
 
 from sqlalchemy import or_, select, update
 
@@ -28,14 +29,17 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
         advertisement_id: int | None = None,
         scheduled_at: datetime.datetime | None = None,
         audience_expression_id: int | None = None,
+        status: str = "pending",
     ) -> Broadcast:
-        """Insert a ``pending`` broadcast the worker will pick up (16.8 step 1).
+        """Insert a broadcast the worker will pick up once ``pending`` (16.8 step 1).
 
         ``advertisement_id`` (Sprint 9.5) links an ad to deliver via copyMessage instead
         of plain ``message_text``. ``scheduled_at`` (9.5.10) defers delivery: NULL = send
         as soon as the worker polls; set → the due-poller skips it until it is due.
         ``audience_expression_id`` (Sprint 9.6, D-055) targets a unified audience
-        expression; NULL = legacy ``target_role`` / ``target_language``.
+        expression; NULL = legacy ``target_role`` / ``target_language``. ``status``
+        (Publish-vs-Save wizard flow) is ``pending`` (queued for the worker) or ``draft``
+        (saved but not sent — :meth:`set_status` moves it to ``pending`` on Publish).
         """
         broadcast = Broadcast(
             created_by=created_by,
@@ -46,9 +50,14 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
             advertisement_id=advertisement_id,
             scheduled_at=scheduled_at,
             audience_expression_id=audience_expression_id,
-            status="pending",
+            status=status,
         )
         return await self.add(broadcast)
+
+    async def list_all(self) -> Sequence[Broadcast]:
+        """Every saved broadcast (draft + pending + completed), newest first (Save/Publish flow)."""
+        result = await self.session.execute(select(Broadcast).order_by(Broadcast.id.desc()))
+        return result.scalars().all()
 
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> Broadcast | None:
         """Oldest **due** ``pending`` broadcast, FIFO by id (16.8 step 1; 9.5.10 due-poller).

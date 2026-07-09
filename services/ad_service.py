@@ -60,6 +60,7 @@ _FIELD_TO_COLUMN: dict[str, str] = {
     "button_text": "button_text",
     "button_url": "button_url",
     "target": "target_role",
+    "language": "target_language",  # language-first ads (each language its own campaigns)
     "every": "show_every_n_downloads",
     "priority": "priority",
     "placement": "placement",
@@ -253,6 +254,13 @@ class AdService:
         for ad in await self._ads.list_active_for_placement(place):
             scheduled_at = getattr(ad, "scheduled_at", None)
             if scheduled_at is not None and scheduled_at > now:  # not yet due (9.5.10)
+                continue
+            # Language-first ads: a language-targeted ad shows only to that language's
+            # viewers (untargeted ads — target_language IS NULL — always match). Mirrors the
+            # target_role scalar filter; the exact-match convention matches the audience
+            # engine's LANGUAGE dimension (audience_service._rule_hit).
+            target_language = getattr(ad, "target_language", None)
+            if target_language is not None and target_language != ctx.language:
                 continue
             if not await self._audience.matches(ad, ctx):
                 continue
@@ -491,6 +499,7 @@ class AdService:
         scheduled_at = _parse_schedule(fields.get("scheduled_at"))
         internal_name = _clean(fields.get("internal_name"))
         internal_notes = _clean(fields.get("notes"))
+        target_language = _clean(fields.get("language"))
 
         if delivery_mode == AdDeliveryMode.COPY.value:
             if store_chat is None or store_msg is None:
@@ -521,6 +530,7 @@ class AdService:
             scheduled_at=scheduled_at,
             internal_name=internal_name,
             internal_notes=internal_notes,
+            target_language=target_language,
         )
 
     async def list_ads(self) -> Sequence[Any]:
@@ -708,6 +718,8 @@ class AdService:
             changes["internal_name"] = _clean(fields["internal_name"])
         if "notes" in fields:
             changes["internal_notes"] = _clean(fields["notes"])
+        if "language" in fields:
+            changes["target_language"] = _clean(fields["language"])
 
         final_mode = changes.get("delivery_mode", ad.delivery_mode)
         if final_mode != AdDeliveryMode.COPY.value:

@@ -332,6 +332,7 @@ class DownloadService:
                 format_=format_.value,
                 quality=quality.value,
                 file_size=file_size,
+                title=info.title,
             )
             metrics.record_download(
                 platform=info.platform,

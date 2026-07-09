@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import datetime
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Identity, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.database.models.base import Base
@@ -26,6 +26,7 @@ class Download(Base):
     platform: Mapped[str] = mapped_column(String(50), nullable=False)
     format: Mapped[str] = mapped_column(String(50), nullable=False)
     quality: Mapped[str] = mapped_column(String(20), nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
     file_size: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="completed")
     created_at: Mapped[datetime.datetime] = mapped_column(

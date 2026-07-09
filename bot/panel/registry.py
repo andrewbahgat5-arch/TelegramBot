@@ -116,20 +116,23 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
     ),
     "a": (
         MenuItem("panel.action.list", "ls"),
-        MenuItem("panel.action.create", "cr"),
+        # Language-first ad creation (each language its own campaigns): the admin picks
+        # English/Arabic before composing, same flow as Broadcast.
+        MenuItem("panel.menu.a.create_en", "cen"),
+        MenuItem("panel.menu.a.create_ar", "car"),
         MenuItem("panel.action.edit", "ed"),
         MenuItem("panel.action.enable", "en"),
         MenuItem("panel.action.disable", "di"),
         MenuItem("panel.action.delete", "de"),
-        MenuItem("panel.action.broadcast", "bc"),
         MenuItem("panel.menu.a.stats", "stt"),
     ),
     "b": (
-        MenuItem("panel.action.create", "cr"),
-        MenuItem("panel.menu.b.free", "bf"),
-        MenuItem("panel.menu.b.premium", "bp"),
-        MenuItem("panel.menu.b.all", "ba"),
-        MenuItem("panel.menu.b.by_language", "bl"),
+        # Language-first broadcast creation: pick English/Arabic before composing (the
+        # audience/content steps are unchanged inside the wizard); Saved lists every
+        # draft/pending/completed broadcast grouped by language.
+        MenuItem("panel.menu.b.english", "cen"),
+        MenuItem("panel.menu.b.arabic", "car"),
+        MenuItem("panel.menu.b.saved", "ls"),
     ),
     "t": (
         MenuItem("panel.menu.t.refresh", "ls"),

@@ -122,6 +122,7 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         scheduled_at: datetime.datetime | None = None,
         internal_name: str | None = None,
         internal_notes: str | None = None,
+        target_language: str | None = None,
     ) -> Advertisement:
         ad = Advertisement(
             title=title,
@@ -143,6 +144,7 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
             scheduled_at=scheduled_at,
             internal_name=internal_name,
             internal_notes=internal_notes,
+            target_language=target_language,
         )
         return await self.add(ad)
 

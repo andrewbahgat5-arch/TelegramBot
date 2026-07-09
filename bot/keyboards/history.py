@@ -1,14 +1,12 @@
 """History inline keyboard (MASTER_PLAN Task 7.4).
 
 One resend button per history row (carrying a signed ``download_id``) plus a
-prev/next navigation row. The richer browsable surface the Owner described
-(thumbnails, titles) is a future sprint — V1 lists the denormalized
-platform/format/quality/date that ``downloads`` already stores.
+prev/next navigation row. Each row label shows the platform emoji, media title,
+and quality (denormalized on ``downloads`` at delivery time).
 """
 
 from __future__ import annotations
 
-import datetime
 from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,6 +14,23 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks.factory import CallbackSigner
 from core.i18n import translate
+
+_PLATFORM_EMOJI: dict[str, str] = {
+    "youtube": "▶️",
+    "tiktok": "🎵",
+    "instagram": "📸",
+    "facebook": "📘",
+    "twitter": "🐦",
+    "x": "🐦",
+    "soundcloud": "🎧",
+    "pinterest": "📌",
+    "snapchat": "👻",
+    "reddit": "🔗",
+}
+
+
+def _platform_emoji(platform: str | None) -> str:
+    return _PLATFORM_EMOJI.get((platform or "").lower(), "🔗")
 
 
 def build_history_keyboard(
@@ -53,13 +68,7 @@ def build_history_keyboard(
 
 
 def _row_label(row: Any) -> str:
-    """A one-line label: ``🔁 <Platform> · <quality> · <date>``."""
-    platform = (row.platform or "link").capitalize()
-    when = _short_date(row.created_at)
-    return f"🔁 {platform} · {row.quality} · {when}"
-
-
-def _short_date(value: datetime.datetime | None) -> str:
-    if value is None:
-        return ""
-    return value.strftime("%Y-%m-%d")
+    """A one-line label: ``🔁 <platform emoji> <title> · <quality>``."""
+    platform_emoji = _platform_emoji(row.platform)
+    title = (row.title or row.format)[:35]
+    return f"🔁 {platform_emoji} {title} · {row.quality}"
