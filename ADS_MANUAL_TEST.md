@@ -1,4 +1,4 @@
-# Ads — Big Manual Test (Sprint 9 + Sprint 9.5 / Ads v2)
+# Ads — Big Manual Test (Sprint 9 + Sprint 9.5 / Ads v2 + Sprint 14)
 
 End-to-end human test for every advertisement feature. Work top to bottom; each step has
 an **expected result** and a checkbox. Run as the **Owner** unless a step says otherwise.
@@ -169,3 +169,30 @@ Create one ad and re-target it; test from the **USER** account (and premium if a
 | `/ad_broadcast` | pushed to users | the broadcast audience filter |
 | buttons | under the ad | anyone; tapping records a click + delivers the link |
 | audience rules | — | include/exclude across role/plan/language/user/segment (OR within, AND across) |
+
+---
+
+## Sprint 14 additions
+
+### Per-ad stats (Phase 4)
+- [ ] Open Ads → Stats → tap an ad → see per-ad stats card (impressions, clicks, CTR, placement breakdown, buttons, last shown/sent dates).
+- [ ] Stats show broadcast totals when the ad has been broadcast.
+
+### Placement management (Phase 5)
+- [ ] Open Ads → Placements → see all 8 placements with ✅/❌ toggles.
+- [ ] Toggle "analysis" placement off → send a URL → no ad after URL analysis.
+- [ ] Toggle "analysis" placement on → send a URL → ad appears after URL analysis.
+- [ ] Toggle "quality_select" → verify ad shows/hides on quality choice.
+
+### Audience simplification (Phase 6)
+- [ ] Create a new ad → Audience step shows 6 options: All Users, Free, Premium, Moderators, Owner, User ID.
+- [ ] "All Users" is checked by default when no rules are selected.
+- [ ] Selecting "Free" unchecks "All Users" and adds include/plan/free rule.
+- [ ] Selecting "All Users" clears all rules.
+
+### Message templates (Phase 7)
+- [ ] Open Templates → tap "banned_message" → see full content in blockquote, placeholder legend ({reason} → e.g. Spam), example result.
+- [ ] Edit content with an unknown placeholder like `{foo}` → rejected with "Unknown placeholders" message.
+- [ ] "banned_message" and "maintenance" show an "Edit Buttons" option; other templates do not.
+- [ ] Edit buttons for "banned_message": send `Appeal | https://example.com` → saved. Ban a user → banned reply includes the Appeal button.
+- [ ] Turn on maintenance mode → non-staff user gets maintenance message (rate-limited: one per 5 min).

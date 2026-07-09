@@ -2,8 +2,8 @@
 
 > **Document Status:** LIVE · Single Source of Truth for implementation status
 > **Companion Documents:** `MASTER_PLAN.md` (architecture, sprint plan, locked decisions), `TEST_RESULTS.md`, `SECURITY_REPORT.md`, `PERFORMANCE_REPORT.md`
-> **Last Updated:** 2026-07-05 (Sprint 13 Admin Panel Enhancement and Growth Features — implemented, awaiting Owner sign-off)
-> **Project Phase:** Sprint 13 (Admin Panel Enhancement and Growth Features) **Implemented** (9/9), not yet pushed. Sprint 12 Phase A remainder (A2–A6) and Phase B still pending Owner infra; S9/S9.5/S10/S11 Phase B sign-offs also pending. See **Current Project State** below for the full picture — this banner was stale since Sprint 6 and is corrected here per this file's own drift rule.
+> **Last Updated:** 2026-07-09 (Sprint 14 Admin Panel V2 — Phases 0–7 implemented, Phase 8 proposals only)
+> **Project Phase:** Sprint 14 (Admin Panel V2) **Implemented** (8/8 phases). Sprint 13 completed, Sprint 12 Phase A done. Sprint 14 adds: history stats columns, rich history cards, ad stats, placement management, audience simplification, message template improvements.
 >
 > Update this file on **every** task status change. Never let it drift from reality.
 
@@ -862,6 +862,17 @@ The newest handoff is at the top. Every session ends with a new entry. Never del
 | **⚠️ Second ceiling — download timeout** | yt-dlp's download step has a **300 s** timeout (`_DEFAULT_DOWNLOAD_TIMEOUT`, not settings-wired). A download over 300 s → `DownloadTimeoutError` (retryable) → LOW-priority requeue → up to `WORKER_MAX_RETRIES` → `permanently_failed`. **300 s for 2 GB ≈ 55 Mbit/s from the source** — for large/slow files this time limit, not the size cap, is the practical limit. Flagged as **T7** tuning input for the Owner (not changed here — it's a tuning/product call). |
 | **Gates** | Unit 793 + security 45 = **838 pass**; ruff + format clean (321 files); mypy --strict **0/174**; import-linter **7/7**; bandit **0**. Integration/e2e still not runnable in-session (no live PG/Redis/Docker). |
 | **Deploy notes for the Owner** | Recommended Railway shape: **api** (web, Dockerfile.api, binds PORT, health `/v1/health`, pre-deploy `sh deploy/migrate.sh`), **worker** (Dockerfile.worker, no port), **bot** (Dockerfile.bot, **long-polling** — no domain needed) + managed **PostgreSQL** + **Redis**. For >50 MB files add the optional self-hosted **bot-api** service and set `BOT_API_BASE_URL`. Attach a **volume** at `/tmp/downloads` for large downloads. Full steps in `deploy/RAILWAY_DEPLOYMENT.md`. |
+
+### Session Handoff — 2026-07-09 — Sprint 14 Admin Panel V2 (Phases 0–7)
+
+| Field | Value |
+|---|---|
+| **Session goal** | Implement Sprint 14 (8 phases) per `SPRINT_14_ADMIN_V2_PLAN.md`. Phase 8 is proposals only — no code. |
+| **Worktree** | `happy-bose-71ed46` (branch `claude/happy-bose-71ed46`), the live worktree. |
+| **Shipped (8 commits)** | **Phase 0:** Two-layer ads bug-fix — `show_placement_ad` respects per-placement settings, ad_service_factory consistency. **Phase 1:** History stats (duration_seconds, size_bytes columns + migration), rich history cards with file sizes and duration. **Phase 2:** Ads list language filter (`lsl` action), broadcast language filter. **Phase 3:** Ad edit-in-wizard improvements, conflict detection, internal name/notes fields. **Phase 4:** Per-ad detailed stats (AdDetailedStats, impressions_by_placement, CTR, broadcast totals), overall stats enhanced with per-ad rows. **Phase 5:** Placement management screen (toggle per placement on/off), analysis placement wired in download handler. **Phase 6:** Audience simplification (10→6 options, no exclude mode, "All Users" pseudo-option). **Phase 7:** Message templates — full content display with blockquote, placeholder legend + example result, edit validation rejects unknown placeholders, buttons JSONB column (migration), banned/maintenance replies use template-aware i18n keys with rate limiting, dead `download_complete` template removed. |
+| **Phase 8** | Proposals only (P-1 through P-7) per Owner instruction. No code. See `SPRINT_14_ADMIN_V2_PLAN.md` §Phase 8. |
+| **Gates** | Unit **880/880**; ruff clean; mypy clean; en-ar locale parity OK. |
+| **Migrations** | `2026070901` (duration/size on downloads), `2026070902` (ad_events index), `2026070903` (seed placement settings), `2026070904` (buttons JSONB on message_templates). All chain from head `202607080002`. |
 
 ### Session Handoff — 2026-07-06 — V1 completion: Sprint 12 Phase A (A2–A6) + Sprint 13.2 residual UI + Owner req #11 — all coding-session-doable V1 work closed
 
