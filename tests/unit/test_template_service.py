@@ -59,8 +59,8 @@ def _configure_temp_catalog(tmp_path: Path) -> None:
             "enabled": True,
             "version": 1,
         },
-        "user.welcome": "Welcome {name}!",
-        "user.help": "Default help text.",
+        "start.welcome_named": "Welcome {name}!",
+        "help.body": "Default help text.",
     }
     (tmp_path / "en.json").write_text(json.dumps(catalog), encoding="utf-8")
     i18n.configure("en", locales_dir=tmp_path)
@@ -85,9 +85,9 @@ async def test_custom_template_overrides_translate(tmp_path: Path) -> None:
     _configure_temp_catalog(tmp_path)
     svc = TemplateService(FakeTemplateStore())
 
-    assert i18n.translate("user.welcome", "en", name="Ahmed") == "Welcome Ahmed!"
+    assert i18n.translate("start.welcome_named", "en", name="Ahmed") == "Welcome Ahmed!"
     await svc.set("welcome", "en", "Marhaba {name} 👋", updated_by=1)
-    assert i18n.translate("user.welcome", "en", name="Ahmed") == "Marhaba Ahmed 👋"
+    assert i18n.translate("start.welcome_named", "en", name="Ahmed") == "Marhaba Ahmed 👋"
 
 
 async def test_reset_reverts_translate_to_default(tmp_path: Path) -> None:
@@ -95,7 +95,7 @@ async def test_reset_reverts_translate_to_default(tmp_path: Path) -> None:
     svc = TemplateService(FakeTemplateStore())
     await svc.set("welcome", "en", "Custom {name}", updated_by=1)
     await svc.reset("welcome", "en")
-    assert i18n.translate("user.welcome", "en", name="Sara") == "Welcome Sara!"
+    assert i18n.translate("start.welcome_named", "en", name="Sara") == "Welcome Sara!"
 
 
 async def test_catalog_template_ignores_overrides(tmp_path: Path) -> None:
@@ -103,7 +103,7 @@ async def test_catalog_template_ignores_overrides(tmp_path: Path) -> None:
     svc = TemplateService(FakeTemplateStore())
     await svc.set("welcome", "en", "Overridden {name}", updated_by=1)
     # The shipped default is still reachable for the preview screen.
-    assert i18n.catalog_template("user.welcome", "en") == "Welcome {name}!"
+    assert i18n.catalog_template("start.welcome_named", "en") == "Welcome {name}!"
 
 
 async def test_load_warms_cache_and_overrides(tmp_path: Path) -> None:
@@ -115,7 +115,7 @@ async def test_load_warms_cache_and_overrides(tmp_path: Path) -> None:
     await svc.load()
 
     assert await svc.get("welcome", "en") == "Preloaded {name}"
-    assert i18n.translate("user.welcome", "en", name="Omar") == "Preloaded Omar"
+    assert i18n.translate("start.welcome_named", "en", name="Omar") == "Preloaded Omar"
 
 
 async def test_list_all_marks_custom_vs_default(tmp_path: Path) -> None:
@@ -129,7 +129,7 @@ async def test_list_all_marks_custom_vs_default(tmp_path: Path) -> None:
     assert views["welcome"].content_preview == "Custom welcome"
     assert views["help"].is_custom is False
     assert views["help"].content_preview == "Default help text."
-    assert len(views) == 8  # every editable key present
+    assert len(views) == 6  # every editable key present
 
 
 async def test_full_content_returns_custom_when_set() -> None:
@@ -178,8 +178,49 @@ async def test_buttons_survive_reload_from_store() -> None:
     assert reloaded.buttons_for("banned_message", "en") == buttons
 
 
-async def test_download_complete_removed_from_defs() -> None:
+async def test_buttons_persist_on_uncustomized_template(tmp_path: Path) -> None:
+    # banned/maintenance have no DB row until their text is customized. Setting buttons
+    # must still persist (create a row seeded with the default content) so they survive a
+    # restart — the fix for "banned buttons don't work" (item #3).
+    _configure_temp_catalog(tmp_path)
+    store = FakeTemplateStore()
+    svc = TemplateService(store)
+    buttons = [{"text": "Appeal", "url": "https://example.com"}]
+
+    await svc.set_buttons("banned_message", "en", buttons)  # no prior svc.set()
+
+    assert ("banned_message", "en") in store.rows  # a row was created to host the buttons
+    reloaded = TemplateService(store)
+    await reloaded.load()
+    assert reloaded.buttons_for("banned_message", "en") == buttons
+
+
+async def test_removed_templates_absent_from_defs() -> None:
     from services.template_service import TEMPLATE_DEFS
 
     keys = {d.key for d in TEMPLATE_DEFS}
-    assert "download_complete" not in keys
+    # download_complete (Sprint 14 Phase 1), plus download_started + cooldown_message
+    # (removed here as unused / phantom).
+    assert not ({"download_complete", "download_started", "cooldown_message"} & keys)
+
+
+async def test_every_template_key_is_real_and_placeholders_match_catalog() -> None:
+    # Regression guard for the phantom-template bug: a TEMPLATE_DEFS i18n_key that is not
+    # the exact catalog key the bot sends means admin edits silently do nothing. Validate
+    # against the SHIPPED catalogs (both locales), not a test fixture that can hide drift.
+    import re
+
+    from services.template_service import TEMPLATE_DEFS
+
+    locales_dir = Path(__file__).resolve().parents[2] / "core" / "locales"
+    for loc in ("en", "ar"):
+        catalog = json.loads((locales_dir / f"{loc}.json").read_text(encoding="utf-8"))
+        for defn in TEMPLATE_DEFS:
+            assert defn.i18n_key in catalog, (
+                f"{defn.key} -> {defn.i18n_key!r} is not in {loc}.json (admin edits would no-op)"
+            )
+            catalog_ph = set(re.findall(r"\{(\w+)\}", catalog[defn.i18n_key]))
+            assert set(defn.placeholders) == catalog_ph, (
+                f"{defn.key}: declared placeholders {defn.placeholders} "
+                f"!= catalog {sorted(catalog_ph)} in {loc}.json"
+            )

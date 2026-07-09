@@ -35,33 +35,18 @@ class TemplateDef:
     allow_buttons: bool = False
 
 
+# Each entry's ``i18n_key`` MUST be the exact catalog key the bot sends at runtime, or
+# admin edits silently do nothing (the override map is keyed by the sent key). A guard
+# test asserts every key below exists in the real locale catalog and is actually sent.
 TEMPLATE_DEFS: tuple[TemplateDef, ...] = (
     TemplateDef(
-        "welcome", "user.welcome", ("name",),
+        "welcome", "start.welcome_named", ("name",),
         placeholder_help=(("name", "Andrew"),),
     ),
-    TemplateDef("help", "user.help", ()),
-    TemplateDef(
-        "download_started", "download.started", ("title", "platform"),
-        placeholder_help=(("title", "My Video"), ("platform", "YouTube")),
-    ),
-    TemplateDef(
-        "download_failed", "download.failed", ("error",),
-        placeholder_help=(("error", "File too large"),),
-    ),
-    TemplateDef(
-        "daily_limit_reached", "limit.daily_reached", ("limit", "reset_in"),
-        placeholder_help=(("limit", "10"), ("reset_in", "6h")),
-    ),
-    TemplateDef(
-        "banned_message", "user.banned", ("reason",),
-        placeholder_help=(("reason", "Spam"),),
-        allow_buttons=True,
-    ),
-    TemplateDef(
-        "cooldown_message", "limit.cooldown", ("seconds",),
-        placeholder_help=(("seconds", "30"),),
-    ),
+    TemplateDef("help", "help.body", ()),
+    TemplateDef("download_failed", "notification.failed", ()),
+    TemplateDef("daily_limit_reached", "errors.daily_limit_exceeded", ()),
+    TemplateDef("banned_message", "user.banned", (), allow_buttons=True),
     TemplateDef("maintenance", "system.maintenance", (), allow_buttons=True),
 )
 
@@ -191,6 +176,15 @@ class TemplateService:
     ) -> None:
         if key not in _DEF_BY_KEY:
             raise KeyError(f"unknown template key: {key}")
+        # Buttons live on the ``message_templates`` row. banned/maintenance have no row
+        # until their text is customized, so persist the current (default) content first —
+        # otherwise the buttons write silently no-ops (content is NOT NULL) and the buttons
+        # vanish on restart. The message text is unchanged (it equals the shipped default).
+        if (key, locale) not in self._cache:
+            seed = self.full_content(key, locale)
+            await self._store.upsert(key, locale, seed)
+            self._cache[(key, locale)] = (seed, datetime.datetime.now(datetime.UTC))
+            self._sync_overrides()
         await self._store.set_buttons(key, locale, buttons)
         if buttons:
             self._buttons_cache[(key, locale)] = buttons
