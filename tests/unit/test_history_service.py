@@ -152,12 +152,12 @@ async def test_list_history_honours_configured_page_size() -> None:
 
 
 async def test_list_history_falls_back_to_default_when_unseeded() -> None:
-    # Key missing → SettingNotFoundError → default of 10, so 9 rows fit on one page.
+    # Key missing → SettingNotFoundError → default of 7, so 6 rows fit on one page.
     env = _build(page_size=None)
-    await _seed_history_rows(env, 9)
+    await _seed_history_rows(env, 6)
 
     first = await env["service"].list_history(7, page=0)
-    assert len(first.rows) == 9
+    assert len(first.rows) == 6
     assert first.has_next is False
 
 

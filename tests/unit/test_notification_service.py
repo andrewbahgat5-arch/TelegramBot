@@ -41,6 +41,7 @@ async def test_completed_and_failed_edits() -> None:
     await service.notify_failed(chat_id=1, message_id=2, locale="en")
     await service.notify_failed(chat_id=1, message_id=2, locale="en", reason="too large")
 
-    assert sender.edits[0][2].startswith("✅")
-    assert sender.edits[1][2].startswith("❌")
-    assert "too large" in sender.edits[2][2]
+    assert len(sender.deletes) == 1
+    assert sender.deletes[0] == (1, 2)
+    assert sender.edits[0][2].startswith("❌")
+    assert "too large" in sender.edits[1][2]

@@ -95,6 +95,10 @@ class CallbackSigner:
         payload = f"h{_SEP}{page}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
+    def pack_history_close(self) -> str:
+        payload = f"hx{_SEP}0"
+        return f"{payload}{_SEP}{self._sig(payload)}"
+
     def pack_language(self, code: str) -> str:
         payload = f"l{_SEP}{code}"
         return f"{payload}{_SEP}{self._sig(payload)}"
@@ -159,6 +163,8 @@ class CallbackSigner:
                 return ParsedCallback(action="r", arg=int(parts[1]))
             if action == "h" and len(parts) == 3:
                 return ParsedCallback(action="h", arg=int(parts[1]))
+            if action == "hx" and len(parts) == 3:
+                return ParsedCallback(action="hx", arg=int(parts[1]))
             if action == "l" and len(parts) == 3:
                 return ParsedCallback(action="l", language=parts[1])
             if action == "a" and len(parts) == 3:

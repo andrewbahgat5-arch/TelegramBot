@@ -69,13 +69,16 @@ def test_history_keyboard_has_resend_button_per_row_and_nav() -> None:
     signer = CallbackSigner("k")
     rows = [_HistRow(1), _HistRow(2)]
     markup = build_history_keyboard(
-        rows, page=1, has_prev=True, has_next=True, signer=signer, locale="en"
+        rows, page=1, has_prev=True, has_next=True, signer=signer, locale="en",
+        audio_count=1, video_count=1,
     )
     buttons = _buttons(markup)
     resend = [b for b in buttons if (b.callback_data or "").startswith("r|")]
-    nav = [b for b in buttons if (b.callback_data or "").startswith("h|")]
-    assert len(resend) == 2  # one resend per history row
-    assert len(nav) == 2  # prev + next
+    nav_h = [b for b in buttons if (b.callback_data or "").startswith("h|")]
+    close = [b for b in buttons if (b.callback_data or "").startswith("hx|")]
+    assert len(resend) == 2
+    assert len(nav_h) == 4  # 2 filters + prev + next
+    assert len(close) == 1
     parsed = signer.unpack(resend[0].callback_data or "")
     assert parsed is not None and parsed.action == "r" and parsed.arg == 1
 
@@ -83,10 +86,13 @@ def test_history_keyboard_has_resend_button_per_row_and_nav() -> None:
 def test_history_keyboard_first_page_has_no_prev() -> None:
     signer = CallbackSigner("k")
     markup = build_history_keyboard(
-        [_HistRow(1)], page=0, has_prev=False, has_next=False, signer=signer, locale="en"
+        [_HistRow(1)], page=0, has_prev=False, has_next=False, signer=signer, locale="en",
+        audio_count=0, video_count=1,
     )
-    nav = [b for b in _buttons(markup) if (b.callback_data or "").startswith("h|")]
-    assert nav == []  # neither prev nor next on a single full-stop page
+    buttons = _buttons(markup)
+    nav = [b for b in buttons if (b.callback_data or "").startswith("h|")]
+    # 2 filter buttons (audio/video), no prev/next
+    assert len(nav) == 2
 
 
 def test_quality_label_uses_gb_for_large_files() -> None:

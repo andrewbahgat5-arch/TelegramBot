@@ -333,6 +333,8 @@ class DownloadService:
                 quality=quality.value,
                 file_size=file_size,
                 title=info.title,
+                duration_seconds=info.duration,
+                size_bytes=file_size,
             )
             metrics.record_download(
                 platform=info.platform,

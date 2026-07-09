@@ -152,6 +152,13 @@ class TelegramMessageSender:
             # "message is not modified" / message deleted by the user — non-fatal.
             _log.debug("progress_edit_skipped", chat_id=chat_id, error=str(exc))
 
+    async def delete_message(self, chat_id: int, message_id: int) -> bool:
+        try:
+            await self._bot.delete_message(chat_id=chat_id, message_id=message_id)
+            return True
+        except TelegramBadRequest:
+            return False
+
 
 def _extract_upload(message: Message) -> UploadedFile:
     media = message.video or message.audio or message.document or message.voice

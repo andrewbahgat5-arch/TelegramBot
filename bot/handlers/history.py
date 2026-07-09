@@ -21,6 +21,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
+from bot.callbacks.paging import decode_filter_page
 from bot.handlers.ads import show_placement_ad
 from bot.keyboards.history import build_history_keyboard
 from core.i18n import Translator
@@ -50,9 +51,23 @@ _PLATFORM_EMOJI: dict[str, str] = {
     "reddit": "🔗",
 }
 
+_FILTER_LABELS = {0: None, 1: "audio", 2: "video"}
+_FILTER_INDEX = {v: k for k, v in _FILTER_LABELS.items()}
+
 
 def _platform_emoji(platform: str | None) -> str:
     return _PLATFORM_EMOJI.get((platform or "").lower(), "🔗")
+
+
+def _format_duration(seconds: int) -> str:
+    minutes, secs = divmod(seconds, 60)
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _humanize_size(size_bytes: int) -> str:
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.1f} MB"
 
 
 @router.message(Command("history"))
@@ -64,13 +79,11 @@ async def handle_history(
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
-    ad_service_factory: AdServiceFactory | None = None,
 ) -> None:
-    page = await history_service_factory(session).list_history(user.id, page=0)
+    svc = history_service_factory(session)
+    page = await svc.list_history(user.id, page=0)
     text, keyboard = _render(page, callback_signer, translate, locale)
     await message.answer(text, reply_markup=keyboard)
-    if ad_service_factory is not None:  # best-effort history placement (Sprint 9.5)
-        await show_placement_ad(ad_service_factory(session), user, AdPlacement.HISTORY.value)
 
 
 @router.callback_query(F.data.startswith("h|"))
@@ -85,12 +98,32 @@ async def handle_history_page(
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "h" or parsed.arg is None:
-        await callback.answer()  # forged/garbled → ignore silently (Section 14.2)
+        await callback.answer()
         return
-    page = await history_service_factory(session).list_history(user.id, page=parsed.arg)
+    filter_index, page_num = decode_filter_page(parsed.arg)
+    format_filter = _FILTER_LABELS.get(filter_index)
+    svc = history_service_factory(session)
+    page = await svc.list_history(user.id, page=page_num, format_filter=format_filter)
     text, keyboard = _render(page, callback_signer, translate, locale)
     if isinstance(callback.message, Message):
         await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("hx|"))
+async def handle_history_close(
+    callback: CallbackQuery,
+    callback_signer: CallbackSigner,
+) -> None:
+    parsed = callback_signer.unpack(callback.data or "")
+    if parsed is None or parsed.action != "hx":
+        await callback.answer()
+        return
+    if isinstance(callback.message, Message):
+        try:
+            await callback.message.delete()
+        except Exception:  # noqa: S110
+            pass
     await callback.answer()
 
 
@@ -104,6 +137,7 @@ async def handle_resend(
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
+    ad_service_factory: AdServiceFactory | None = None,
 ) -> None:
     parsed = callback_signer.unpack(callback.data or "")
     if parsed is None or parsed.action != "r" or parsed.arg is None:
@@ -117,10 +151,12 @@ async def handle_resend(
         user_id=user.id,
         telegram_id=user.telegram_id,
         progress_message_id=progress_message_id,
-        user=user,  # lets the caption-ad layer target this viewer (two-layer ads)
+        user=user,
     )
     if outcome is ResendKind.RESENT:
         await notification_service.notify_completed(user.telegram_id, progress_message_id, locale)
+        if ad_service_factory is not None:
+            await show_placement_ad(ad_service_factory(session), user, AdPlacement.HISTORY.value)
     elif outcome is ResendKind.NEEDS_RELINK:
         await notification_service.notify_text(
             user.telegram_id, progress_message_id, translate("history.relink", locale)
@@ -129,8 +165,6 @@ async def handle_resend(
         await notification_service.notify_text(
             user.telegram_id, progress_message_id, translate("history.not_found", locale)
         )
-    # REQUEUED: the worker now owns the progress message (request stashed its id),
-    # editing it through the download stages to ✅/❌ — nothing more to do here.
 
 
 def _render(
@@ -145,11 +179,28 @@ def _render(
         has_next=page.has_next,
         signer=signer,
         locale=locale,
+        format_filter=page.format_filter,
+        audio_count=page.audio_count,
+        video_count=page.video_count,
     )
     header = translate("history.header", locale, page=page.page + 1)
-    lines = [header, ""]
+    subtitle = translate("history.subtitle", locale)
+    lines = [header, subtitle, ""]
     for index, row in enumerate(page.rows, start=1):
         platform_emoji = _platform_emoji(row.platform)
         title = escape(row.title[:40]) if row.title else escape(row.format)
-        lines.append(f"{index}. {platform_emoji} {title} · {escape(row.quality)}")
+        lines.append(f"{index}. {title}")
+        detail_parts: list[str] = []
+        duration = getattr(row, "duration_seconds", None)
+        if duration is not None:
+            detail_parts.append(f"🕐 {_format_duration(duration)}")
+        size = getattr(row, "size_bytes", None) or getattr(row, "file_size", None)
+        if size is not None:
+            detail_parts.append(_humanize_size(size))
+        detail_parts.append(escape(row.format))
+        detail_parts.append(escape(row.quality))
+        detail_parts.append(f"{platform_emoji} {escape(row.platform or 'unknown').capitalize()}")
+        lines.append(f"   {'  ·  '.join(detail_parts)}")
+    lines.append("")
+    lines.append(f"💡 {translate('history.tip', locale)}")
     return "\n".join(lines), keyboard

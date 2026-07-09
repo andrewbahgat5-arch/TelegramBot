@@ -11,7 +11,6 @@
   "errors.rate_limit_exceeded": "Too many requests. Please slow down.",
 
   "notification.preparing": "⏳ Preparing your file…",
-  "notification.completed": "✅ Done — here is your file.",
   "notification.failed": "❌ Sorry, that download failed. Please try again.",
 
   "language.change_button": "🌐 Change Language",
@@ -46,7 +45,12 @@
   "history.empty": "🗂 You have no downloads yet. Send me a link to get started!",
   "history.relink": "This file is no longer available — please send the link again.",
   "history.not_found": "That item is no longer in your history.",
-  "history.header": "🗂 <b>Your downloads</b> (page {page})\nTap an entry to resend it.",
+  "history.header": "🗂 <b>Your downloads</b> (page {page})",
+  "history.subtitle": "Tap a number to get it again.",
+  "history.tip": "Tap a number to get it again.",
+  "history.filter_audio": "Audio only",
+  "history.filter_video": "Video only",
+  "history.close": "✕ Close",
 
   "common.cancel": "❌ Cancel",
   "common.home": "🏠 Home",

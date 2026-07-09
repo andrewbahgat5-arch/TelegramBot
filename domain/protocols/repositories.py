@@ -327,11 +327,18 @@ class SettingsRepositoryProtocol(Repository[T], Protocol[T]):
 
 class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
     async def list_for_user(
-        self, user_id: int, *, limit: int = 10, offset: int = 0
+        self,
+        user_id: int,
+        *,
+        limit: int = 10,
+        offset: int = 0,
+        format_filter: str | None = None,
     ) -> Sequence[T]: ...
     async def get_for_user(self, download_id: int, user_id: int) -> T | None:
         """Fetch one history row by id, scoped to its owner (resend, 16.3)."""
         ...
+
+    async def count_by_format(self, user_id: int) -> dict[str, int]: ...
 
     async def create_completed(
         self,
@@ -344,6 +351,8 @@ class DownloadRepositoryProtocol(Repository[T], Protocol[T]):
         file_size: int | None,
         status: str = "completed",
         title: str | None = None,
+        duration_seconds: int | None = None,
+        size_bytes: int | None = None,
     ) -> T:
         """Insert a denormalized history row for a delivered download (10.5, 16.1 W7)."""
         ...

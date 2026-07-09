@@ -891,6 +891,8 @@ class FakeDownloadRow:
     file_size: int | None
     status: str = "completed"
     title: str | None = None
+    duration_seconds: int | None = None
+    size_bytes: int | None = None
     id: int = 0
     created_at: datetime.datetime = field(
         default_factory=lambda: datetime.datetime.now(datetime.UTC)
@@ -917,11 +919,25 @@ class FakeDownloadRepo:
         return None
 
     async def list_for_user(
-        self, user_id: int, *, limit: int = 10, offset: int = 0
+        self,
+        user_id: int,
+        *,
+        limit: int = 10,
+        offset: int = 0,
+        format_filter: str | None = None,
     ) -> Sequence[FakeDownloadRow]:
         owned = [r for r in self.rows if r.user_id == user_id]
-        owned.sort(key=lambda r: (r.created_at, r.id), reverse=True)  # newest first
+        if format_filter is not None:
+            owned = [r for r in owned if r.format == format_filter]
+        owned.sort(key=lambda r: (r.created_at, r.id), reverse=True)
         return owned[offset : offset + limit]
+
+    async def count_by_format(self, user_id: int) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for r in self.rows:
+            if r.user_id == user_id:
+                counts[r.format] = counts.get(r.format, 0) + 1
+        return counts
 
     async def get_for_user(self, download_id: int, user_id: int) -> FakeDownloadRow | None:
         return next((r for r in self.rows if r.id == download_id and r.user_id == user_id), None)
@@ -937,6 +953,8 @@ class FakeDownloadRepo:
         file_size: int | None,
         status: str = "completed",
         title: str | None = None,
+        duration_seconds: int | None = None,
+        size_bytes: int | None = None,
     ) -> FakeDownloadRow:
         row = FakeDownloadRow(
             user_id=user_id,
@@ -947,6 +965,8 @@ class FakeDownloadRepo:
             file_size=file_size,
             status=status,
             title=title,
+            duration_seconds=duration_seconds,
+            size_bytes=size_bytes,
             id=self._next_id,
         )
         self._next_id += 1
@@ -1055,12 +1075,14 @@ class FakeFileSender:
 
 
 class FakeMessageSender:
-    """In-memory ``MessageSenderProtocol`` recording sends/edits."""
+    """In-memory ``MessageSenderProtocol`` recording sends/edits/deletes."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, delete_fails: bool = False) -> None:
         self._next_id = 100
+        self._delete_fails = delete_fails
         self.sent: list[tuple[int, str]] = []
         self.edits: list[tuple[int, int, str]] = []
+        self.deletes: list[tuple[int, int]] = []
 
     async def send_message(self, chat_id: int, text: str) -> int:
         self._next_id += 1
@@ -1069,6 +1091,10 @@ class FakeMessageSender:
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
         self.edits.append((chat_id, message_id, text))
+
+    async def delete_message(self, chat_id: int, message_id: int) -> bool:
+        self.deletes.append((chat_id, message_id))
+        return not self._delete_fails
 
 
 class FakeTranscoder:

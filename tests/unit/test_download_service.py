@@ -293,8 +293,8 @@ async def test_fan_out_delivers_to_all_waiters_once(tmp_path: Path) -> None:
     assert sorted(r.user_id for r in env["downloads"].rows) == [7, 8]
     assert env["users"].by_tid[555].total_downloads == 1
     assert env["users"].by_tid[556].total_downloads == 1
-    # Both waiters' progress messages are edited to the completed text.
-    completed_targets = {(c, m) for c, m, _ in env["msg"].edits}
+    # Both waiters' progress messages are deleted (Phase 1.2 — D-1).
+    completed_targets = set(env["msg"].deletes)
     assert (555, 901) in completed_targets and (556, 902) in completed_targets
 
 

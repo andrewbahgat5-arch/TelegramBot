@@ -80,9 +80,9 @@ class NotificationService:
         await self._sender.edit_message(chat_id, message_id, text)
 
     async def notify_completed(self, chat_id: int, message_id: int, locale: str) -> None:
-        await self._sender.edit_message(
-            chat_id, message_id, translate("notification.completed", locale)
-        )
+        deleted = await self._sender.delete_message(chat_id, message_id)
+        if not deleted:
+            await self._sender.edit_message(chat_id, message_id, "✅")
 
     async def notify_failed(
         self, chat_id: int, message_id: int, locale: str, reason: str | None = None

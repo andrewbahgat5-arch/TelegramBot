@@ -11,7 +11,6 @@
   "errors.rate_limit_exceeded": "طلبات كثيرة جدًا. يرجى الإبطاء.",
 
   "notification.preparing": "⏳ جارٍ تجهيز ملفك…",
-  "notification.completed": "✅ تم — إليك ملفك.",
   "notification.failed": "❌ عذرًا، فشل التنزيل. يرجى المحاولة مرة أخرى.",
 
   "language.change_button": "🌐 تغيير اللغة",
@@ -46,7 +45,12 @@
   "history.empty": "🗂 لا توجد لديك تنزيلات بعد. أرسل لي رابطًا للبدء!",
   "history.relink": "هذا الملف لم يعد متاحًا — يرجى إرسال الرابط مرة أخرى.",
   "history.not_found": "هذا العنصر لم يعد موجودًا في سجلّك.",
-  "history.header": "🗂 <b>تنزيلاتك</b> (صفحة {page})\nاضغط على عنصر لإعادة إرساله.",
+  "history.header": "🗂 <b>تنزيلاتك</b> (صفحة {page})",
+  "history.subtitle": "اضغط على رقم لاسترجاعه.",
+  "history.tip": "اضغط على رقم لاسترجاعه.",
+  "history.filter_audio": "صوت فقط",
+  "history.filter_video": "فيديو فقط",
+  "history.close": "✕ إغلاق",
 
   "common.cancel": "❌ إلغاء",
   "common.home": "🏠 الرئيسية",

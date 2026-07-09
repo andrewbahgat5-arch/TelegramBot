@@ -81,3 +81,7 @@ class MessageSenderProtocol(Protocol):
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:
         """Edit a previously sent message's text (best-effort; ignores 'not modified')."""
         ...
+
+    async def delete_message(self, chat_id: int, message_id: int) -> bool:
+        """Delete a previously sent message. Returns True on success, False on failure."""
+        ...

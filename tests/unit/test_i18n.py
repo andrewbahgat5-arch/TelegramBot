@@ -226,7 +226,6 @@ def test_real_error_and_notification_keys_present() -> None:
     i18n.configure("en")
     for key in (
         "notification.preparing",
-        "notification.completed",
         "notification.failed",
         "language.change_button",
         "language.picker_prompt",
