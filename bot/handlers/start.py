@@ -60,25 +60,22 @@ def render_home(
     """The /start home view: welcome text + a menu. Reused by handle_start (new message),
     the Settings Back button, and the post-language-change reopen (all edit in place)."""
     name = user.first_name if user and user.first_name else None
-    text = (
+    greeting = (
         translate("start.welcome_named", locale, name=name)
         if name
         else translate("start.welcome_anonymous", locale)
     )
+    text = f"{greeting}\n\n{translate('start.home_body', locale)}"
+
+    def button(label_key: str, data: str) -> list[InlineKeyboardButton]:
+        return [InlineKeyboardButton(text=translate(label_key, locale), callback_data=data)]
+
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=translate("settings.open_button", locale),
-                    callback_data=signer.pack_user_setting(-1),
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text=translate("language.change_button", locale),
-                    callback_data=signer.pack_language(OPEN_PICKER_SENTINEL, "s"),
-                )
-            ],
+            button("start.button.my_files", signer.pack_history_page(0)),
+            button("settings.open_button", signer.pack_user_setting(-1)),
+            button("start.button.try_premium", signer.pack_referral()),
+            button("language.change_button", signer.pack_language(OPEN_PICKER_SENTINEL, "s")),
         ]
     )
     return text, keyboard
@@ -172,24 +169,72 @@ async def handle_referral(
     """Show the caller their personal referral link, invite count, and bonus (13.7)."""
     if user is None or session is None or referral_service_factory is None:
         return
+    text = await _referral_screen_text(
+        user, session, referral_service_factory, settings_service_factory, translate, locale
+    )
+    await message.answer(text)
+
+
+async def _referral_screen_text(
+    user: UserSnapshot,
+    session: AsyncSession,
+    referral_service_factory: ReferralServiceFactory | None,
+    settings_service_factory: SettingsServiceFactory | None,
+    translate: Translator,
+    locale: str,
+) -> str:
+    """The referral screen body (link + invites + bonus), or the disabled notice. Shared by
+    the ``/referral`` command and the Start-menu "Try Premium" button (item #9)."""
+    if referral_service_factory is None:
+        return translate("referral.disabled", locale)
     reward = 0
     if settings_service_factory is not None:
         settings = settings_service_factory(session)
         if not bool(await settings.get("referral_enabled")):
-            await message.answer(translate("referral.disabled", locale))
-            return
+            return translate("referral.disabled", locale)
         reward = int(await settings.get("referral_reward_downloads"))
     stats = await referral_service_factory(session).get_user_referral_stats(user.id)
-    await message.answer(
-        translate(
-            "referral.screen",
-            locale,
-            link=stats.referral_link,
-            reward=reward,
-            invited=stats.total_invited,
-            bonus=stats.total_bonus_downloads,
-        )
+    return translate(
+        "referral.screen",
+        locale,
+        link=stats.referral_link,
+        reward=reward,
+        invited=stats.total_invited,
+        bonus=stats.total_bonus_downloads,
     )
+
+
+@router.callback_query(F.data.startswith("rf|"))
+async def handle_referral_callback(
+    callback: CallbackQuery,
+    translate: Translator,
+    locale: str,
+    callback_signer: CallbackSigner,
+    session: AsyncSession,
+    user: UserSnapshot,
+    referral_service_factory: ReferralServiceFactory | None = None,
+    settings_service_factory: SettingsServiceFactory | None = None,
+) -> None:
+    """Render the referral screen in place from the Start menu, with a Back-to-Start row."""
+    parsed = callback_signer.unpack(callback.data or "")
+    if parsed is None or parsed.action != "rf":
+        await callback.answer()
+        return
+    await callback.answer()
+    text = await _referral_screen_text(
+        user, session, referral_service_factory, settings_service_factory, translate, locale
+    )
+    back = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=translate("common.back", locale),
+                    callback_data=callback_signer.pack_user_setting(-2),  # -2 = back to Start
+                )
+            ]
+        ]
+    )
+    await _edit_text(callback, text, back)
 
 
 @router.callback_query(F.data.startswith("l|"))

@@ -12,6 +12,7 @@ from bot.handlers.help import handle_help
 from bot.handlers.start import (
     handle_language_callback,
     handle_referral,
+    handle_referral_callback,
     handle_start,
     handle_user_settings,
 )
@@ -124,13 +125,21 @@ async def test_start_without_user_still_replies() -> None:
     message.answer.assert_awaited_once()
 
 
-async def test_start_offers_settings_and_language_buttons() -> None:
+async def test_start_offers_all_working_menu_buttons() -> None:
+    # Item #9: Start shows the working buttons — My files, Settings, Try Premium, Change language.
     message = _message()
     await handle_start(message, _cmd(), translate, "en", _SIGNER, None)
     keyboard = message.answer.await_args.kwargs["reply_markup"]
     labels = [b.text for row in keyboard.inline_keyboard for b in row]
-    assert translate("settings.open_button", "en") in labels  # item #10 entry point
-    assert translate("language.change_button", "en") in labels
+    for key in (
+        "start.button.my_files",
+        "settings.open_button",
+        "start.button.try_premium",
+        "language.change_button",
+    ):
+        assert translate(key, "en") in labels
+    body = message.answer.await_args.args[0]
+    assert "Features" in body and "How to use" in body  # the redesigned home text
 
 
 async def test_help_replies() -> None:
@@ -175,7 +184,7 @@ async def test_language_pick_persists_and_reopens_start_in_new_locale() -> None:
     assert repo.by_tid[1].language == "ar"
     callback.answer.assert_awaited_with(translate("language.updated", "ar", native_name="العربية"))
     reopened = callback.message.edit_text.await_args.args[0]
-    assert reopened == translate("start.welcome_anonymous", "ar")  # Start reopened in Arabic
+    assert reopened.startswith(translate("start.welcome_anonymous", "ar"))  # Start, in Arabic
     kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
     labels = [b.text for row in kb.inline_keyboard for b in row]
     assert translate("language.change_button", "ar") in labels
@@ -227,7 +236,41 @@ async def test_user_settings_back_reopens_start() -> None:
         callback, translate, "en", _SIGNER, object(), user, lambda s: _FakePrefService()
     )
     text = callback.message.edit_text.await_args.args[0]
-    assert text == translate("start.welcome_anonymous", "en")
+    assert text.startswith(translate("start.welcome_anonymous", "en"))  # Start home reopened
+
+
+class _FakeReferralService:
+    async def get_user_referral_stats(self, user_id: int) -> object:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            referral_link="https://t.me/bot?start=ref_abc", total_invited=3, total_bonus_downloads=6
+        )
+
+
+class _FakeReferralSettings:
+    async def get(self, key: str) -> object:
+        return True if key == "referral_enabled" else 5
+
+
+async def test_referral_callback_renders_screen_with_back_button() -> None:
+    # Item #9: the "Try Premium" button renders the referral screen in place, with a Back row.
+    callback = _callback(_SIGNER.pack_referral())
+    user = UserSnapshot.from_row(FakeUser(id=1, telegram_id=1))
+    await handle_referral_callback(
+        callback,
+        translate,
+        "en",
+        _SIGNER,
+        object(),
+        user,
+        lambda s: _FakeReferralService(),
+        lambda s: _FakeReferralSettings(),
+    )
+    callback.message.edit_text.assert_awaited_once()
+    kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert translate("common.back", "en") in labels
 
 
 async def test_language_pick_origin_survives_pack_unpack() -> None:

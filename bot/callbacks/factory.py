@@ -106,6 +106,12 @@ class CallbackSigner:
         payload = f"l{_SEP}{code}{_SEP}{origin}" if origin else f"l{_SEP}{code}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
+    def pack_referral(self) -> str:
+        # "Try Premium / Referral" button on the Start menu (item #9) — renders the
+        # caller's referral screen in place. The ``0`` keeps it at the 3-field minimum.
+        payload = f"rf{_SEP}0"
+        return f"{payload}{_SEP}{self._sig(payload)}"
+
     def pack_user_setting(self, arg: int) -> str:
         # User Settings screen (item #10): arg -1 opens the screen, -2 goes back to Start,
         # >=0 toggles SETTING_TOGGLES[arg]. Small signed int keeps callback_data tiny.
@@ -180,6 +186,8 @@ class CallbackSigner:
                 return ParsedCallback(action="l", language=parts[1])
             if action == "us" and len(parts) == 3:
                 return ParsedCallback(action="us", arg=int(parts[1]))
+            if action == "rf" and len(parts) == 3:
+                return ParsedCallback(action="rf")
             if action == "a" and len(parts) == 3:
                 return ParsedCallback(action="a", arg=int(parts[1]))
             if action == "a" and len(parts) == 4:

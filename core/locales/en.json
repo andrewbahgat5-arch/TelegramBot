@@ -29,12 +29,15 @@
 
   "start.welcome_named": "👋 Welcome, {name}!\n\nSend me a link to a video or audio post and I'll fetch it for you.\nUse /help to see what I can do.",
   "start.welcome_anonymous": "👋 Welcome!\n\nSend me a link to a video or audio post and I'll fetch it for you.\nUse /help to see what I can do.",
+  "start.home_body": "<b>Features</b>\n• 📹 YouTube, Instagram, TikTok, Twitter, Facebook, and more\n• ⚡ Instant delivery from cache for files fetched before\n• 🎧 Audio extraction & conversion (mp3, m4a, ogg)\n• 🗂 Your download history, one tap away\n\n<b>How to use</b>\n1. Send a link to any supported service\n2. Choose a format and quality\n3. Get your file in seconds",
+  "start.button.my_files": "📁 My files",
+  "start.button.try_premium": "👑 Try Premium for free",
 
   "referral.notify": "🎉 Someone joined using your referral link!\nYou earned <b>+{reward}</b> bonus downloads.\nTotal referrals: <b>{total}</b>",
   "referral.disabled": "Referrals are currently disabled.",
   "referral.screen": "◆ <b>Your Referral Link</b>\n\n🔗 {link}\n\nShare this link with friends — you both get <b>+{reward}</b> bonus downloads.\n\n👥 Total invited: <b>{invited}</b>\n🎁 Bonus downloads: <b>{bonus}</b>",
 
-  "help.body": "<b>How to use this bot</b>\n\n• Send a supported link and pick a format/quality to download.\n• /history — see your past downloads and resend any of them.\n• /start — restart the bot.\n• /help — show this message.",
+  "help.body": "<b>How to use</b>\n1. Send a supported link\n2. Choose a format and quality\n3. Get your file in seconds\n\n<b>Commands</b>\n• /history — your past downloads, resend any of them\n• /start — open the home menu\n• /help — show this message",
 
   "download.duplicate": "⏳ This is already being prepared — you'll get it shortly.",
   "download.busy": "⏳ You already have a download in progress. Please wait for it to finish.",
