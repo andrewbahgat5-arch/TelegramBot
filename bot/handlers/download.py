@@ -17,6 +17,7 @@ import datetime
 import uuid
 from collections.abc import Callable
 from html import escape
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
@@ -30,7 +31,7 @@ from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from domain.entities.media import MediaInfo
 from domain.entities.user import UserSnapshot
-from domain.enums import UNLIMITED_ROLES, AdPlacement
+from domain.enums import UNLIMITED_ROLES, AdPlacement, MediaFormat, Quality
 from domain.exceptions import (
     ExtractionFailedError,
     InfrastructureError,
@@ -44,6 +45,7 @@ from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
 from services.url_analyzer import URLAnalyzerService
+from services.user_preference_service import UserPreferenceService
 
 router = Router(name="download")
 _log = get_logger("bot.handlers.download")
@@ -52,6 +54,11 @@ AnalyzerFactory = Callable[[AsyncSession], URLAnalyzerService]
 JobServiceFactory = Callable[[AsyncSession], JobService]
 RateLimitServiceFactory = Callable[[AsyncSession], RateLimitService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
+PreferenceServiceFactory = Callable[[AsyncSession], UserPreferenceService]
+
+# "Small file" ceiling for the auto-download preference (item #10): a single-format
+# link at or under this size is fetched without the picker; larger files still ask.
+_AUTO_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MiB
 
 
 def _is_free(user: UserSnapshot) -> bool:
@@ -78,6 +85,10 @@ async def handle_url(
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
+    preference_service_factory: PreferenceServiceFactory | None = None,
+    job_service_factory: JobServiceFactory | None = None,
+    rate_limit_service_factory: RateLimitServiceFactory | None = None,
+    notification_service: NotificationService | None = None,
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
     ack = await message.answer(translate("download.analyzing", locale))
@@ -102,6 +113,37 @@ async def handle_url(
         await ack.edit_text(translate("download.no_formats", locale))
         return
 
+    # Auto-download (item #10): if the user opted in and this is a single small format,
+    # skip the picker and fetch it straight away (large/multi-format links still ask).
+    if (
+        preference_service_factory is not None
+        and job_service_factory is not None
+        and rate_limit_service_factory is not None
+        and notification_service is not None
+    ):
+        prefs = await preference_service_factory(session).get(user.id)
+        auto = _single_small_format(analyzed.info) if prefs.auto_download_small else None
+        if auto is not None:
+            try:
+                await rate_limit_service_factory(session).authorize_download(user.telegram_id)
+            except UserFacingError as exc:
+                await ack.edit_text(translate(exc.translation_key, locale))
+                return
+            await ack.delete()
+            await _auto_download(
+                session,
+                user,
+                analyzed,
+                auto[0],
+                auto[1],
+                job_service_factory,
+                ad_service_factory,
+                notification_service,
+                translate,
+                locale,
+            )
+            return
+
     keyboard = build_format_keyboard(analyzed.media_id, analyzed.info, callback_signer, locale)
     caption = _media_caption(analyzed.info, translate, locale)
     # Caption-layer ad (two-layer ads): append the ad text under "Choose a format" + its CTA
@@ -123,6 +165,57 @@ async def handle_url(
             _log.debug("thumbnail_send_failed", error=str(exc))
     await ack.edit_text(caption, reply_markup=keyboard)
     await show_placement_ad(ad_service_factory(session), user, AdPlacement.ANALYSIS.value)
+
+
+def _single_small_format(info: MediaInfo) -> tuple[MediaFormat, Quality] | None:
+    """The one small format to auto-fetch (item #10), or None when the picker should show:
+    only a single available format whose size is known and at or under the ceiling."""
+    if len(info.formats) != 1:
+        return None
+    option = info.formats[0]
+    size = option.approx_size_bytes
+    if size is None or size > _AUTO_DOWNLOAD_MAX_BYTES:
+        return None
+    return option.format, option.quality
+
+
+async def _auto_download(
+    session: AsyncSession,
+    user: UserSnapshot,
+    analyzed: Any,
+    format_: MediaFormat,
+    quality: Quality,
+    job_service_factory: JobServiceFactory,
+    ad_service_factory: AdServiceFactory,
+    notification_service: NotificationService,
+    translate: Translator,
+    locale: str,
+) -> None:
+    """Enqueue the auto-picked format directly — mirrors handle_quality_choice's core
+    (progress message → JobService.request → dedup notices → placement ad) so an
+    auto-download and a manual pick behave identically past the picker."""
+    progress_message_id = await notification_service.send_initial(user.telegram_id, locale)
+    correlation = get_correlation_id()
+    outcome = await job_service_factory(session).request(
+        user_id=user.id,
+        telegram_id=user.telegram_id,
+        media_id=analyzed.media_id,
+        info=analyzed.info,
+        format_=format_,
+        quality=quality,
+        progress_message_id=progress_message_id,
+        correlation_id=uuid.UUID(correlation) if correlation else None,
+        single_active=_subject_to_free_cap(user),
+    )
+    if outcome.kind is RequestKind.DUPLICATE:
+        await notification_service.notify_text(
+            user.telegram_id, progress_message_id, translate("download.duplicate", locale)
+        )
+    elif outcome.kind is RequestKind.BUSY:
+        await notification_service.notify_text(
+            user.telegram_id, progress_message_id, translate("download.busy", locale)
+        )
+    await show_placement_ad(ad_service_factory(session), user, AdPlacement.QUALITY_SELECT.value)
 
 
 def _build_caption(info: MediaInfo, footer: str) -> str:

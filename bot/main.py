@@ -68,6 +68,7 @@ from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.reward import RewardRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
+from infrastructure.database.repositories.user_preference import UserPreferenceRepository
 from infrastructure.database.session import create_session_factory
 from infrastructure.database.user_health_store import UserHealthStoreAdapter
 from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
@@ -98,6 +99,7 @@ from services.settings_service import SettingsService
 from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
 from services.user_health import UserHealthChecker
+from services.user_preference_service import UserPreferenceService
 from services.user_service import UserService
 
 _log = get_logger("bot.main")
@@ -117,6 +119,7 @@ def build_dispatcher(
     audience_service_factory: Callable[[AsyncSession], AudienceService],
     admin_service_factory: Callable[[AsyncSession], AdminService],
     referral_service_factory: Callable[[AsyncSession], ReferralService],
+    preference_service_factory: Callable[[AsyncSession], UserPreferenceService],
     template_service: TemplateService,
     health_checker_factory: Callable[[Bot], UserHealthChecker],
     queue_service: QueueService,
@@ -144,6 +147,7 @@ def build_dispatcher(
     dp["audience_service_factory"] = audience_service_factory
     dp["admin_service_factory"] = admin_service_factory
     dp["referral_service_factory"] = referral_service_factory
+    dp["preference_service_factory"] = preference_service_factory
     dp["template_service"] = template_service
     dp["health_checker_factory"] = health_checker_factory
     dp["queue_service"] = queue_service
@@ -238,6 +242,9 @@ async def main() -> None:
     def make_reward_service(session: AsyncSession) -> RewardService:
         return RewardService(RewardRepository(session))
 
+    def make_preference_service(session: AsyncSession) -> UserPreferenceService:
+        return UserPreferenceService(UserPreferenceRepository(session))
+
     def make_rate_limit_service(session: AsyncSession) -> RateLimitService:
         settings_service = SettingsService(
             SettingsRepository(session), redis_cache, cache_ttl=settings.cache_settings_ttl
@@ -266,6 +273,7 @@ async def main() -> None:
             notification_service=notification_service,
             settings=settings,
             caption_mixer=make_caption_mixer(session),
+            preference_repo=UserPreferenceRepository(session),
         )
 
     def make_caption_mixer(session: AsyncSession) -> CaptionAdMixer:
@@ -351,6 +359,7 @@ async def main() -> None:
         audience_service_factory=make_audience_service,
         admin_service_factory=make_admin_service,
         referral_service_factory=make_referral_service,
+        preference_service_factory=make_preference_service,
         template_service=template_service,
         health_checker_factory=make_health_checker,
         queue_service=queue_service,

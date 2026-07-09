@@ -17,6 +17,13 @@
   "notification.failed": "❌ Sorry, that download failed. Please try again.",
 
   "language.change_button": "🌐 Change Language",
+  "settings.open_button": "⚙️ Settings",
+  "settings.header": "⚙️ <b>Settings</b>",
+  "settings.intro_auto": "<b>Auto-download</b> — when on, a link with a single format and a small file is downloaded and sent right away, no picker. Off by default: a large file never uses your daily quota without asking.",
+  "settings.intro_caption": "<b>Caption</b> — hide parts of the caption from delivered files. Off by default — everything is sent.\n• <b>Title</b> — the title, the account name, or just the link",
+  "settings.legend": "Legend\n❌ — feature off · ✅ — feature on",
+  "settings.toggle.auto_download": "Auto-download single small files",
+  "settings.toggle.hide_title": "Don't send title",
   "language.picker_prompt": "Please choose your language:",
   "language.updated": "Language updated to {native_name} ✅",
 

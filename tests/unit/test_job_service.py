@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import types
 from typing import Any
 
 from core.uuid7 import uuid7
@@ -269,3 +270,25 @@ async def test_duplicate_active_request_attaches_waiter() -> None:
     assert ctx is not None
     assert ctx["progress"]["7"] == {"telegram_id": 555, "message_id": 999}  # originator
     assert ctx["progress"]["8"] == {"telegram_id": 556, "message_id": 1000}  # duplicate
+
+
+class _FakePrefRepo:
+    def __init__(self, hide_title: bool) -> None:
+        self._hide = hide_title
+
+    async def get_by_user_id(self, user_id: int) -> Any:
+        return types.SimpleNamespace(hide_title=self._hide)
+
+
+async def test_hide_title_pref_drops_the_caption_title() -> None:
+    # Item #10: the "Don't send title" preference removes the title (the caption base)
+    # from the delivered cache-hit caption; without it the title is kept.
+    svc = object.__new__(JobService)
+    svc._caption_mixer = None
+    svc._users = None  # not reached when caption_mixer is None
+
+    svc._prefs = _FakePrefRepo(hide_title=True)
+    assert await svc._caption_addon(1, "My Title") == (None, ())
+
+    svc._prefs = _FakePrefRepo(hide_title=False)
+    assert await svc._caption_addon(1, "My Title") == ("My Title", ())

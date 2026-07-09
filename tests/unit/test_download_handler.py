@@ -457,6 +457,76 @@ async def test_quality_choice_enqueues_job() -> None:
     assert await backend.depth() == 1  # a job was enqueued (cache miss)
 
 
+def _single_small_analyzer(size: int) -> URLAnalyzerService:
+    info = MediaInfo(
+        platform="x",
+        video_id="vid",
+        title="A Clip",
+        source_url=_URL,
+        formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P720, size, "a"),),
+    )
+    cache_service, _ = make_cache_service()
+    return URLAnalyzerService(FakeProvider("ytdlp", result=info), cache_service, FakeMediaRepo())
+
+
+class _AutoOnPrefService:
+    async def get(self, user_id: int) -> object:
+        from services.user_preference_service import UserPreferences
+
+        return UserPreferences(auto_download_small=True)
+
+
+async def test_auto_download_single_small_file_skips_the_picker() -> None:
+    # Item #10: opted-in user + one small format → enqueue directly, no picker shown.
+    analyzer = _single_small_analyzer(5_000_000)  # 5 MB < 20 MiB ceiling
+    job_service, backend = _job_service()
+    message, ack = _message_with_ack()
+
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+        preference_service_factory=lambda s: _AutoOnPrefService(),
+        job_service_factory=lambda s: job_service,
+        rate_limit_service_factory=lambda s: _rate_limit_service(),
+        notification_service=NotificationService(FakeMessageSender()),
+    )
+
+    ack.delete.assert_awaited_once()  # the "Analyzing…" ack was removed
+    ack.edit_text.assert_not_awaited()  # never rendered a picker
+    assert await backend.depth() == 1  # enqueued straight away
+
+
+async def test_auto_download_skips_large_file_and_shows_picker() -> None:
+    # A single LARGE file still asks (the whole point of the opt-in).
+    analyzer = _single_small_analyzer(500_000_000)  # 500 MB > ceiling
+    job_service, backend = _job_service()
+    message, ack = _message_with_ack()
+
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+        preference_service_factory=lambda s: _AutoOnPrefService(),
+        job_service_factory=lambda s: job_service,
+        rate_limit_service_factory=lambda s: _rate_limit_service(),
+        notification_service=NotificationService(FakeMessageSender()),
+    )
+
+    ack.edit_text.assert_awaited_once()  # picker shown
+    assert await backend.depth() == 0  # nothing auto-enqueued
+
+
 def _rate_limit_service_at_limit() -> RateLimitService:
     """A rate limiter that rejects: free_daily_limit=0 with the user already present."""
     cache_service, _ = make_cache_service()

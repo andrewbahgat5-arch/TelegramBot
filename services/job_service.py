@@ -46,6 +46,7 @@ from services.cache_service import CacheService
 from services.caption_ad_mixer import CaptionAdMixer
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
+from services.user_preference_service import UserPreferenceStore
 
 _log = get_logger("services.job_service")
 
@@ -81,6 +82,7 @@ class JobService:
         notification_service: NotificationService,
         settings: Settings,
         caption_mixer: CaptionAdMixer | None = None,
+        preference_repo: UserPreferenceStore | None = None,
     ) -> None:
         self._jobs = job_repo
         self._cached = cached_file_repo
@@ -94,6 +96,7 @@ class JobService:
         self._notifier = notification_service
         self._settings = settings
         self._caption_mixer = caption_mixer
+        self._prefs = preference_repo
 
     async def request(
         self,
@@ -199,6 +202,10 @@ class JobService:
         self, user_id: int, base: str | None
     ) -> tuple[str | None, tuple[AdButtonSpec, ...]]:
         """Base caption + any due caption-layer ad for the requester (two-layer ads)."""
+        if base and self._prefs is not None:  # "Don't send title" preference (item #10)
+            pref = await self._prefs.get_by_user_id(user_id)
+            if pref is not None and getattr(pref, "hide_title", False):
+                base = None
         if self._caption_mixer is None:
             return base, ()
         user = await self._users.get_by_id(user_id)

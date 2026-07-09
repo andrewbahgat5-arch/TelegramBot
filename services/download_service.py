@@ -68,6 +68,7 @@ from services.caption_ad_mixer import CaptionAdMixer
 from services.notification_service import NotificationService, ProgressStage
 from services.settings_service import SettingNotFoundError, SettingsService
 from services.url_analyzer import URLAnalyzerService
+from services.user_preference_service import UserPreferenceStore
 
 _log = get_logger("services.download_service")
 
@@ -124,6 +125,7 @@ class DownloadService:
         settings: Settings,
         ad_service: AdShowProtocol | None = None,
         caption_mixer: CaptionAdMixer | None = None,
+        preference_repo: UserPreferenceStore | None = None,
     ) -> None:
         self._jobs = job_repo
         self._cached = cached_file_repo
@@ -141,11 +143,20 @@ class DownloadService:
         self._settings = settings
         self._ad_service = ad_service
         self._caption_mixer = caption_mixer
+        self._prefs = preference_repo
 
     async def _caption(
         self, user: Any, total_downloads: int, base: str | None
     ) -> tuple[str | None, tuple[AdButtonSpec, ...]]:
-        """Base caption + any due caption-layer ad (text + buttons) for ``user`` (two-layer)."""
+        """Base caption + any due caption-layer ad (text + buttons) for ``user`` (two-layer).
+
+        Respects the per-user "Don't send title" preference (item #10): the delivered
+        caption base is the media title, so drop it when the recipient has opted out.
+        """
+        if base and self._prefs is not None and getattr(user, "id", None) is not None:
+            pref = await self._prefs.get_by_user_id(user.id)
+            if pref is not None and getattr(pref, "hide_title", False):
+                base = None
         if self._caption_mixer is None:
             return base, ()
         return await self._caption_mixer.decorate_for_user(user, base, total_downloads)

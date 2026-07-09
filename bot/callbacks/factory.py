@@ -106,6 +106,12 @@ class CallbackSigner:
         payload = f"l{_SEP}{code}{_SEP}{origin}" if origin else f"l{_SEP}{code}"
         return f"{payload}{_SEP}{self._sig(payload)}"
 
+    def pack_user_setting(self, arg: int) -> str:
+        # User Settings screen (item #10): arg -1 opens the screen, -2 goes back to Start,
+        # >=0 toggles SETTING_TOGGLES[arg]. Small signed int keeps callback_data tiny.
+        payload = f"us{_SEP}{arg}"
+        return f"{payload}{_SEP}{self._sig(payload)}"
+
     def pack_ad_click(self, ad_id: int, button_id: int | None = None) -> str:
         # 3-part (legacy single button) ``a|ad_id``; 4-part ``a|ad_id|button_id``.
         payload = f"a{_SEP}{ad_id}" if button_id is None else f"a{_SEP}{ad_id}{_SEP}{button_id}"
@@ -172,6 +178,8 @@ class CallbackSigner:
                 return ParsedCallback(action="l", language=parts[1], origin=parts[2] or None)
             if action == "l" and len(parts) == 3:
                 return ParsedCallback(action="l", language=parts[1])
+            if action == "us" and len(parts) == 3:
+                return ParsedCallback(action="us", arg=int(parts[1]))
             if action == "a" and len(parts) == 3:
                 return ParsedCallback(action="a", arg=int(parts[1]))
             if action == "a" and len(parts) == 4:

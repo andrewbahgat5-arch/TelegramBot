@@ -9,7 +9,12 @@ from aiogram.types import CallbackQuery, Message
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.help import handle_help
-from bot.handlers.start import handle_language_callback, handle_referral, handle_start
+from bot.handlers.start import (
+    handle_language_callback,
+    handle_referral,
+    handle_start,
+    handle_user_settings,
+)
 from core.i18n import translate
 from domain.entities.user import UserSnapshot
 from services.user_service import UserService
@@ -119,12 +124,13 @@ async def test_start_without_user_still_replies() -> None:
     message.answer.assert_awaited_once()
 
 
-async def test_start_offers_change_language_button() -> None:
+async def test_start_offers_settings_and_language_buttons() -> None:
     message = _message()
     await handle_start(message, _cmd(), translate, "en", _SIGNER, None)
     keyboard = message.answer.await_args.kwargs["reply_markup"]
-    button = keyboard.inline_keyboard[0][0]
-    assert button.text == translate("language.change_button", "en")
+    labels = [b.text for row in keyboard.inline_keyboard for b in row]
+    assert translate("settings.open_button", "en") in labels  # item #10 entry point
+    assert translate("language.change_button", "en") in labels
 
 
 async def test_help_replies() -> None:
@@ -171,7 +177,57 @@ async def test_language_pick_persists_and_reopens_start_in_new_locale() -> None:
     reopened = callback.message.edit_text.await_args.args[0]
     assert reopened == translate("start.welcome_anonymous", "ar")  # Start reopened in Arabic
     kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
-    assert kb.inline_keyboard[0][0].text == translate("language.change_button", "ar")
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert translate("language.change_button", "ar") in labels
+
+
+# --- User Settings screen (item #10) ---------------------------------------
+class _FakePrefService:
+    def __init__(self) -> None:
+        from services.user_preference_service import UserPreferences
+
+        self.prefs = UserPreferences()
+        self.toggled: list[int] = []
+
+    async def get(self, user_id: int) -> object:
+        return self.prefs
+
+    async def toggle(self, user_id: int, index: int) -> object:
+        self.toggled.append(index)
+        return self.prefs
+
+
+async def test_user_settings_open_renders_toggles() -> None:
+    callback = _callback(_SIGNER.pack_user_setting(-1))  # -1 = open
+    user = UserSnapshot.from_row(FakeUser(id=1, telegram_id=1))
+    await handle_user_settings(
+        callback, translate, "en", _SIGNER, object(), user, lambda s: _FakePrefService()
+    )
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Settings" in text
+    kb = callback.message.edit_text.await_args.kwargs["reply_markup"]
+    labels = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("Auto-download" in lb for lb in labels)
+
+
+async def test_user_settings_toggle_flips_the_pref() -> None:
+    callback = _callback(_SIGNER.pack_user_setting(1))  # toggle index 1 (hide_title)
+    prefs = _FakePrefService()
+    user = UserSnapshot.from_row(FakeUser(id=1, telegram_id=1))
+    await handle_user_settings(
+        callback, translate, "en", _SIGNER, object(), user, lambda s: prefs
+    )
+    assert prefs.toggled == [1]  # the toggle was applied
+
+
+async def test_user_settings_back_reopens_start() -> None:
+    callback = _callback(_SIGNER.pack_user_setting(-2))  # -2 = back to Start
+    user = UserSnapshot.from_row(FakeUser(id=1, telegram_id=1))
+    await handle_user_settings(
+        callback, translate, "en", _SIGNER, object(), user, lambda s: _FakePrefService()
+    )
+    text = callback.message.edit_text.await_args.args[0]
+    assert text == translate("start.welcome_anonymous", "en")
 
 
 async def test_language_pick_origin_survives_pack_unpack() -> None:

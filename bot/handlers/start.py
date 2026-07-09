@@ -19,12 +19,21 @@ from collections.abc import Callable
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
-from bot.keyboards.language_select import build_change_language_button, build_language_picker
+from bot.keyboards.language_select import (
+    OPEN_PICKER_SENTINEL,
+    build_language_picker,
+)
+from bot.keyboards.user_settings import build_user_settings
 from core.i18n import Translator, list_enabled_locales
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
@@ -33,6 +42,7 @@ from services.ad_service import AdService
 from services.queue_service import QueueService
 from services.referral_service import ReferralService
 from services.settings_service import SettingsService
+from services.user_preference_service import UserPreferenceService
 from services.user_service import UserService
 
 router = Router(name="start")
@@ -41,6 +51,51 @@ _log = get_logger("bot.handlers.start")
 UserServiceFactory = Callable[[AsyncSession], UserService]
 ReferralServiceFactory = Callable[[AsyncSession], ReferralService]
 SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
+UserPreferenceServiceFactory = Callable[[AsyncSession], UserPreferenceService]
+
+
+def render_home(
+    user: UserSnapshot | None, signer: CallbackSigner, translate: Translator, locale: str
+) -> tuple[str, InlineKeyboardMarkup]:
+    """The /start home view: welcome text + a menu. Reused by handle_start (new message),
+    the Settings Back button, and the post-language-change reopen (all edit in place)."""
+    name = user.first_name if user and user.first_name else None
+    text = (
+        translate("start.welcome_named", locale, name=name)
+        if name
+        else translate("start.welcome_anonymous", locale)
+    )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=translate("settings.open_button", locale),
+                    callback_data=signer.pack_user_setting(-1),
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=translate("language.change_button", locale),
+                    callback_data=signer.pack_language(OPEN_PICKER_SENTINEL, "s"),
+                )
+            ],
+        ]
+    )
+    return text, keyboard
+
+
+def _user_settings_text(translate: Translator, locale: str) -> str:
+    return "\n".join(
+        [
+            translate("settings.header", locale),
+            "",
+            translate("settings.intro_auto", locale),
+            "",
+            translate("settings.intro_caption", locale),
+            "",
+            translate("settings.legend", locale),
+        ]
+    )
 _REFERRAL_PREFIX = "ref_"
 
 
@@ -56,13 +111,8 @@ async def handle_start(
     ad_service_factory: Callable[[AsyncSession], AdService] | None = None,
     referral_service_factory: ReferralServiceFactory | None = None,
 ) -> None:
-    name = user.first_name if user and user.first_name else None
-    text = (
-        translate("start.welcome_named", locale, name=name)
-        if name
-        else translate("start.welcome_anonymous", locale)
-    )
-    await message.answer(text, reply_markup=build_change_language_button(callback_signer, locale))
+    text, keyboard = render_home(user, callback_signer, translate, locale)
+    await message.answer(text, reply_markup=keyboard)
     if (
         command.args
         and command.args.startswith(_REFERRAL_PREFIX)
@@ -215,13 +265,43 @@ async def apply_language_pick(
         await _edit_text(callback, text, markup)
         return
 
-    name = user.first_name or None
-    welcome = (
-        translate("start.welcome_named", code, name=name)
-        if name
-        else translate("start.welcome_anonymous", code)
+    text, markup = render_home(user, signer, translate, code)
+    await _edit_text(callback, text, markup)
+
+
+@router.callback_query(F.data.startswith("us|"))
+async def handle_user_settings(
+    callback: CallbackQuery,
+    translate: Translator,
+    locale: str,
+    callback_signer: CallbackSigner,
+    session: AsyncSession,
+    user: UserSnapshot,
+    preference_service_factory: UserPreferenceServiceFactory | None = None,
+) -> None:
+    """User Settings screen (item #10): open (-1), back to Start (-2), or toggle (>=0)."""
+    parsed = callback_signer.unpack(callback.data or "")
+    if parsed is None or parsed.action != "us" or parsed.arg is None:
+        await callback.answer()  # forged/garbled → ignore silently
+        return
+    if parsed.arg == -2:  # back to Start
+        await callback.answer()
+        text, markup = render_home(user, callback_signer, translate, locale)
+        await _edit_text(callback, text, markup)
+        return
+    if preference_service_factory is None:
+        await callback.answer()
+        return
+    prefs_service = preference_service_factory(session)
+    if parsed.arg >= 0:  # flip a toggle, then re-render
+        await prefs_service.toggle(user.id, parsed.arg)
+    prefs = await prefs_service.get(user.id)
+    await callback.answer()
+    await _edit_text(
+        callback,
+        _user_settings_text(translate, locale),
+        build_user_settings(prefs, callback_signer, locale),
     )
-    await _edit_text(callback, welcome, build_change_language_button(signer, code, "s"))
 
 
 async def _edit_text(

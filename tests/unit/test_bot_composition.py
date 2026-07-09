@@ -28,6 +28,7 @@ from services.settings_service import SettingsService
 from services.template_service import TemplateService
 from services.url_analyzer import URLAnalyzerService
 from services.user_health import UserHealthChecker
+from services.user_preference_service import UserPreferenceService
 from services.user_service import UserService
 from tests.unit._fakes import FakeMessageSender, FakeQueueBackend, load_settings
 
@@ -76,6 +77,10 @@ def _referral_factory(session: AsyncSession) -> ReferralService:
     return cast(ReferralService, None)
 
 
+def _preference_factory(session: AsyncSession) -> UserPreferenceService:
+    return cast(UserPreferenceService, None)
+
+
 def _health_checker_factory(bot: Bot) -> UserHealthChecker:
     return cast(UserHealthChecker, None)
 
@@ -99,6 +104,7 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         audience_service_factory=_audience_factory,
         admin_service_factory=_admin_factory,
         referral_service_factory=_referral_factory,
+        preference_service_factory=_preference_factory,
         template_service=cast(TemplateService, None),
         health_checker_factory=_health_checker_factory,
         queue_service=QueueService(FakeQueueBackend()),

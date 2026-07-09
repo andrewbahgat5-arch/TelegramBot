@@ -24,6 +24,11 @@ class UserPreference(Base):
         Boolean, nullable=False, server_default="true"
     )
     preferred_language: Mapped[str | None] = mapped_column(String(10))
+    # Settings-screen toggles (item #10). Both default OFF (current behavior).
+    auto_download_small: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    hide_title: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

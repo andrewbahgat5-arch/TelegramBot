@@ -43,6 +43,7 @@ from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
 from infrastructure.database.repositories.setting import SettingsRepository
 from infrastructure.database.repositories.user import UserRepository
+from infrastructure.database.repositories.user_preference import UserPreferenceRepository
 from infrastructure.database.session import create_session_factory
 from infrastructure.downloader.ffmpeg_client import FFmpegClient
 from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
@@ -177,6 +178,7 @@ def make_download_service_factory(
             settings=settings,
             ad_service=ad_service,
             caption_mixer=CaptionAdMixer(ad_service),
+            preference_repo=UserPreferenceRepository(session),
         )
 
     return build
