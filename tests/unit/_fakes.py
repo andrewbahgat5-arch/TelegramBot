@@ -1362,6 +1362,9 @@ class FakeAdRepo:
     async def list_all_ads(self) -> Sequence[FakeAdRow]:
         return self._ranked(list(self.by_id.values()))
 
+    async def list_by_language(self, language: str | None) -> Sequence[FakeAdRow]:
+        return self._ranked([a for a in self.by_id.values() if a.target_language == language])
+
     async def create_ad(
         self,
         *,

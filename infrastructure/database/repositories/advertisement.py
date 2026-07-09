@@ -48,6 +48,20 @@ class AdRepository(SqlAlchemyRepository[Advertisement]):
         )
         return result.scalars().all()
 
+    async def list_by_language(self, language: str | None) -> Sequence[Advertisement]:
+        """Ads filtered by target_language; None = ads with no language set."""
+        clause = (
+            Advertisement.target_language.is_(None)
+            if language is None
+            else Advertisement.target_language == language
+        )
+        result = await self.session.execute(
+            select(Advertisement)
+            .where(clause)
+            .order_by(Advertisement.priority.desc(), Advertisement.id.asc())
+        )
+        return result.scalars().all()
+
     async def list_active_for_placement(self, placement: str) -> Sequence[Advertisement]:
         """Active ads for a placement, ranked for fair selection (Sprint 9.5; UX sprint #10).
 

@@ -46,15 +46,16 @@ from bot.filters.panel_filter import PanelFilter
 from bot.filters.role_filter import RoleFilter, StaffFilter
 from bot.handlers import admin_wizard
 from bot.keyboards.admin_panel import (
-    build_ad_action_list,
     build_ad_conflict_confirm,
     build_ad_detail,
+    build_ad_language_categories,
     build_ad_list,
     build_broadcast_detail,
     build_broadcast_list,
     build_confirm,
     build_export_formats,
     build_input_prompt,
+    build_language_chooser,
     build_main_menu,
     build_platform_stats,
     build_section_menu,
@@ -262,12 +263,25 @@ async def panel_write(
         return
     await state.clear()  # a fresh write cancels any stale guided input ("ev" re-arms below)
     # Compose-wizard entry points (9.6.10): Ads "Create" / Broadcast "Create" + presets.
-    if panel.section == "a" and panel.action in ("cen", "car"):
-        lang = "en" if panel.action == "cen" else "ar"
-        await admin_wizard.start(
-            callback, state, callback_signer, translate, locale,
-            kind="ad", target_language=lang,
-        )
+    if panel.section == "a" and panel.action == "cr":
+        if isinstance(callback.message, Message):
+            await _safe_edit(
+                callback.message,
+                translate("panel.ads.create_pick_language", locale),
+                build_language_chooser("a", "crl", callback_signer, locale),
+            )
+        await callback.answer()
+        return
+    if panel.section == "a" and panel.action == "crl" and panel.arg is not None:
+        locales = list_enabled_locales()
+        if 0 <= panel.arg < len(locales):
+            lang = locales[panel.arg].code
+            await admin_wizard.start(
+                callback, state, callback_signer, translate, locale,
+                kind="ad", target_language=lang,
+            )
+        else:
+            await callback.answer()
         return
     if panel.section == "a" and panel.action == "ed" and panel.arg is not None:
         # Full edit-in-wizard: load the existing ad into the compose wizard (Bug-fix sprint).
@@ -1065,9 +1079,24 @@ async def _render(
                 "a", role, signer, locale
             )
         if action == "ls":
-            ad_rows = await ads.list_ads()
-            return _ads_list_text(ad_rows, translate, locale), build_ad_list(
-                ad_rows, signer, locale
+            all_ads = await ads.list_ads()
+            counts = _language_counts(all_ads)
+            return _ads_list_text(all_ads, translate, locale), build_ad_language_categories(
+                counts, signer, locale
+            )
+        if action == "lsl" and panel.arg is not None:
+            locales = list_enabled_locales()
+            if 0 <= panel.arg < len(locales):
+                lang: str | None = locales[panel.arg].code
+            elif panel.arg == len(locales):
+                lang = None
+            else:
+                return translate("panel.ads.section_body", locale), build_section_menu(
+                    "a", role, signer, locale
+                )
+            filtered = await ads.list_ads_by_language(lang)
+            return _ads_list_text(filtered, translate, locale), build_ad_list(
+                filtered, signer, locale
             )
         if action == "stt":
             return await _overall_stats_text(ads, translate, locale), build_section_menu(
@@ -1647,31 +1676,6 @@ def _ad_conflict_text(
     )
 
 
-# Top-level Manage-Campaigns actions that need an ad chosen first → render a picker.
-_AD_PICKER_ACTIONS = frozenset({"en", "di", "de", "bc", "ed"})
-_AD_PICKER_VERB = {
-    "en": "panel.verb.enable",
-    "di": "panel.verb.disable",
-    "de": "panel.verb.delete",
-    "bc": "panel.verb.broadcast",
-    "ed": "panel.verb.edit",
-}
-
-
-def _ad_picker_text(action: str, rows: Sequence[Any], translate: Translator, locale: str) -> str:
-    if not rows:
-        return translate("panel.ads.picker_empty", locale)
-    verb_key = _AD_PICKER_VERB.get(action, "panel.verb.manage")
-    verb = translate(verb_key, locale)
-    return "\n".join(
-        [
-            ui.header(translate("panel.ads.picker_title", locale, verb=verb), icon=ui.emoji("ads")),
-            "",
-            translate("panel.ads.picker_subtitle", locale),
-        ]
-    )
-
-
 async def _ads_write(
     callback: CallbackQuery,
     panel: ParsedPanel,
@@ -1685,19 +1689,7 @@ async def _ads_write(
     """Enable / Disable / Delete / Broadcast a selected ad; destructive steps confirm first."""
     ad_id, action = panel.arg, panel.action
     if ad_id is None:
-        # A top-level Manage-Campaigns action (no ad chosen yet): show an ad picker whose
-        # rows carry the same action + an ad id, so the next tap is fully targeted.
-        if action in _AD_PICKER_ACTIONS:
-            rows = await ads.list_ads()
-            if isinstance(callback.message, Message):
-                await _safe_edit(
-                    callback.message,
-                    _ad_picker_text(action, rows, translate, locale),
-                    build_ad_action_list(rows, action, signer, locale),
-                )
-            await callback.answer()
-            return
-        await callback.answer(translate("panel.ads.tap_list_first", locale), show_alert=False)
+        await callback.answer(translate("panel.ads.not_found", locale), show_alert=True)
         return
     if action in _AD_CONFIRM:  # render the confirm screen
         if await ads.get(ad_id) is None:
@@ -1877,6 +1869,14 @@ def _ads_list_text(rows: Sequence[Any], translate: Translator, locale: str) -> s
             ui.footer(),
         ]
     )
+
+
+def _language_counts(ads: Sequence[Any]) -> dict[str | None, int]:
+    counts: dict[str | None, int] = {}
+    for ad in ads:
+        lang = getattr(ad, "target_language", None)
+        counts[lang] = counts.get(lang, 0) + 1
+    return counts
 
 
 async def _overall_stats_text(ads: AdService, translate: Translator, locale: str) -> str:

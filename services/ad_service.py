@@ -536,6 +536,9 @@ class AdService:
     async def list_ads(self) -> Sequence[Any]:
         return await self._ads.list_all_ads()
 
+    async def list_ads_by_language(self, language: str | None) -> Sequence[Any]:
+        return await self._ads.list_by_language(language)
+
     async def get(self, ad_id: int) -> Any | None:
         return await self._ads.get_by_id(ad_id)
 

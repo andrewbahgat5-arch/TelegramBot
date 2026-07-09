@@ -247,13 +247,13 @@ def test_ad_detail_owner_sees_actions() -> None:
         _parse(signer, b).action
         for b in _flat(build_ad_detail(_ad(), UserRole.OWNER, signer, _LOCALE))
     }
-    assert {"di", "bc", "de"} <= actions  # active ad → Disable + Broadcast + Delete
+    assert {"ed", "ast", "di", "bc", "de"} <= actions
 
 
-def test_ad_detail_moderator_sees_no_actions() -> None:
+def test_ad_detail_moderator_sees_read_only() -> None:
     signer = _signer()
     actions = {
         _parse(signer, b).action
         for b in _flat(build_ad_detail(_ad(), UserRole.MODERATOR, signer, _LOCALE))
     }
-    assert actions == {"ls", "hm"}  # only the nav row
+    assert actions == {"ed", "ast", "ls", "hm"}

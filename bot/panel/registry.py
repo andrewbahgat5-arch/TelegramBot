@@ -39,6 +39,7 @@ READ_ACTIONS: frozenset[str] = frozenset(
         "cx",  # cancel / abort a wizard (non-mutating; returns to a menu)
         "lsb",  # list blocked-bot users (Sprint 13.5, read-only)
         "lsd",  # list deleted-account users (Sprint 13.5, read-only)
+        "lsl",  # list ads filtered by language (Sprint 14, Phase 2.2)
     }
 )
 
@@ -116,15 +117,9 @@ SUBMENUS: dict[str, tuple[MenuItem, ...]] = {
     ),
     "a": (
         MenuItem("panel.action.list", "ls"),
-        # Language-first ad creation (each language its own campaigns): the admin picks
-        # English/Arabic before composing, same flow as Broadcast.
-        MenuItem("panel.menu.a.create_en", "cen"),
-        MenuItem("panel.menu.a.create_ar", "car"),
-        MenuItem("panel.action.edit", "ed"),
-        MenuItem("panel.action.enable", "en"),
-        MenuItem("panel.action.disable", "di"),
-        MenuItem("panel.action.delete", "de"),
+        MenuItem("panel.action.create", "cr"),
         MenuItem("panel.menu.a.stats", "stt"),
+        MenuItem("panel.menu.a.placements", "pl"),
     ),
     "b": (
         # Language-first broadcast creation: pick English/Arabic before composing (the

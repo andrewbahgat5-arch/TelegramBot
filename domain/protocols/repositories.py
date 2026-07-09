@@ -434,6 +434,10 @@ class AdRepositoryProtocol(Repository[T], Protocol[T]):
         """Every ad for the admin ``/ad_list`` / ``/ad_stats`` surface, ranked."""
         ...
 
+    async def list_by_language(self, language: str | None) -> Sequence[T]:
+        """Ads filtered by ``target_language``; ``None`` = ads with no language set."""
+        ...
+
     async def create_ad(
         self,
         *,

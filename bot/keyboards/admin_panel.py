@@ -51,7 +51,7 @@ from bot.panel.wizard import (
     prev_step,
     step_index,
 )
-from core.i18n import translate
+from core.i18n import list_enabled_locales, translate
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 
@@ -346,6 +346,43 @@ def _user_button_label(snap: UserSnapshot) -> str:
     return f"{marker} {snap.telegram_id} · {name}"[:60]
 
 
+def build_language_chooser(
+    section: str, action: str, signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """Data-driven language chooser: one button per enabled locale (shared by ads + broadcast)."""
+    locales = list_enabled_locales()
+    buttons = [
+        _btn(signer, meta.native_name, section, action, idx)
+        for idx, meta in enumerate(locales)
+    ]
+    rows = _chunk(buttons)
+    rows.append(nav_row(signer, locale, back=(section, "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_ad_language_categories(
+    counts: dict[str | None, int], signer: CallbackSigner, locale: str
+) -> InlineKeyboardMarkup:
+    """Language category screen for the ads list: one button per locale + 'All languages'."""
+    locales = list_enabled_locales()
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, meta in enumerate(locales):
+        count = counts.get(meta.code, 0)
+        label = translate("panel.ads.language_category", locale, name=meta.native_name, count=count)
+        rows.append([_btn(signer, label, "a", "lsl", idx)])
+    none_count = counts.get(None, 0)
+    if none_count:
+        label = translate(
+            "panel.ads.language_category",
+            locale,
+            name=translate("panel.ads.all_languages", locale),
+            count=none_count,
+        )
+        rows.append([_btn(signer, label, "a", "lsl", len(locales))])
+    rows.append(nav_row(signer, locale, back=("a", "op")))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_ad_list(ads: Sequence[Any], signer: CallbackSigner, locale: str) -> InlineKeyboardMarkup:
     """Tappable ad rows (one per row) → each opens that ad's detail screen."""
     rows = [[_btn(signer, _ad_button_label(ad), "a", "inf", ad.id)] for ad in ads]
@@ -358,31 +395,22 @@ def _ad_button_label(ad: Any) -> str:
     return f"{state} #{ad.id} {ad.title}"[:60]
 
 
-def build_ad_action_list(
-    ads: Sequence[Any], action: str, signer: CallbackSigner, locale: str
-) -> InlineKeyboardMarkup:
-    """Pick which ad a top-level Manage-Campaigns action applies to.
-
-    The section-menu Enable/Disable/Delete/Broadcast/Edit buttons carry no ad id; tapping
-    one lists the ads with each row carrying that same ``action`` plus the ad's id, so the
-    selected row re-enters the write handler fully targeted (no dead-end, Bug-fix sprint).
-    """
-    rows = [[_btn(signer, _ad_button_label(ad), "a", action, ad.id)] for ad in ads]
-    rows.append(nav_row(signer, locale, back=("a", "op")))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
 def build_ad_detail(
     ad: Any, role: UserRole, signer: CallbackSigner, locale: str
 ) -> InlineKeyboardMarkup:
-    """An ad's detail screen with owner-only actions reflecting its current state.
+    """An ad's management page: Edit, Statistics (read-tier), plus owner-only mutations.
 
     Enable/Disable toggle directly; Delete and Broadcast (to all users) route through a
     confirm screen (destructive / high-impact, Owner #4).
     """
-    rows: list[list[InlineKeyboardButton]] = []
+    aid = ad.id
+    rows: list[list[InlineKeyboardButton]] = [
+        [
+            _btn(signer, translate("panel.action.edit", locale), "a", "ed", aid),
+            _btn(signer, translate("panel.menu.a.stats", locale), "a", "ast", aid),
+        ]
+    ]
     if role is UserRole.OWNER:
-        aid = ad.id
         actions = [
             _btn(signer, translate("panel.action.disable", locale), "a", "di", aid)
             if ad.is_active
@@ -390,7 +418,7 @@ def build_ad_detail(
             _btn(signer, translate("panel.action.broadcast", locale), "a", "bc", aid),
             _btn(signer, translate("panel.action.delete", locale), "a", "de", aid),
         ]
-        rows = _chunk(actions)
+        rows.extend(_chunk(actions))
     rows.append(nav_row(signer, locale, back=("a", "ls")))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

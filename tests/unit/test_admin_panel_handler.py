@@ -192,7 +192,9 @@ class _FakeHealthChecker:
 
 
 class _FakeAd:
-    def __init__(self, ad_id: int = 1, *, is_active: bool = True) -> None:
+    def __init__(
+        self, ad_id: int = 1, *, is_active: bool = True, target_language: str | None = "en"
+    ) -> None:
         self.id = ad_id
         self.title = "Promo"
         self.type = "text"
@@ -209,6 +211,7 @@ class _FakeAd:
         self.delivery_mode = "fields"
         self.storage_chat_id: int | None = None
         self.storage_message_id: int | None = None
+        self.target_language = target_language
 
 
 class _FakeAds:
@@ -220,6 +223,9 @@ class _FakeAds:
 
     async def list_ads(self) -> list[Any]:
         return [self.ad]
+
+    async def list_ads_by_language(self, language: str | None) -> list[Any]:
+        return [a for a in [self.ad] if a.target_language == language]
 
     async def get(self, ad_id: int) -> Any:
         return self.ad if ad_id == self.ad.id else None
@@ -955,58 +961,41 @@ async def test_ad_broadcast_requires_confirm() -> None:
     assert "42" in _call(callback.answer).args[0]
 
 
-def _picker_rows(callback: Any, signer: CallbackSigner, action: str) -> set[int | None]:
-    markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
-    return {
-        p.arg
-        for row in markup.inline_keyboard
-        for b in row
-        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == action
-    }
-
-
-async def test_ad_top_level_action_shows_ad_picker() -> None:
+async def test_ad_write_no_id_answers_not_found() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "di")
     await _awrite(callback, ParsedPanel("a", "di", None), _FakeAds())
-    callback.message.edit_text.assert_awaited_once()
-    assert 1 in _picker_rows(callback, signer, "di")  # the ad is a targeted row
-
-
-async def test_ad_top_level_edit_shows_ad_picker() -> None:
-    signer = _signer()
-    callback = _callback(signer, "a", "ed")
-    await _awrite(callback, ParsedPanel("a", "ed", None), _FakeAds())
-    assert 1 in _picker_rows(callback, signer, "ed")
+    callback.answer.assert_awaited_once()
+    assert "not found" in _call(callback.answer).args[0].lower()
 
 
 async def test_ad_edit_with_target_opens_wizard() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "ed")
     await _awrite(callback, ParsedPanel("a", "ed", 1), _FakeAds())
-    # Edit-in-wizard renders the Preview edit-hub via bot.edit_message_text.
     assert "Preview" in callback.bot.edit_message_text.await_args.args[0]
 
 
-async def test_ad_create_starts_wizard() -> None:
+async def test_ad_create_shows_language_chooser() -> None:
     signer = _signer()
-    callback = _callback(signer, "a", "cen")
-    await _awrite(callback, ParsedPanel("a", "cen"), _FakeAds())
-    assert "Audience" in callback.bot.edit_message_text.await_args.args[0]
+    callback = _callback(signer, "a", "cr")
+    await _awrite(callback, ParsedPanel("a", "cr"), _FakeAds())
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Pick a language" in text
 
 
-async def test_ads_list_renders_tappable_rows() -> None:
+async def test_ads_list_renders_language_categories() -> None:
     signer = _signer()
     callback = _callback(signer, "a", "ls")
     await _navigate(callback, ParsedPanel("a", "ls"), _user(), signer)
     markup = callback.message.edit_text.await_args.kwargs["reply_markup"]
-    opened = {
+    lsl_buttons = {
         p.arg
         for row in markup.inline_keyboard
         for b in row
-        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "inf"
+        if (p := signer.unpack_panel(b.callback_data)) is not None and p.action == "lsl"
     }
-    assert 1 in opened
+    assert 0 in lsl_buttons  # at least the first locale
 
 
 async def test_ad_detail_renders_via_navigation() -> None:
