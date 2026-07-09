@@ -1554,7 +1554,7 @@ def _template_detail_text(
             lines.append(f"  {translate('panel.templates.example_error', locale)}")
     if defn.allow_buttons:
         btn_text = (
-            ", ".join(b.get("text", "?") for b in buttons)
+            ", ".join(escape(b.get("text", "?")) for b in buttons)
             if buttons
             else translate("panel.templates.buttons_none", locale)
         )

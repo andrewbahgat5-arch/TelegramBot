@@ -181,6 +181,57 @@ async def test_auth_banned_callback_query_gets_alert() -> None:
     )
 
 
+class _FakeMaintenanceSettings:
+    """Minimal settings surface for the maintenance gate (only ``get`` is read)."""
+
+    def __init__(self, on: bool) -> None:
+        self._on = on
+
+    async def get(self, key: str) -> Any:
+        return self._on if key == "maintenance_mode" else None
+
+
+async def test_auth_blocks_non_staff_when_maintenance_on() -> None:
+    from bot.middlewares.auth import _reply_timestamps
+
+    _reply_timestamps.clear()
+    repo = FakeUserRepo()
+    repo.by_tid[1] = FakeUser(id=1, telegram_id=1, role="user")
+    mw = AuthMiddleware(
+        lambda session: _user_service(repo),
+        default_locale="en",
+        settings_service_factory=lambda session: cast(Any, _FakeMaintenanceSettings(True)),
+    )
+    calls: list[dict[str, Any]] = []
+    event = AsyncMock(spec=Message)
+    event.answer = AsyncMock()
+    data: dict[str, Any] = {"session": object(), "event_from_user": _tg_user()}
+
+    result = await mw(_ok_handler(calls), cast(TelegramObject, event), data)
+    assert result is None
+    assert calls == []  # handler skipped during maintenance
+    event.answer.assert_awaited_once_with(translate("system.maintenance", "en"), reply_markup=None)
+
+
+async def test_auth_lets_staff_through_during_maintenance() -> None:
+    from bot.middlewares.auth import _reply_timestamps
+
+    _reply_timestamps.clear()
+    repo = FakeUserRepo()
+    repo.by_tid[1] = FakeUser(id=1, telegram_id=1, role="owner")
+    mw = AuthMiddleware(
+        lambda session: _user_service(repo),
+        default_locale="en",
+        settings_service_factory=lambda session: cast(Any, _FakeMaintenanceSettings(True)),
+    )
+    calls: list[dict[str, Any]] = []
+    data: dict[str, Any] = {"session": object(), "event_from_user": _tg_user()}
+
+    result = await mw(_ok_handler(calls), _EVENT, data)
+    assert result == "handled"  # staff bypass the maintenance gate
+    assert len(calls) == 1 and calls[0]["user"].role.value == "owner"
+
+
 async def test_auth_passes_through_without_from_user() -> None:
     repo = FakeUserRepo()
     mw = AuthMiddleware(lambda session: _user_service(repo), default_locale="en")

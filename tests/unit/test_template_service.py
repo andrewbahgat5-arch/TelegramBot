@@ -163,6 +163,21 @@ async def test_buttons_for_round_trip() -> None:
     assert svc.buttons_for("banned_message", "en") == []
 
 
+async def test_buttons_survive_reload_from_store() -> None:
+    # Buttons persisted to the store must re-warm into a fresh service on load() — the
+    # contract the session-owning MessageTemplateStore adapter must satisfy (its
+    # TemplateRow snapshot carries the ``buttons`` column, else buttons vanish on restart).
+    store = FakeTemplateStore()
+    svc = TemplateService(store)
+    await svc.set("banned_message", "en", "Banned: {reason}", updated_by=1)
+    buttons = [{"text": "Appeal", "url": "https://example.com"}]
+    await svc.set_buttons("banned_message", "en", buttons)
+
+    reloaded = TemplateService(store)
+    await reloaded.load()
+    assert reloaded.buttons_for("banned_message", "en") == buttons
+
+
 async def test_download_complete_removed_from_defs() -> None:
     from services.template_service import TEMPLATE_DEFS
 

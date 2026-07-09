@@ -28,6 +28,7 @@ class TemplateRow:
     locale: str
     content: str
     updated_at: datetime.datetime | None
+    buttons: list[dict[str, str]] | None = None
 
 
 class MessageTemplateStore:
@@ -37,14 +38,16 @@ class MessageTemplateStore:
     async def load_all(self) -> Sequence[TemplateRow]:
         async with self._session_factory() as session:
             rows = await MessageTemplateRepository(session).load_all()
-            return [TemplateRow(r.key, r.locale, r.content, r.updated_at) for r in rows]
+            return [
+                TemplateRow(r.key, r.locale, r.content, r.updated_at, r.buttons) for r in rows
+            ]
 
     async def get(self, key: str, locale: str) -> TemplateRow | None:
         async with self._session_factory() as session:
             row = await MessageTemplateRepository(session).get(key, locale)
             if row is None:
                 return None
-            return TemplateRow(row.key, row.locale, row.content, row.updated_at)
+            return TemplateRow(row.key, row.locale, row.content, row.updated_at, row.buttons)
 
     async def upsert(
         self, key: str, locale: str, content: str, *, updated_by: int | None = None
@@ -53,6 +56,13 @@ class MessageTemplateStore:
             await MessageTemplateRepository(session).upsert(
                 key, locale, content, updated_by=updated_by
             )
+            await session.commit()
+
+    async def set_buttons(
+        self, key: str, locale: str, buttons: list[dict[str, str]] | None
+    ) -> None:
+        async with self._session_factory() as session:
+            await MessageTemplateRepository(session).set_buttons(key, locale, buttons)
             await session.commit()
 
     async def delete_template(self, key: str, locale: str) -> None:
