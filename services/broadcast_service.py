@@ -219,6 +219,10 @@ class BroadcastService:
             rows = rows[:page_size]
         return rows, page, page > 0, has_next
 
+    async def totals_for_ad(self, ad_id: int) -> tuple[int, datetime.datetime | None]:
+        """Total sends and last completion time for broadcasts of an ad (Phase 4)."""
+        return await self._broadcasts.broadcast_totals_for_ad(ad_id)
+
     async def delete_broadcast(self, broadcast_id: int) -> bool:
         broadcast = await self._broadcasts.get_by_id(broadcast_id)
         if broadcast is None:

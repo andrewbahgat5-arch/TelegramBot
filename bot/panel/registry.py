@@ -39,6 +39,7 @@ READ_ACTIONS: frozenset[str] = frozenset(
         "cx",  # cancel / abort a wizard (non-mutating; returns to a menu)
         "lsb",  # list blocked-bot users (Sprint 13.5, read-only)
         "lsd",  # list deleted-account users (Sprint 13.5, read-only)
+        "ast",  # per-ad statistics screen (Sprint 14, Phase 4)
         "lsl",  # list ads filtered by language (Sprint 14, Phase 2.2)
     }
 )

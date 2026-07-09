@@ -320,6 +320,23 @@ async def test_overall_stats_aggregates_counters() -> None:
     assert stats.impressions == 15 and stats.clicks == 3
 
 
+async def test_detailed_stats_returns_dataclass() -> None:
+    service, repo, _ = _build()
+    repo.by_id[1] = FakeAdRow(id=1, title="A", impressions=10, clicks=2, is_active=True)
+    stats = await service.detailed_stats(1)
+    assert stats is not None
+    assert stats.title == "A"
+    assert stats.impressions_total == 10
+    assert stats.clicks_total == 2
+    assert stats.ctr == "20.0%"
+    assert stats.impressions_by_placement == {}
+
+
+async def test_detailed_stats_not_found() -> None:
+    service, _, _ = _build()
+    assert await service.detailed_stats(999) is None
+
+
 async def test_set_global_writes_master_switch() -> None:
     repo = FakeAdRepo()
     settings = SettingsService(

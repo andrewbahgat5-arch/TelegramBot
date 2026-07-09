@@ -74,7 +74,7 @@ from core.i18n import Translator, catalog_template, list_enabled_locales
 from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
-from services.ad_service import AdService
+from services.ad_service import AdDetailedStats, AdService
 from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
@@ -1158,10 +1158,25 @@ async def _render(
             return _ads_list_text(filtered, translate, locale), build_ad_list(
                 filtered, signer, locale
             )
-        if action == "stt":
-            return await _overall_stats_text(ads, translate, locale), build_section_menu(
-                "a", role, signer, locale
+        if action == "ast" and panel.arg is not None:
+            stats = await ads.detailed_stats(panel.arg)
+            if stats is None:
+                return translate(
+                    "panel.ads.not_found", locale
+                ), build_section_menu("a", role, signer, locale)
+            broadcasts = broadcast_factory(session)
+            bc_sent, bc_last = await broadcasts.totals_for_ad(
+                panel.arg
             )
+            return _ad_stats_text(
+                stats, bc_sent, bc_last, translate, locale
+            ), build_ad_detail(
+                await ads.get(panel.arg), role, signer, locale
+            )
+        if action == "stt":
+            return await _overall_stats_text(
+                ads, translate, locale
+            ), build_section_menu("a", role, signer, locale)
         return translate("panel.ads.section_body", locale), build_section_menu(
             "a", role, signer, locale
         )
@@ -1960,27 +1975,101 @@ def _language_counts(ads: Sequence[Any]) -> dict[str | None, int]:
     return counts
 
 
+def _ad_stats_text(
+    stats: AdDetailedStats,
+    bc_sent: int,
+    bc_last: datetime.datetime | None,
+    translate: Translator,
+    locale: str,
+) -> str:
+    """Per-ad statistics card (Sprint 14, Phase 4.3)."""
+
+    def slbl(name: str) -> str:
+        return translate(f"panel.ads.stats.{name}", locale)
+
+    state = translate(
+        "panel.ads.state_active" if stats.is_active else "panel.ads.state_disabled",
+        locale,
+    )
+    name_line = stats.internal_name or stats.title
+    lines = [
+        ui.header(
+            f"{name_line} (#{slbl('title_suffix')})",
+            icon=ui.emoji("chart"),
+        ),
+        "",
+        ui.metric(ui.emoji("ads"), slbl("state"), state),
+        ui.metric(
+            ui.emoji("calendar"), slbl("created"), _fmt_dt(stats.created_at)
+        ),
+        ui.metric(
+            ui.emoji("members"), slbl("impressions"), stats.impressions_total
+        ),
+    ]
+    for placement, count in sorted(stats.impressions_by_placement.items()):
+        lines.append(
+            f"    {ui.emoji('link')} {placement}: {ui.number_fmt(count)}"
+        )
+    lines.extend(
+        [
+            ui.metric(ui.emoji("link"), slbl("clicks"), stats.clicks_total),
+            ui.metric(ui.emoji("chart"), slbl("ctr"), stats.ctr),
+            ui.metric(ui.emoji("fire"), slbl("times_sent"), bc_sent),
+            ui.metric(
+                ui.emoji("clock"), slbl("last_sent"), _fmt_dt(bc_last)
+            ),
+            ui.metric(
+                ui.emoji("clock"),
+                slbl("last_shown"),
+                _fmt_dt(stats.last_shown_at),
+            ),
+        ]
+    )
+    if stats.buttons:
+        lines.append("")
+        lines.append(f"<b>{slbl('buttons')}</b>")
+        for text, clicks in stats.buttons:
+            lines.append(f"  {escape(text)} — {clicks}")
+        lines.append(f"<i>{translate('panel.ads.stats.clicks_note', locale)}</i>")
+    lines.extend(["", ui.footer()])
+    return "\n".join(lines)
+
+
 async def _overall_stats_text(ads: AdService, translate: Translator, locale: str) -> str:
-    """Ad totals rendered as a ui.py metric dashboard (Sprint 13.2)."""
+    """Ad totals rendered as a ui.py metric dashboard (Sprint 13.2 + Phase 4.3 per-ad rows)."""
+    all_ads = await ads.list_ads()
     stats = await ads.overall_stats()
     ctr = f"{stats.clicks / stats.impressions * 100:.1f}%" if stats.impressions else "—"
 
     def lbl(name: str) -> str:
         return translate(f"panel.ads.label.{name}", locale)
 
-    return "\n".join(
-        [
-            ui.header(translate("panel.ads.stats_title", locale), icon=ui.emoji("chart")),
-            "",
-            ui.metric(ui.emoji("ads"), lbl("total"), stats.total_ads),
-            ui.metric(ui.emoji("active"), lbl("active"), stats.active_ads),
-            ui.metric(ui.emoji("members"), lbl("impressions"), stats.impressions),
-            ui.metric(ui.emoji("link"), lbl("clicks"), stats.clicks),
-            ui.metric(ui.emoji("chart"), lbl("ctr"), ctr),
-            "",
-            ui.footer(),
-        ]
-    )
+    lines = [
+        ui.header(translate("panel.ads.stats_title", locale), icon=ui.emoji("chart")),
+        "",
+        ui.metric(ui.emoji("ads"), lbl("total"), stats.total_ads),
+        ui.metric(ui.emoji("active"), lbl("active"), stats.active_ads),
+        ui.metric(ui.emoji("members"), lbl("impressions"), stats.impressions),
+        ui.metric(ui.emoji("link"), lbl("clicks"), stats.clicks),
+        ui.metric(ui.emoji("chart"), lbl("ctr"), ctr),
+    ]
+    if all_ads:
+        lines.append("")
+        for ad in all_ads:
+            ad_ctr = (
+                f"{ad.clicks / ad.impressions * 100:.0f}%"
+                if ad.impressions
+                else "—"
+            )
+            state = "✅" if ad.is_active else "⏸"
+            lines.append(
+                f"{state} #{ad.id} {escape(ad.title)}"
+                f" — {ui.number_fmt(ad.impressions)}"
+                f" · {ui.number_fmt(ad.clicks)}"
+                f" · {ad_ctr}"
+            )
+    lines.extend(["", ui.footer()])
+    return "\n".join(lines)
 
 
 # Display grouping for the Settings screen (Sprint 13.2): a field index -> group

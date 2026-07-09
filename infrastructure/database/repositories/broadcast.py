@@ -91,6 +91,19 @@ class BroadcastRepository(SqlAlchemyRepository[Broadcast]):
         await self.session.flush()
         return (result.rowcount or 0) > 0
 
+    async def broadcast_totals_for_ad(
+        self, ad_id: int
+    ) -> tuple[int, datetime.datetime | None]:
+        """Total sends and last completion for broadcasts linked to an ad (Phase 4)."""
+        result = await self.session.execute(
+            select(
+                func.coalesce(func.sum(Broadcast.total_sent), 0),
+                func.max(Broadcast.completed_at),
+            ).where(Broadcast.advertisement_id == ad_id)
+        )
+        row = result.one()
+        return int(row[0]), row[1]
+
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> Broadcast | None:
         """Oldest **due** ``pending`` broadcast, FIFO by id (16.8 step 1; 9.5.10 due-poller).
 

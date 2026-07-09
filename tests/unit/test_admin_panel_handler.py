@@ -260,10 +260,29 @@ class _FakeAds:
     async def overall_stats(self) -> Any:
         return SimpleNamespace(total_ads=1, active_ads=1, impressions=100, clicks=10)
 
+    async def detailed_stats(self, ad_id: int) -> Any:
+        if ad_id != self.ad.id:
+            return None
+        return SimpleNamespace(
+            title=self.ad.title,
+            internal_name=None,
+            is_active=self.ad.is_active,
+            created_at=None,
+            impressions_total=self.ad.impressions,
+            impressions_by_placement={"post_download": 80, "caption": 20},
+            clicks_total=self.ad.clicks,
+            ctr="10.0%",
+            last_shown_at=None,
+            buttons=[("Visit", 0)],
+        )
+
 
 class _FakeBroadcasts:
     def __init__(self) -> None:
         self.calls: list[tuple[int, int]] = []
+
+    async def totals_for_ad(self, ad_id: int) -> tuple[int, None]:
+        return 42, None
 
     async def create_from_ad(
         self,
@@ -1003,6 +1022,25 @@ async def test_ad_detail_renders_via_navigation() -> None:
     callback = _callback(signer, "a", "inf")
     await _navigate(callback, ParsedPanel("a", "inf", 1), _user(), signer)
     assert "Promo" in callback.message.edit_text.await_args.args[0]
+
+
+async def test_ad_per_ad_stats_renders() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "ast")
+    await _navigate(callback, ParsedPanel("a", "ast", 1), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "Total Views" in text
+    assert "post_download" in text
+    assert "Visit" in text
+    assert "direct-link" in text
+
+
+async def test_ad_per_ad_stats_not_found() -> None:
+    signer = _signer()
+    callback = _callback(signer, "a", "ast")
+    await _navigate(callback, ParsedPanel("a", "ast", 999), _user(), signer)
+    text = callback.message.edit_text.await_args.args[0]
+    assert "not found" in text.lower()
 
 
 async def test_ads_overall_stats_renders() -> None:

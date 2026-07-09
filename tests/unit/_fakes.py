@@ -1221,6 +1221,17 @@ class FakeBroadcastRepo:
     async def count_by_language(self, language: str | None) -> int:
         return sum(1 for b in self.rows if b.target_language == language)
 
+    async def broadcast_totals_for_ad(
+        self, ad_id: int
+    ) -> tuple[int, datetime.datetime | None]:
+        sent = sum(b.total_sent for b in self.rows if b.advertisement_id == ad_id)
+        completed = [
+            b.completed_at
+            for b in self.rows
+            if b.advertisement_id == ad_id and b.completed_at is not None
+        ]
+        return sent, max(completed) if completed else None
+
     async def delete_broadcast(self, broadcast_id: int) -> bool:
         row = await self.get_by_id(broadcast_id)
         if row is None:

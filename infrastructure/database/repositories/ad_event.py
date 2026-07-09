@@ -36,6 +36,18 @@ class AdEventRepository(SqlAlchemyRepository[AdEvent]):
             )
         )
 
+    async def impressions_by_placement(self, ad_id: int) -> dict[str, int]:
+        """Impressions grouped by placement for one ad (Sprint 14, Phase 4)."""
+        result = await self.session.execute(
+            select(AdEvent.placement, func.count())
+            .where(
+                AdEvent.advertisement_id == ad_id,
+                AdEvent.event_type == "impression",
+            )
+            .group_by(AdEvent.placement)
+        )
+        return {row[0] or "unknown": int(row[1]) for row in result.all()}
+
     async def count_for_ad(self, advertisement_id: int, *, event_type: str | None = None) -> int:
         """Count events for one ad, optionally restricted to an ``event_type``."""
         conditions = [AdEvent.advertisement_id == advertisement_id]

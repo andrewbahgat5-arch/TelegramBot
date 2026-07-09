@@ -400,6 +400,12 @@ class BroadcastRepositoryProtocol(Repository[T], Protocol[T]):
         """Delete a broadcast by id. Returns True if deleted."""
         ...
 
+    async def broadcast_totals_for_ad(
+        self, ad_id: int
+    ) -> tuple[int, datetime.datetime | None]:
+        """Total sends and last completion for broadcasts linked to an ad."""
+        ...
+
     async def get_next_pending(self, *, now: datetime.datetime | None = None) -> T | None:
         """Oldest **due** ``pending`` broadcast for the worker (16.8; 9.5.10 due-poller).
 
@@ -432,6 +438,12 @@ class AudienceExpressionRepositoryProtocol(Repository[T], Protocol[T]):
     async def get_rules(self, expression_id: int) -> tuple[str, list[AudienceRuleSpec]] | None:
         """Return ``(mode, rules)`` for an expression, or None when it does not exist."""
         ...
+
+
+class AdEventQueryProtocol(Protocol):
+    """Read surface for ad_events aggregates (Sprint 14, Phase 4)."""
+
+    async def impressions_by_placement(self, ad_id: int) -> dict[str, int]: ...
 
 
 class AdRepositoryProtocol(Repository[T], Protocol[T]):

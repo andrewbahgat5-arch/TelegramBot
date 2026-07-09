@@ -42,7 +42,11 @@ from domain.protocols.advertising import (
     AdEventRecorderProtocol,
     AdSenderProtocol,
 )
-from domain.protocols.repositories import AdButtonRepositoryProtocol, AdRepositoryProtocol
+from domain.protocols.repositories import (
+    AdButtonRepositoryProtocol,
+    AdEventQueryProtocol,
+    AdRepositoryProtocol,
+)
 from services.audience_service import AudienceContext, AudienceService
 from services.settings_service import SettingNotFoundError, SettingsService
 
@@ -80,6 +84,22 @@ _EDITABLE_FIELDS = frozenset(_FIELD_TO_COLUMN)
 
 class InvalidAdError(AppError):
     """An ad create/edit request is malformed (bad type, missing content, etc.)."""
+
+
+@dataclass(frozen=True, slots=True)
+class AdDetailedStats:
+    """Per-ad statistics for the admin panel (Sprint 14, Phase 4)."""
+
+    title: str
+    internal_name: str | None
+    is_active: bool
+    created_at: datetime.datetime | None
+    impressions_total: int
+    impressions_by_placement: dict[str, int]
+    clicks_total: int
+    ctr: str
+    last_shown_at: datetime.datetime | None
+    buttons: list[tuple[str, int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,6 +190,7 @@ class AdService:
         button_repo: AdButtonRepositoryProtocol[Any],
         audience: AudienceService,
         event_recorder: AdEventRecorderProtocol | None = None,
+        event_query: AdEventQueryProtocol | None = None,
     ) -> None:
         self._ads = ad_repo
         self._settings = settings
@@ -178,6 +199,7 @@ class AdService:
         self._buttons = button_repo
         self._audience = audience
         self._events = event_recorder
+        self._event_query = event_query
 
     # --- delivery (flow 16.7 + Sprint 9.5 placement/audience) ------------
     async def maybe_show(
@@ -640,6 +662,32 @@ class AdService:
             active_ads=sum(1 for ad in ads if ad.is_active),
             impressions=sum(ad.impressions for ad in ads),
             clicks=sum(ad.clicks for ad in ads),
+        )
+
+    async def detailed_stats(self, ad_id: int) -> AdDetailedStats | None:
+        ad = await self._ads.get_by_id(ad_id)
+        if ad is None:
+            return None
+        by_placement: dict[str, int] = {}
+        if self._event_query is not None:
+            by_placement = await self._event_query.impressions_by_placement(ad_id)
+        buttons = await self._buttons.list_for_ad(ad_id)
+        ctr = (
+            f"{ad.clicks / ad.impressions * 100:.1f}%"
+            if ad.impressions
+            else "—"
+        )
+        return AdDetailedStats(
+            title=ad.title,
+            internal_name=getattr(ad, "internal_name", None),
+            is_active=ad.is_active,
+            created_at=getattr(ad, "created_at", None),
+            impressions_total=ad.impressions,
+            impressions_by_placement=by_placement,
+            clicks_total=ad.clicks,
+            ctr=ctr,
+            last_shown_at=getattr(ad, "last_shown_at", None),
+            buttons=[(b.text, b.clicks) for b in buttons],
         )
 
     async def set_global(self, enabled: bool, *, updated_by: int) -> None:
