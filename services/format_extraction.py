@@ -56,11 +56,13 @@ def normalize_formats(options: Iterable[MediaFormatOption]) -> tuple[MediaFormat
     audio_sources = [o for o in options if o.format is MediaFormat.AUDIO]
     best_audio = _best_audio(audio_sources)
 
+    # Image options carry no tiers/codecs to normalize — pass them through untouched.
+    images = [o for o in options if o.format is MediaFormat.IMAGE]
     videos = _dedupe_video(o for o in options if o.format is MediaFormat.VIDEO)
     audios = _audio_targets(best_audio) if audio_sources else []
 
     videos.sort(key=lambda o: -_QUALITY_RANK.get(o.quality, 0))
-    return tuple(videos + audios)
+    return tuple(images + videos + audios)
 
 
 def _dedupe_video(options: Iterable[MediaFormatOption]) -> list[MediaFormatOption]:

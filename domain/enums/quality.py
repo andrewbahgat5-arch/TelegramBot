@@ -36,6 +36,8 @@ class Quality(StrEnum):
     FLAC = "flac"
     # "Best available" — resolved by the provider when no specific tier is chosen.
     BEST = "best"
+    # Static image selection (paired with MediaFormat.IMAGE). No tiers — one original.
+    IMAGE = "image"
 
     @property
     def is_audio(self) -> bool:

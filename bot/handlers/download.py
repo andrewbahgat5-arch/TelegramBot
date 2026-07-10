@@ -116,13 +116,20 @@ async def handle_url(
     # Auto-download (item #10): if the user opted in and this is a single small format,
     # skip the picker and fetch it straight away (large/multi-format links still ask).
     if (
-        preference_service_factory is not None
-        and job_service_factory is not None
+        job_service_factory is not None
         and rate_limit_service_factory is not None
         and notification_service is not None
     ):
-        prefs = await preference_service_factory(session).get(user.id)
-        auto = _single_small_format(analyzed.info) if prefs.auto_download_small else None
+        # Images have no format/quality to choose — always deliver straight away, no
+        # picker, regardless of the auto-download-small preference. Other single small
+        # formats still honour the user's opt-in.
+        auto: tuple[MediaFormat, Quality] | None = None
+        if _is_single_image(analyzed.info):
+            auto = (MediaFormat.IMAGE, Quality.IMAGE)
+        elif preference_service_factory is not None:
+            prefs = await preference_service_factory(session).get(user.id)
+            if prefs.auto_download_small:
+                auto = _single_small_format(analyzed.info)
         if auto is not None:
             try:
                 await rate_limit_service_factory(session).authorize_download(user.telegram_id)
@@ -177,6 +184,14 @@ def _single_small_format(info: MediaInfo) -> tuple[MediaFormat, Quality] | None:
     if size is None or size > _AUTO_DOWNLOAD_MAX_BYTES:
         return None
     return option.format, option.quality
+
+
+def _is_single_image(info: MediaInfo) -> bool:
+    """A source whose only option is a still image (Pinterest image pin, etc.).
+
+    These skip the format picker entirely and download straight away (no tiers to
+    choose), regardless of the auto-download-small preference."""
+    return len(info.formats) == 1 and info.formats[0].format is MediaFormat.IMAGE
 
 
 async def _auto_download(

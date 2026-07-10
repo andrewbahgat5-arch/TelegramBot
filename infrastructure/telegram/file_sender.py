@@ -130,6 +130,10 @@ class TelegramFileSender:
             return await self._bot.send_video(
                 chat_id, media, caption=caption, supports_streaming=True, reply_markup=markup
             )
+        if format_ is MediaFormat.IMAGE:
+            # Inline photo preview. Deterministic per (format, quality) so upload() and
+            # send_cached() agree and the cached photo file_id stays valid.
+            return await self._bot.send_photo(chat_id, media, caption=caption, reply_markup=markup)
         if format_ is MediaFormat.AUDIO and not _audio_is_document(quality):
             return await self._bot.send_audio(chat_id, media, caption=caption, reply_markup=markup)
         return await self._bot.send_document(chat_id, media, caption=caption, reply_markup=markup)
@@ -162,6 +166,8 @@ class TelegramMessageSender:
 
 def _extract_upload(message: Message) -> UploadedFile:
     media = message.video or message.audio or message.document or message.voice
+    if media is None and message.photo:
+        media = message.photo[-1]  # largest PhotoSize (send_photo returns a size ladder)
     if media is None:  # pragma: no cover - defensive; a send always returns media
         raise TelegramUploadError("Telegram returned no file reference.")
     return UploadedFile(

@@ -92,6 +92,18 @@ _INVALID_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _MAX_FILENAME_STEM = 120
 
 
+def _delivery_caption_base(info: MediaInfo, format_: MediaFormat) -> str | None:
+    """Caption base for the delivered file.
+
+    Images append the source page link under the title (feature request), so the
+    recipient can open the original. Video/audio keep the title only.
+    """
+    title = info.title if info.title and info.title != "Untitled" else None
+    if format_ is MediaFormat.IMAGE and info.source_url:
+        return f"{title}\n{info.source_url}" if title else info.source_url
+    return title
+
+
 def _safe_filename(title: str, suffix: str) -> str:
     """Build a delivered filename from the media title (#11): ``<sanitized title><ext>``.
 
@@ -305,7 +317,7 @@ class DownloadService:
             # received it on a prior attempt — that upload is their delivery.
             target = next((p for p in pairs if p[0].user_id not in delivered), pairs[0])
             target_caption, target_buttons = await self._caption(
-                target[1], target[1].total_downloads + 1, info.title
+                target[1], target[1].total_downloads + 1, _delivery_caption_base(info, format_)
             )
             uploaded = await self._file_sender.upload(
                 produced,
@@ -360,7 +372,7 @@ class DownloadService:
             if waiter.user_id in delivered:
                 continue  # already received it (via the upload, or a prior attempt)
             waiter_caption, waiter_buttons = await self._caption(
-                user, post_totals[waiter.user_id], info.title
+                user, post_totals[waiter.user_id], _delivery_caption_base(info, format_)
             )
             try:
                 sent_message_id = await self._file_sender.send_cached(

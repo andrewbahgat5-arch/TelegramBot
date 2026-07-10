@@ -136,7 +136,11 @@ class YtdlpProvider:
 
     async def extract_info(self, url: str) -> MediaInfo:
         stdout = await self._run_with_retries(
-            [self._bin, "-J", "--no-playlist", "--no-warnings", url],
+            # --ignore-no-formats-error: image-only sources (e.g. a Pinterest image pin)
+            # have no *video* formats; without this yt-dlp exits non-zero ("No video
+            # formats found") and we lose the metadata + image. With it, the info dict
+            # (incl. thumbnails) is still returned and we emit an IMAGE option below.
+            [self._bin, "-J", "--no-playlist", "--no-warnings", "--ignore-no-formats-error", url],
             timeout_s=self._extract_timeout,
         )
         try:
@@ -163,15 +167,23 @@ class YtdlpProvider:
         self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
     ) -> DownloadedFile:
         dest.mkdir(parents=True, exist_ok=True)
-        selector = _format_selector(media, format_, quality)
         out_template = str(dest / f"{media.video_id}.%(ext)s")
-        args = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
-        if format_ is MediaFormat.VIDEO:
-            # Merge into an mp4 container so Telegram plays it inline (sendVideo). The
-            # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
-            # native container and Telegram falls back to a document.
-            args += ["--merge-output-format", "mp4"]
-        args += ["-o", out_template, media.source_url]
+        if format_ is MediaFormat.IMAGE:
+            # Fetch the image URL directly (no format selector / no merge). The URL was
+            # stashed on the IMAGE option at extraction time.
+            image_url = _selected_image_url(media)
+            if not image_url:
+                raise ExtractionFailedError("No image URL to download.")
+            args = [self._bin, "--no-playlist", "--no-warnings", "-o", out_template, image_url]
+        else:
+            selector = _format_selector(media, format_, quality)
+            args = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
+            if format_ is MediaFormat.VIDEO:
+                # Merge into an mp4 container so Telegram plays it inline (sendVideo). The
+                # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
+                # native container and Telegram falls back to a document.
+                args += ["--merge-output-format", "mp4"]
+            args += ["-o", out_template, media.source_url]
         await self._run(args, timeout_s=self._download_timeout)
         produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
         if not produced:
@@ -224,16 +236,88 @@ class YtdlpProvider:
         platform = detect_platform(url)
         duration = _opt_int(info.get("duration"))
         formats = tuple(_parse_formats(info.get("formats") or [], duration))
+        title = str(info.get("title") or "Untitled")
+        if not formats:
+            # No playable audio/video streams — offer the image if the source is one
+            # (image pins etc.). The full-resolution image URL rides in the option's
+            # provider_format_id; download() fetches it directly.
+            image_url = _best_image_url(info)
+            if image_url:
+                # yt-dlp labels image pins "Pinterest video #<id>"; the human text lives
+                # in description — prefer it for a clean caption.
+                desc = info.get("description")
+                if isinstance(desc, str) and desc.strip():
+                    title = desc.strip()[:200]
+                formats = (
+                    MediaFormatOption(
+                        format=MediaFormat.IMAGE,
+                        quality=Quality.IMAGE,
+                        approx_size_bytes=_opt_int(
+                            info.get("filesize") or info.get("filesize_approx")
+                        ),
+                        provider_format_id=image_url,
+                        codec="image",
+                    ),
+                )
         return MediaInfo(
             platform=platform,
             video_id=str(info.get("id") or ""),
-            title=str(info.get("title") or "Untitled"),
+            title=title,
             source_url=str(info.get("webpage_url") or url),
             duration=duration,
             thumbnail_url=info.get("thumbnail"),
             formats=formats,
             raw=_curated_metadata(info),
         )
+
+
+_IMAGE_EXTS = frozenset(
+    {"jpg", "jpeg", "png", "webp", "gif", "bmp", "tiff", "tif", "avif", "heic", "jfif"}
+)
+
+
+def _looks_like_image(url: str) -> bool:
+    tail = url.split("?", 1)[0].rsplit("/", 1)[-1].lower()
+    return "." in tail and tail.rsplit(".", 1)[-1] in _IMAGE_EXTS
+
+
+def _best_image_url(info: dict[str, Any]) -> str | None:
+    """The highest-resolution still image for an image-only source (any site), or None.
+
+    Works generically, not just for Pinterest:
+      1. a concrete image *format* (direct image links / extractors that expose the
+         picture as a format),
+      2. a full-resolution ``/originals/`` thumbnail (Pinterest), else the largest
+         thumbnail by pixel area,
+      3. a top-level image ``url``, else the ``thumbnail`` preview.
+    """
+    for fmt in info.get("formats") or []:
+        url = fmt.get("url")
+        if isinstance(url, str) and (
+            str(fmt.get("ext") or "").lower() in _IMAGE_EXTS or _looks_like_image(url)
+        ):
+            return url
+    thumbs = [t for t in (info.get("thumbnails") or []) if isinstance(t.get("url"), str)]
+    originals = [t["url"] for t in thumbs if "/originals/" in t["url"]]
+    if originals:
+        return originals[-1]
+    if thumbs:
+        return max(
+            thumbs,
+            key=lambda t: (_opt_int(t.get("width")) or 0) * (_opt_int(t.get("height")) or 0),
+        )["url"]
+    top = info.get("url")
+    if isinstance(top, str) and _looks_like_image(top):
+        return top
+    thumb = info.get("thumbnail")
+    return thumb if isinstance(thumb, str) else None
+
+
+def _selected_image_url(media: MediaInfo) -> str | None:
+    for option in media.formats:
+        if option.format is MediaFormat.IMAGE and option.provider_format_id:
+            return option.provider_format_id
+    return None
 
 
 def _map_error(stderr: str) -> Exception:

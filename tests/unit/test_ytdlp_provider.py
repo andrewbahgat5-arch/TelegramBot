@@ -82,6 +82,28 @@ def test_to_media_info_parses_formats() -> None:
     assert audio.format is MediaFormat.AUDIO
 
 
+def test_to_media_info_emits_image_when_no_video_formats() -> None:
+    """An image-only source (e.g. a Pinterest image pin) → one IMAGE option carrying
+    the full-resolution /originals/ URL, so it auto-downloads and delivers as a photo."""
+    provider = YtdlpProvider()
+    image_info: dict[str, Any] = {
+        "id": "pin123",
+        "title": "A knight",
+        "webpage_url": "https://www.pinterest.com/pin/pin123/",
+        "formats": [],
+        "thumbnails": [
+            {"url": "https://i.pinimg.com/236x/x.jpg", "width": 236, "height": 300},
+            {"url": "https://i.pinimg.com/originals/x.jpg", "width": 736, "height": 900},
+        ],
+    }
+    info = provider._to_media_info("https://www.pinterest.com/pin/pin123/", image_info)
+    assert len(info.formats) == 1
+    option = info.formats[0]
+    assert option.format is MediaFormat.IMAGE
+    assert option.quality is Quality.IMAGE
+    assert option.provider_format_id == "https://i.pinimg.com/originals/x.jpg"
+
+
 @pytest.mark.parametrize(
     ("width", "height", "note", "expected"),
     [

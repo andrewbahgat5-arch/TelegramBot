@@ -109,6 +109,27 @@ Final container set (13): `tgbot_bot`, `tgbot_worker`, `tgbot_api`, `tgbot_postg
   (`startup_crash_recovery requeued_inflight=4`), reprocessed, **completed and
   delivered**, and `active_downloads` dropped to 0 — retries are unblocked immediately.
 
+### F1 — Feature: image downloads (all sites)
+- **Ask:** support downloading images (Pinterest pins and any site), skip the
+  format picker, and put the source link in the caption.
+- **How it works:**
+  - New `MediaFormat.IMAGE` / `Quality.IMAGE`. `extract_info` now passes
+    `--ignore-no-formats-error` so an image-only source (no video/audio formats)
+    still returns metadata, and `_best_image_url` picks the picture **generically** —
+    a direct image *format*/URL (`.jpg/.png/.webp/.gif…`), else a `/originals/`
+    thumbnail (Pinterest), else the largest thumbnail, else the top-level image URL.
+    The full-res URL rides in the option's `provider_format_id`; `download()` fetches
+    it directly (no `-f`/merge). For image pins the caption title uses the pin
+    **description** (yt-dlp labels them "Pinterest video #<id>").
+  - `normalize_formats` passes IMAGE options through; `file_sender` sends images with
+    **`send_photo`** (inline preview) and `_extract_upload` reads `message.photo`.
+  - The handler **auto-downloads images unconditionally** (`_is_single_image`) — no
+    "Choose a format" step, regardless of the auto-download-small preference.
+  - The delivered caption appends the **source link** under the title for images
+    (`_delivery_caption_base`). No third-party "saved by" branding.
+- **Verified live:** Pinterest image pin and a direct Wikimedia `.jpg` both analyze to
+  a single IMAGE option, download, and carry `title + source URL` in the caption.
+
 ### Known / watch
 - One transient worker `asyncpg ConnectionDoesNotExistError` appeared during the `WORKER_COUNT`
   restart; none since. Watch under sustained load (asyncpg + PgBouncer transaction pooling).
@@ -141,6 +162,12 @@ Final container set (13): `tgbot_bot`, `tgbot_worker`, `tgbot_api`, `tgbot_postg
 | `workers/main.py` | Run `recover_inflight()` + `sweep_orphans()` at startup before workers dequeue (P7). |
 | `infrastructure/database/repositories/job.py` · `infrastructure/database/maintenance.py` · `domain/protocols/maintenance.py` | `fail_stalled_inflight()` / `reclaim_stalled_jobs()` — periodic stalled-`PROCESSING` backstop (P7). |
 | `workers/cleanup_worker.py` | Periodic age-gated stalled-job reclaim before the orphan sweep (P7). |
+| `domain/enums/media_format.py` · `domain/enums/quality.py` | Add `IMAGE` media kind + quality (F1). |
+| `infrastructure/downloader/providers/ytdlp_provider.py` | `--ignore-no-formats-error`, generic `_best_image_url`, image download, description-as-title (F1). |
+| `services/format_extraction.py` | Pass IMAGE options through normalization (F1). |
+| `infrastructure/telegram/file_sender.py` | Deliver images via `send_photo`; read `message.photo` (F1). |
+| `bot/handlers/download.py` | Auto-download images with no picker (`_is_single_image`, F1). |
+| `services/download_service.py` | Append the source link to image captions (`_delivery_caption_base`, F1). |
 | `deploy/Dockerfile.bot` | Bake in Deno (EJS) + `bgutil-ytdlp-pot-provider` plugin. |
 | `deploy/Dockerfile.worker` | Bake in Deno, `/tmp/downloads` ownership fix, the yt-dlp cookie wrapper, POT plugin. |
 | `deploy/docker-compose.prod.yml` | Add `warp`/`warp2`/`warp3` + `warp-lb` (HAProxy) + `bgutil-pot` services and their volumes; mount `yt-dlp.conf` + `secrets/cookies.txt` into bot/worker. |

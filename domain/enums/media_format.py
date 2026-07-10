@@ -14,3 +14,5 @@ from enum import StrEnum
 class MediaFormat(StrEnum):
     VIDEO = "video"
     AUDIO = "audio"
+    # Static image (e.g. a Pinterest image pin). No quality tiers; delivered as a photo.
+    IMAGE = "image"
