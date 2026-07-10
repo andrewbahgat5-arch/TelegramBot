@@ -10,6 +10,7 @@
 > [`SMOKE_TEST.md`](SMOKE_TEST.md) (launch smoke test), [`smoke-test.sh`](smoke-test.sh),
 > [`migrate.sh`](migrate.sh), [`monitor-resources.sh`](monitor-resources.sh),
 > [`restore-drill-report.md`](restore-drill-report.md), [`LOCAL_BOT_API.md`](LOCAL_BOT_API.md),
+> [`VPS_DEPLOYMENT_CHANGES.md`](VPS_DEPLOYMENT_CHANGES.md) (what changed on the live VPS + why),
 > [`../.env.production.example`](../.env.production.example),
 > `MASTER_PLAN.md` §13 (config), §15 (observability), §14.8 (DR).
 

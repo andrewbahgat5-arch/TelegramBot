@@ -45,6 +45,10 @@ class _FakeMaintenance:
         self.calls.append("sweep")
         return (1, 2)
 
+    async def reclaim_stalled_jobs(self, *, older_than_seconds: float | None = None) -> int:
+        self.calls.append(("reclaim", older_than_seconds))
+        return 0
+
 
 async def _retention() -> dict[str, int]:
     return {"downloads": 365, "jobs": 90, "error_logs": 90}
@@ -56,6 +60,8 @@ async def test_maintain_once_runs_all_duties(tmp_path: Path) -> None:
     await worker.maintain_once()
     assert "ensure" in fake.calls
     assert "sweep" in fake.calls
+    # Backstop reclaim runs age-gated (never reap-all on the periodic cadence).
+    assert ("reclaim", worker._stalled_ceiling) in fake.calls
     assert ("drop", {"downloads": 365, "jobs": 90, "error_logs": 90}) in fake.calls
 
 

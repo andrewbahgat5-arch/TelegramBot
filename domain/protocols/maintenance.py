@@ -27,3 +27,12 @@ class DbMaintenanceProtocol(Protocol):
     async def sweep_orphans(self) -> tuple[int, int]:
         """Delete orphaned ``active_downloads`` + ``job_waiters``; return their counts."""
         ...
+
+    async def reclaim_stalled_jobs(self, *, older_than_seconds: float | None = None) -> int:
+        """Fail jobs a dead worker stranded in ``PROCESSING`` so their orphaned
+        ``active_downloads``/``job_waiters`` become sweepable; return the count.
+
+        ``older_than_seconds=None`` reaps all claimed jobs (crash recovery at startup);
+        a positive value reaps only jobs older than the cutoff (periodic backstop).
+        """
+        ...

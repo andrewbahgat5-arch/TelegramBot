@@ -31,6 +31,10 @@ _log = get_logger("workers.cleanup_worker")
 RetentionReader = Callable[[], Awaitable[dict[str, int]]]
 
 _DEFAULT_MAINTENANCE_INTERVAL = 3600.0  # hourly; partition/retention work is not hot.
+# Backstop only: a job still "processing" this long after it began — with no restart to
+# trigger the startup crash-recovery reclaim — is almost certainly dead (a legitimate
+# download finishes far sooner). Kept generous so a slow-but-live download is never reaped.
+_DEFAULT_STALLED_CEILING = 7200.0  # 2 hours
 
 
 class CleanupWorker:
@@ -43,6 +47,7 @@ class CleanupWorker:
         maintenance: DbMaintenanceProtocol | None = None,
         retention_reader: RetentionReader | None = None,
         maintenance_interval_seconds: float = _DEFAULT_MAINTENANCE_INTERVAL,
+        stalled_job_ceiling_seconds: float = _DEFAULT_STALLED_CEILING,
     ) -> None:
         self._temp_dir = temp_dir
         self._max_age = max_age_seconds
@@ -50,6 +55,7 @@ class CleanupWorker:
         self._maintenance = maintenance
         self._retention_reader = retention_reader
         self._maintenance_interval = maintenance_interval_seconds
+        self._stalled_ceiling = stalled_job_ceiling_seconds
 
     def sweep_once(self, *, now: float | None = None) -> int:
         """Remove temp entries older than ``max_age_seconds``; return the count removed."""
@@ -85,6 +91,17 @@ class CleanupWorker:
             _log.info("cleanup_partitions_ensured", count=len(ensured))
         except Exception as exc:  # boundary: a maintenance failure must not stop cleanup
             _log.warning("cleanup_partitions_failed", error=str(exc))
+        try:
+            # Backstop reclaim: fail jobs stuck "processing" past the ceiling (a hang
+            # with no restart). Age-gated so a still-running download is never reaped;
+            # the aggressive reap-all crash recovery runs once at startup (workers/main).
+            reclaimed = await self._maintenance.reclaim_stalled_jobs(
+                older_than_seconds=self._stalled_ceiling
+            )
+            if reclaimed:
+                _log.info("cleanup_stalled_jobs_reclaimed", jobs=reclaimed)
+        except Exception as exc:  # boundary
+            _log.warning("cleanup_reclaim_failed", error=str(exc))
         try:
             active, waiters = await self._maintenance.sweep_orphans()
             if active or waiters:

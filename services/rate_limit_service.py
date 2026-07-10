@@ -122,7 +122,10 @@ class RateLimitService:
         if await self._cache.is_on_cooldown(user.id):
             raise CooldownActiveError("Please wait before requesting another download.")
 
-        await self._cache.set_cooldown(user.id, ttl=cooldown)
+        # A cooldown of 0 (or less) means "no cooldown" — arming a 0-second Redis
+        # expiry would raise "invalid expire time" and fail the whole download.
+        if cooldown > 0:
+            await self._cache.set_cooldown(user.id, ttl=cooldown)
 
 
 def _effective_plan(user: Any) -> str:

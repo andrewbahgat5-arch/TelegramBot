@@ -33,3 +33,12 @@ class QueueProtocol(Protocol):
     async def active_count(self) -> int:
         """Number of jobs currently in flight."""
         ...
+
+    async def recover_inflight(self, *, score: float) -> int:
+        """Move every in-flight member back to the pending queue; return the count.
+
+        A member is left in the active set only by a worker that dequeued it and then
+        died before ``ack`` (crash / restart). Re-driving them at startup is the
+        reliable-queue crash-recovery step (at-least-once delivery).
+        """
+        ...

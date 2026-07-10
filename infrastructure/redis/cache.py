@@ -20,6 +20,10 @@ class RedisCache:
         return value
 
     async def set(self, key: str, value: str, *, ttl: int | None = None) -> None:
+        # Redis rejects a non-positive EX ("invalid expire time"); treat ttl<=0 as
+        # "no expiry" so a 0/disabled TTL setting can never crash the caller.
+        if ttl is not None and ttl <= 0:
+            ttl = None
         await self._client.set(key, value, ex=ttl)
 
     async def delete(self, key: str) -> None:

@@ -131,6 +131,8 @@ services:
     # DOWNLOAD_TEMP_DIR (default /tmp/downloads) is a scratch volume.
     volumes:
       - downloads:/tmp/downloads
+      - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
+      - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
     depends_on:
       postgres:
         condition: service_healthy
@@ -146,6 +148,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.bot
     container_name: tgbot_bot
+    volumes:
+      - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
+      - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
     depends_on:
       postgres:
         condition: service_healthy
@@ -153,6 +158,69 @@ services:
         condition: service_healthy
       api:
         condition: service_started
+
+  # Cloudflare WARP — clean (non-datacenter) egress IP so YouTube does not
+  # bot-block the server. Exposes a SOCKS5 proxy on :1080 (used via --proxy).
+  warp:
+    image: caomingjun/warp
+    container_name: tgbot_warp
+    restart: unless-stopped
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    device_cgroup_rules:
+      - "c 10:200 rwm"
+    environment:
+      WARP_SLEEP: "5"
+    volumes:
+      - warpdata:/var/lib/cloudflare-warp
+
+  # bgutil PO Token provider — YouTube GVS PO tokens so media URLs are authorized
+  # (avoids HTTP 403 on download). Reached at http://bgutil-pot:4416.
+  bgutil-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: tgbot_bgutil_pot
+    restart: unless-stopped
+
+  # --- WARP pool: extra tunnels (each its own egress IP) load-balanced by warp-lb ---
+  warp2:
+    image: caomingjun/warp
+    container_name: tgbot_warp2
+    restart: unless-stopped
+    cap_add: [MKNOD, AUDIT_WRITE, NET_ADMIN]
+    sysctls: ["net.ipv4.conf.all.src_valid_mark=1"]
+    device_cgroup_rules: ["c 10:200 rwm"]
+    environment:
+      WARP_SLEEP: "5"
+    volumes:
+      - warpdata2:/var/lib/cloudflare-warp
+
+  warp3:
+    image: caomingjun/warp
+    container_name: tgbot_warp3
+    restart: unless-stopped
+    cap_add: [MKNOD, AUDIT_WRITE, NET_ADMIN]
+    sysctls: ["net.ipv4.conf.all.src_valid_mark=1"]
+    device_cgroup_rules: ["c 10:200 rwm"]
+    environment:
+      WARP_SLEEP: "5"
+    volumes:
+      - warpdata3:/var/lib/cloudflare-warp
+
+  # HAProxy SOCKS load-balancer -> single endpoint warp-lb:1080 across the pool.
+  warp-lb:
+    image: haproxy:2.9
+    container_name: tgbot_warp_lb
+    restart: unless-stopped
+    volumes:
+      - ./haproxy-warp.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - warp
+      - warp2
+      - warp3
 
   uptime-kuma:
     image: louislam/uptime-kuma:1
@@ -180,6 +248,9 @@ services:
     restart: unless-stopped
 
 volumes:
+  warpdata:
+  warpdata2:
+  warpdata3:
   pgdata:
   redisdata:
   downloads:

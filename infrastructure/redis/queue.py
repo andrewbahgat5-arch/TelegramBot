@@ -48,3 +48,22 @@ class RedisQueue:
     async def active_count(self) -> int:
         count: int = await self._client.scard(RedisKeys.QUEUE_ACTIVE)  # type: ignore[misc]
         return count
+
+    async def recover_inflight(self, *, score: float) -> int:
+        """Re-drive dequeued-but-unacked members back into the queue (crash recovery).
+
+        A member sits in ``queue:active`` only because the worker that popped it died
+        before ``ack``; nothing else re-drives it, so it (and its ``active_downloads``
+        slot) would block the same content forever. Move each back to ``queue:jobs`` at
+        the given score and clear the active set. Idempotent and safe to run at startup
+        before any worker begins dequeuing.
+        """
+        members = await self._client.smembers(RedisKeys.QUEUE_ACTIVE)  # type: ignore[misc]
+        if not members:
+            return 0
+        pipe = self._client.pipeline()
+        for member in members:
+            pipe.zadd(RedisKeys.QUEUE_JOBS, {member: score})
+            pipe.srem(RedisKeys.QUEUE_ACTIVE, member)
+        await pipe.execute()
+        return len(members)

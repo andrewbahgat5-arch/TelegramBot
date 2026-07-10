@@ -268,9 +268,32 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
                 "error_logs": int(await retention_settings.get("error_log_retention_days")),
             }
 
+    maintenance = DbMaintenance(engine, session_factory)
+
+    # Crash recovery (runs BEFORE any worker starts dequeuing — race-free):
+    #   1. Re-drive jobs a dead worker left stranded in the in-flight set. Each one
+    #      still holds an ``active_downloads`` slot, so without this its content is
+    #      blocked forever with "already being prepared". Re-processing delivers them
+    #      from the durable ``job_waiters`` table (at-least-once), and on completion the
+    #      slot is released; a job that can no longer succeed fails through to terminal.
+    #   2. Sweep ``active_downloads`` / ``job_waiters`` whose job is already terminal,
+    #      so any leftover from the previous run can't block a retry.
+    try:
+        recovered = await queue_service.recover_inflight()
+        swept_active, swept_waiters = await maintenance.sweep_orphans()
+        if recovered or swept_active or swept_waiters:
+            _log.info(
+                "startup_crash_recovery",
+                requeued_inflight=recovered,
+                swept_active_downloads=swept_active,
+                swept_job_waiters=swept_waiters,
+            )
+    except Exception as exc:  # never block startup on recovery
+        _log.warning("startup_crash_recovery_failed", error=str(exc))
+
     cleanup = CleanupWorker(
         Path(settings.download_temp_dir),
-        maintenance=DbMaintenance(engine, session_factory),
+        maintenance=maintenance,
         retention_reader=read_retention,
     )
     broadcast_worker = BroadcastWorker(

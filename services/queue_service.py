@@ -34,3 +34,13 @@ class QueueService:
 
     async def active_count(self) -> int:
         return await self._queue.active_count()
+
+    async def recover_inflight(self, *, now_ms: int | None = None) -> int:
+        """Re-drive jobs a crashed worker left in-flight, at NORMAL priority.
+
+        Call once at worker startup, before any worker begins dequeuing, so stranded
+        in-flight jobs (and the ``active_downloads`` slots blocking their retries) are
+        re-processed instead of stuck. Returns the number recovered.
+        """
+        millis = now_ms if now_ms is not None else int(time.time() * 1000)
+        return await self._queue.recover_inflight(score=priority_score(PRIORITY_NORMAL, millis))

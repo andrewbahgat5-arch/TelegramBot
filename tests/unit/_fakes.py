@@ -1004,6 +1004,14 @@ class FakeQueueBackend:
     async def active_count(self) -> int:
         return len(self.active)
 
+    async def recover_inflight(self, *, score: float) -> int:
+        members = list(self.active)
+        for member in members:
+            self.entries.append((score, member))
+        self.entries.sort(key=lambda e: e[0])
+        self.active.clear()
+        return len(members)
+
 
 class FakeFileSender:
     """In-memory ``FileSenderProtocol`` recording uploads and deliveries.

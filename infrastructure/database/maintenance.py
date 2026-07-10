@@ -17,6 +17,7 @@ from infrastructure.database.partitioning import (
     ensure_partitions_for_next_n_months,
 )
 from infrastructure.database.repositories.active_download import ActiveDownloadRepository
+from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 
 
@@ -54,3 +55,11 @@ class DbMaintenance:
             waiters = await JobWaiterRepository(session).delete_orphaned()
             await session.commit()
         return active, waiters
+
+    async def reclaim_stalled_jobs(self, *, older_than_seconds: float | None = None) -> int:
+        async with self._session_factory() as session:
+            reclaimed = await JobRepository(session).fail_stalled_inflight(
+                older_than_seconds=older_than_seconds
+            )
+            await session.commit()
+        return reclaimed

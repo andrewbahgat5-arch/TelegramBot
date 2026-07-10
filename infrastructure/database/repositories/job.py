@@ -19,6 +19,14 @@ from infrastructure.database.repositories.base import SqlAlchemyRepository
 # Non-terminal states: a job in any of these is still "in flight" for its owner.
 _ACTIVE_STATUSES = tuple(s.value for s in JobStatus if not s.is_terminal)
 
+# States that mean "a worker had dequeued and claimed this job". If that worker dies
+# (crash / restart / OOM), the job is stranded here forever — it is no longer in the
+# Redis queue, so nothing re-drives it, and its active_downloads row keeps blocking
+# every retry for the same (media, format, quality) with "already being prepared".
+# QUEUED / RETRY_QUEUED are intentionally excluded: those still live in the durable
+# (AOF) Redis queue and get reprocessed normally after a restart.
+_RECLAIMABLE_STATUSES = (JobStatus.PROCESSING.value,)
+
 
 class JobRepository(SqlAlchemyRepository[Job]):
     model = Job
@@ -47,6 +55,43 @@ class JobRepository(SqlAlchemyRepository[Job]):
             select(func.count()).select_from(Job).where(*conditions)
         )
         return int(result.scalar_one())
+
+    async def fail_stalled_inflight(
+        self,
+        *,
+        older_than_seconds: float | None = None,
+        error: str = "reclaimed: worker/process restart",
+    ) -> int:
+        """Fail jobs a dead worker left stranded in ``PROCESSING`` and return the count.
+
+        Marking them ``PERMANENTLY_FAILED`` (terminal) lets the existing orphan sweeps
+        drop their ``active_downloads`` / ``job_waiters``, so retries stop hitting
+        "already being prepared".
+
+        ``older_than_seconds=None`` reaps *all* claimed jobs — safe **only at process
+        startup**, before any worker begins claiming new jobs, since nothing is running
+        yet. A positive value reaps only jobs whose work began before the cutoff: a
+        periodic backstop for a hang without a restart that must never touch a
+        still-running download.
+        """
+        conditions = [Job.status.in_(_RECLAIMABLE_STATUSES)]
+        if older_than_seconds is not None:
+            cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+                seconds=older_than_seconds
+            )
+            conditions.append(func.coalesce(Job.started_at, Job.created_at) < cutoff)
+        now = datetime.datetime.now(datetime.UTC)
+        result = await self.session.execute(
+            update(Job)
+            .where(*conditions)
+            .values(
+                status=JobStatus.PERMANENTLY_FAILED.value,
+                error_message=error,
+                finished_at=now,
+            )
+        )
+        await self.session.flush()
+        return int(result.rowcount)
 
     async def list_recent(
         self, *, limit: int = 50, offset: int = 0, status: str | None = None
