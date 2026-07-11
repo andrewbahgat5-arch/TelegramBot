@@ -48,7 +48,8 @@ def test_quality_keyboard_lists_qualities_for_format() -> None:
     assert len(back_buttons) == 1  # a Back row to return to format selection
     labels = [b.text for b in quality_buttons]
     assert any("1080p" in label for label in labels)
-    assert any("(~5 MB)" in label for label in labels)  # size shown when known
+    # Size no longer appears on the button — it now lives in the message description.
+    assert all("MB" not in label and "~" not in label for label in labels)
     parsed = signer.unpack(quality_buttons[0].callback_data or "")
     assert parsed is not None and parsed.action == "q" and parsed.quality is not None
     back = signer.unpack(back_buttons[0].callback_data or "")
@@ -95,7 +96,7 @@ def test_history_keyboard_first_page_has_no_prev() -> None:
     assert len(nav) == 2
 
 
-def test_quality_label_uses_gb_for_large_files() -> None:
+def test_quality_button_label_is_quality_only_without_size() -> None:
     info = MediaInfo(
         platform="youtube",
         video_id="v",
@@ -106,4 +107,5 @@ def test_quality_label_uses_gb_for_large_files() -> None:
     buttons = _buttons(
         build_quality_keyboard(1, MediaFormat.VIDEO, info, CallbackSigner("k"), "en")
     )
-    assert "GB" in buttons[0].text
+    # The size (even a GB-scale one) is shown in the description, not on the button.
+    assert buttons[0].text == "2160p"

@@ -14,6 +14,8 @@
   "system.maintenance": "🔧 البوت تحت الصيانة حاليًا. يرجى المحاولة مرة أخرى لاحقًا.",
 
   "notification.preparing": "⏳ جارٍ تجهيز ملفك…",
+  "notification.uploading": "⬆️ جارٍ الرفع إلى تيليجرام…",
+  "notification.processing": "⚙️ جارٍ المعالجة…",
   "notification.failed": "❌ عذرًا، فشل التنزيل. يرجى المحاولة مرة أخرى.",
 
   "language.change_button": "🌐 تغيير اللغة",
@@ -50,6 +52,7 @@
   "download.choose_quality": "اختر الجودة:",
   "download.format.video": "🎬 فيديو",
   "download.format.audio": "🎵 صوت",
+  "download.subscribers": "مشترك",
 
   "common.back": "⬅️ رجوع",
   "common.prev": "⬅️ السابق",

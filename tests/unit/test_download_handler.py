@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.download import (
+    _human_size,
+    _media_caption,
+    _quality_caption,
     _subject_to_free_cap,
     handle_back,
     handle_format_choice,
@@ -592,3 +595,55 @@ async def test_quality_choice_forged_ignored() -> None:
     )
     callback.answer.assert_awaited_once()
     assert await backend.depth() == 0  # forged → never enqueued
+
+
+def _rich_info() -> MediaInfo:
+    return MediaInfo(
+        platform="youtube",
+        video_id="v",
+        title="Clip",
+        source_url="https://x/y",
+        duration=181,
+        formats=(
+            MediaFormatOption(MediaFormat.VIDEO, Quality.P1080, 3_250_000, "137"),
+            MediaFormatOption(MediaFormat.VIDEO, Quality.P360, 1_500_000, "134"),
+            MediaFormatOption(MediaFormat.AUDIO, Quality.MP3, 2_800_000, "140"),
+        ),
+        raw={
+            "view_count": 691200,
+            "like_count": 9100,
+            "comment_count": 147,
+            "upload_date": "20210924",
+            "channel": "Uzu",
+            "channel_follower_count": 18100,
+        },
+    )
+
+
+def test_quality_caption_lists_sizes_in_description() -> None:
+    caption = _quality_caption(_rich_info(), MediaFormat.VIDEO, translate, "en")
+    # Rich metadata header (views · likes · comments · date · channel/subscribers).
+    assert "👁 691.2K" in caption
+    assert "💬 147" in caption
+    assert "Sep 24, 2021" in caption
+    assert "18.1K subscribers" in caption
+    # Each video tier is listed with its size in the description (not on a button).
+    assert "1080p" in caption and "3.1 MB" in caption
+    assert "360p" in caption and "1.4 MB" in caption
+    # Only the chosen format is listed — no audio line on the video quality screen.
+    assert "MP3" not in caption
+
+
+def test_media_caption_defers_size_list_to_quality_screen() -> None:
+    # The format screen shows the header but not the per-size list (formats_for=None).
+    caption = _media_caption(_rich_info(), translate, "en")
+    assert "👁 691.2K" in caption
+    assert "3.1 MB" not in caption
+
+
+def test_human_size_units() -> None:
+    assert _human_size(None) is None
+    assert _human_size(0) is None
+    assert _human_size(500_000) == "488 KB"
+    assert _human_size(3_250_000) == "3.1 MB"
+    assert _human_size(3 * 1024**3) == "3.0 GB"

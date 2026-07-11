@@ -33,6 +33,7 @@ from domain.exceptions import InfrastructureError, URLNotSupportedError
 from domain.protocols.downloader import (
     Capability,
     DownloaderProtocol,
+    DownloadProgress,
     ProviderHealth,
     ProviderRetryElsewhere,
     ProviderSettingsProtocol,
@@ -88,9 +89,18 @@ class DownloaderRegistry:
         return await self._run(detect_platform(url), lambda p: p.extract_info(url))
 
     async def download(
-        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+        self,
+        media: MediaInfo,
+        format_: MediaFormat,
+        quality: Quality,
+        dest: Path,
+        *,
+        progress_cb: DownloadProgress | None = None,
     ) -> DownloadedFile:
-        return await self._run(media.platform, lambda p: p.download(media, format_, quality, dest))
+        return await self._run(
+            media.platform,
+            lambda p: p.download(media, format_, quality, dest, progress_cb=progress_cb),
+        )
 
     async def health_check(self) -> ProviderHealth:
         return ProviderHealth.OK

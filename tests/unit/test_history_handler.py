@@ -104,6 +104,9 @@ async def test_history_command_lists_rows() -> None:
     message.answer.assert_awaited_once()
     args = message.answer.await_args
     assert args is not None and args.kwargs.get("reply_markup") is not None
+    # The clickable titles must not spawn a Telegram link preview under the list.
+    preview = args.kwargs.get("link_preview_options")
+    assert preview is not None and preview.is_disabled is True
     assert history.list_calls == [(7, 0, None)]
 
 
@@ -340,10 +343,15 @@ async def test_render_detail_lines() -> None:
         text = str(message.answer.await_args)
     assert "01:52" in text or "1:52" in text
     assert "1.8" in text or "1.9" in text
+    # Owner request: the row detail line carries no time/source emoji, just text.
+    assert "🕐" not in text  # time emoji dropped
+    assert "▶️" not in text  # source (platform) emoji dropped
+    assert "Youtube" in text  # platform name still shown, just without the emoji
 
 
 async def test_render_title_hyperlink_and_number_badge() -> None:
-    # Item #8: the title links to the source (http/https only) and rows use number badges.
+    # Item #8: the title links to the source (http/https only). Rows use a plain numeric
+    # label ("1.") — no keycap-emoji badge (Owner request to drop row emojis).
     page = HistoryPage(
         [FakeHistoryRow(1, title="Rick Astley", source_url="https://youtu.be/dQw4w9WgXcQ")],
         0, False, False,
@@ -359,7 +367,8 @@ async def test_render_title_hyperlink_and_number_badge() -> None:
 
     text = message.answer.await_args.args[0]
     assert '<a href="https://youtu.be/dQw4w9WgXcQ">Rick Astley</a>' in text  # clickable title
-    assert "1️⃣" in text and "1. " not in text  # keycap badge, not plain "1."
+    assert "1. " in text  # plain numeric label, not a keycap emoji
+    assert "1️⃣" not in text  # the keycap badge is gone
 
 
 async def test_render_title_not_linked_for_unsafe_or_missing_url() -> None:

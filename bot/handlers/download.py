@@ -29,7 +29,7 @@ from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
-from domain.entities.media import MediaInfo
+from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaFormatOption, MediaInfo
 from domain.entities.user import UserSnapshot
 from domain.enums import UNLIMITED_ROLES, AdPlacement, MediaFormat, Quality
 from domain.exceptions import (
@@ -233,13 +233,22 @@ async def _auto_download(
     await show_placement_ad(ad_service_factory(session), user, AdPlacement.QUALITY_SELECT.value)
 
 
-def _build_caption(info: MediaInfo, footer: str) -> str:
-    """Title + duration + source + media details (description/views/likes) + footer.
+def _build_caption(
+    info: MediaInfo,
+    footer: str,
+    translate: Translator,
+    locale: str,
+    *,
+    formats_for: MediaFormat | None = None,
+) -> str:
+    """Rich header (title · duration · source · stats · channel) + optional formats list.
 
     ``info.title``/``info.platform`` are user/platform-generated content and are
-    interpolated verbatim, never translated (Sprint 11.5 requirement #3). Media
-    details come from the raw yt-dlp metadata (``info.raw``) and are best-effort —
-    most providers omit some or all of these fields.
+    interpolated verbatim, never translated (Sprint 11.5 requirement #3). Stats come
+    from the raw yt-dlp metadata (``info.raw``) and are best-effort — most providers
+    omit some or all of these fields. When ``formats_for`` is given, the available
+    options for that format are listed with their sizes, so the size is shown in the
+    description rather than on the buttons.
     """
     lines = [f"🎬 <b>{escape(info.title)}</b>"]
     meta: list[str] = []
@@ -249,34 +258,108 @@ def _build_caption(info: MediaInfo, footer: str) -> str:
         meta.append(f"📺 {info.platform.capitalize()}")
     if meta:
         lines.append("   ".join(meta))
-    description = (info.raw.get("description") or "")[:100]
-    if description:
-        truncated = "…" if len(info.raw.get("description", "")) > 100 else ""
-        lines.append(f"\n📝 {escape(description)}{truncated}")
-    details: list[str] = []
+
+    stats: list[str] = []
     view_count = info.raw.get("view_count")
     like_count = info.raw.get("like_count")
-    dislike_count = info.raw.get("dislike_count")
+    comment_count = info.raw.get("comment_count")
     if view_count is not None:
-        details.append(f"👁 {_fmt_count(view_count)}")
+        stats.append(f"👁 {_fmt_count(view_count)}")
     if like_count is not None:
-        details.append(f"👍 {_fmt_count(like_count)}")
-    if dislike_count is not None:
-        details.append(f"👎 {_fmt_count(dislike_count)}")
-    if details:
-        lines.append("   ".join(details))
+        stats.append(f"👍 {_fmt_count(like_count)}")
+    if comment_count is not None:
+        stats.append(f"💬 {_fmt_count(comment_count)}")
+    uploaded = _format_upload_date(info.raw.get("upload_date"))
+    if uploaded:
+        stats.append(f"📅 {uploaded}")
+    if stats:
+        lines.append("   ".join(stats))
+
+    channel = info.raw.get("channel") or info.raw.get("uploader")
+    if channel:
+        chan = f"👤 {escape(str(channel))}"
+        subscribers = info.raw.get("channel_follower_count")
+        if subscribers is not None:
+            chan += f" · {_fmt_count(subscribers)} {translate('download.subscribers', locale)}"
+        lines.append(chan)
+
+    if formats_for is not None:
+        lines.extend(_formats_block(info, formats_for, translate, locale))
+
     lines.append(f"\n{footer}")
     return "\n".join(lines)
 
 
+def _formats_block(
+    info: MediaInfo, format_: MediaFormat, translate: Translator, locale: str
+) -> list[str]:
+    """One line per available option for ``format_``: ``• <label> — <container> · <size>``."""
+    options = [o for o in info.formats if o.format is format_]
+    if not options:
+        return []
+    header_key = (
+        "download.format.video" if format_ is MediaFormat.VIDEO else "download.format.audio"
+    )
+    lines = ["", translate(header_key, locale)]
+    lines.extend(_format_line(o, format_) for o in options)
+    return lines
+
+
+def _format_line(option: MediaFormatOption, format_: MediaFormat) -> str:
+    label = _option_label(option)
+    detail: list[str] = []
+    if format_ is MediaFormat.VIDEO:
+        detail.append("mp4")  # video tiers are muxed to mp4 on delivery
+    size = _human_size(option.approx_size_bytes)
+    if size:
+        detail.append(size)
+    return f"• {label} — {' · '.join(detail)}" if detail else f"• {label}"
+
+
+def _option_label(option: MediaFormatOption) -> str:
+    """Quality/codec label for an option — mirrors the keyboard button label."""
+    target = AUDIO_TARGET_BY_QUALITY.get(option.quality)
+    return target.label if target is not None else option.quality.value
+
+
+def _human_size(size_bytes: int | None) -> str | None:
+    if not size_bytes:
+        return None
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.0f} KB"
+    mb = size_bytes / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.1f} MB"
+
+
+def _format_upload_date(raw_date: Any) -> str | None:
+    """yt-dlp ``upload_date`` is ``YYYYMMDD`` → ``Sep 24, 2021`` (best-effort)."""
+    if not isinstance(raw_date, str) or len(raw_date) != 8 or not raw_date.isdigit():
+        return None
+    try:
+        parsed = datetime.datetime.strptime(raw_date, "%Y%m%d")
+    except ValueError:
+        return None
+    return parsed.strftime("%b %d, %Y")
+
+
 def _media_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
     """Caption shown above the format keyboard (choose format)."""
-    return _build_caption(info, translate("download.choose_format", locale))
+    return _build_caption(info, translate("download.choose_format", locale), translate, locale)
 
 
-def _quality_caption(info: MediaInfo, translate: Translator, locale: str) -> str:
-    """Caption shown above the quality keyboard (choose quality)."""
-    return _build_caption(info, translate("download.choose_quality", locale))
+def _quality_caption(
+    info: MediaInfo, format_: MediaFormat, translate: Translator, locale: str
+) -> str:
+    """Caption above the quality keyboard — lists each quality's size in the description."""
+    return _build_caption(
+        info,
+        translate("download.choose_quality", locale),
+        translate,
+        locale,
+        formats_for=format_,
+    )
 
 
 def _fmt_count(n: int) -> str:
@@ -319,7 +402,7 @@ async def handle_format_choice(
     keyboard = build_quality_keyboard(
         parsed.media_id, parsed.format, analyzed.info, callback_signer, locale
     )
-    caption = _quality_caption(analyzed.info, translate, locale)
+    caption = _quality_caption(analyzed.info, parsed.format, translate, locale)
     # Re-decorate with the caption-layer ad (two-layer ads) so it survives the
     # format → quality step instead of disappearing on the first tap.
     mixer = CaptionAdMixer(ad_service_factory(session))

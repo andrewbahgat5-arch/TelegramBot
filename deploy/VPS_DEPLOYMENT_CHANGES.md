@@ -184,3 +184,92 @@ Set in `.env.production` on the server (copied from `.env.production.example`):
 Set in `deploy/.env` (compose interpolation): `DB_NAME`, `DB_USER`, `DB_PASSWORD`,
 `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`.
 `deploy/secrets/cookies.txt` — empty by default (optional, for age-restricted YouTube; chmod 444).
+
+---
+
+## 5. Post-launch session (2026-07-11) — download fix, chooser redesign, progress + history UX
+
+All items below were edited in the worktree, uploaded to the same path under
+`/opt/telegram-bot`, then `build` + `up -d` for the affected image (`bot` = chooser /
+handlers, `worker` = download + upload + progress). Each was verified live inside the
+container with a real extraction/download before moving on.
+
+### P8 — Downloads completely broken: `progress_cb` TypeError (regression)
+- **Symptom:** every video **and** audio download failed; every job went to
+  `job_permanently_failed`. Bot had been fine "until yesterday".
+- **Root cause:** the live download-progress feature added a `progress_cb` keyword to
+  `DownloaderProtocol.download`, the yt-dlp provider, and `DownloadService`, **but not to
+  `DownloaderRegistry.download`** — and the registry is the concrete `DownloaderProtocol`
+  the service actually calls. So every download raised
+  `DownloaderRegistry.download() got an unexpected keyword argument 'progress_cb'`.
+- **Fix:** add `*, progress_cb=None` to `DownloaderRegistry.download` and forward it to the
+  selected provider. (`infrastructure/downloader/registry.py`)
+
+### F2 — Chooser redesign: richer metadata + per-quality size in the description (not on buttons)
+- **Goal:** match a competitor bot's denser info card; move each quality's size off the
+  buttons and into the message body.
+- **Changes:**
+  - Provider `_curated_metadata` now also keeps `upload_date`, `comment_count`, `channel`,
+    `channel_follower_count` (flows through the cache + DB to both chooser screens).
+  - New chooser caption: title · duration · platform · `👁 views  👍 likes  💬 comments
+    📅 date` · `👤 channel · N subscribers`, then a **Video/Audio formats block** listing
+    every option as `• <quality> — mp4 · <size>`.
+  - Quality buttons now show the quality/codec label **only** (no `(~size)` suffix).
+  - i18n: `download.subscribers`.
+- **Files:** `bot/handlers/download.py`, `bot/keyboards/quality_select.py`,
+  `infrastructure/downloader/providers/ytdlp_provider.py`, `core/locales/{en,ar}.json`.
+
+### P9 — Progress bar: wrong final size + long "stuck at 100%" gap before send
+- **Symptom:** at 100% the size shown was e.g. `2.6 MB / 2.6 MB` (not the real file), then a
+  long delay with no feedback before the video arrived.
+- **Root cause:** (a) a merged video downloads the video stream then the audio stream as two
+  **separate** 0→100 passes, so the trailing tiny audio stream's total overwrote the bar with
+  a misleadingly small "100%"; (b) `NotificationService.notify_stage(UPLOADING/PROCESSING)` is
+  a **no-op** (single-status-line UX), so the stale download bar stayed on screen during the
+  ffmpeg merge **and** the (often long) upload to Telegram.
+- **Fix:** the moment the file is ready, replace the bar with `⬆️ … 100% / <real size> /
+  Uploading to Telegram…`; show `⚙️ Processing…` during audio transcode; and in the progress
+  callback, suppress any stream far smaller than the largest seen (drops the tiny trailing
+  audio frame). (`services/download_service.py`, `core/locales/{en,ar}.json`)
+
+### F3 — History rows: drop emojis, use real numbers
+- Number badges `1️⃣ 2️⃣ …` → plain `1.` `2.`; removed the time emoji (`🕐`) and the
+  platform/source emoji (`▶️`). Platform name kept as plain text. (`bot/handlers/history.py`)
+
+### P10 — History: unwanted YouTube link preview under the list
+- **Symptom:** a large YouTube preview/player rendered beneath the history list.
+- **Root cause:** the clickable row titles (item #8) are links, so Telegram auto-renders a
+  web-page preview for the first one.
+- **Fix:** `link_preview_options=LinkPreviewOptions(is_disabled=True)` on the history send +
+  edit. Titles stay clickable; no preview. (`bot/handlers/history.py`)
+
+### Note — live progress feature folded into this commit
+The download-progress feature it depends on (`domain/protocols/downloader.py`,
+`ytdlp_provider._run_with_progress`/`_parse_progress`, `download_service._download_progress_cb`
+/`_render_progress`, and its tests) was already deployed but **uncommitted** before this
+session; it is included in this commit.
+
+### Windows/paramiko deploy gotchas hit this session (for next time)
+- **Git Bash mangles `/opt/...` argv** into a Windows path (`C:/Program Files/Git/opt/...`)
+  when calling the paramiko uploader → run the uploader from **PowerShell** instead.
+- **Remote emoji output crashes local `print`** on Windows cp1252 → set
+  `PYTHONIOENCODING=utf-8` before the SSH helper.
+- **`docker exec … python -c "…"` with spaces/quotes** gets re-split by the paramiko exec
+  wrapper → write a `.py` file, `docker cp` it into the container, run that.
+- **Host `/tmp` ≠ container `/tmp`** → always `docker cp` the script into the target container.
+- Pre-existing unrelated red test `tests/unit/test_enums.py::test_media_format_values` (stale
+  since the `IMAGE` kind was added, F1) — left untouched.
+
+### Files changed this session
+
+| File | Change |
+|---|---|
+| `infrastructure/downloader/registry.py` | Forward `progress_cb` through `DownloaderRegistry.download` (P8). |
+| `bot/handlers/download.py` | Rich chooser caption + per-quality size list in the description (F2). |
+| `bot/keyboards/quality_select.py` | Quality buttons show the label only — size moved to the caption (F2). |
+| `infrastructure/downloader/providers/ytdlp_provider.py` | `_curated_metadata` adds date/comments/channel/subscribers; live-progress `_run_with_progress`/`_parse_progress` (F2, progress feature). |
+| `services/download_service.py` | Uploading/processing status with the real file size; suppress tiny trailing stream; `_download_progress_cb`/`_render_progress` (P9, progress feature). |
+| `domain/protocols/downloader.py` | `progress_cb` on the `download` protocol (progress feature). |
+| `bot/handlers/history.py` | Plain-number rows, no time/source emoji (F3); disable link preview (P10). |
+| `core/locales/{en,ar}.json` | `download.subscribers`, `notification.uploading`, `notification.processing`. |
+| `tests/unit/{test_download_handler,test_download_service,test_download_progress,test_keyboards,test_history_handler,_fakes}.py` | Tests for all of the above. |

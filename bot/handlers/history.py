@@ -17,7 +17,7 @@ from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
@@ -35,35 +35,20 @@ from services.notification_service import NotificationService
 router = Router(name="history")
 _log = get_logger("bot.handlers.history")
 
+# The list's clickable titles are links; without this Telegram renders a big link
+# preview (thumbnail/player) for the first one under the message. Suppress it.
+_NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+
 HistoryServiceFactory = Callable[[AsyncSession], HistoryService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
-
-_PLATFORM_EMOJI: dict[str, str] = {
-    "youtube": "▶️",
-    "tiktok": "🎵",
-    "instagram": "📸",
-    "facebook": "📘",
-    "twitter": "🐦",
-    "x": "🐦",
-    "soundcloud": "🎧",
-    "pinterest": "📌",
-    "snapchat": "👻",
-    "reddit": "🔗",
-}
 
 _FILTER_LABELS = {0: None, 1: "audio", 2: "video"}
 _FILTER_INDEX = {v: k for k, v in _FILTER_LABELS.items()}
 
-# Clean numbered badges for history rows (item #8) — keycap emoji for 1 to 10.
-_NUM_BADGES = ("1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟")
-
 
 def _badge(n: int) -> str:
-    return _NUM_BADGES[n - 1] if 1 <= n <= len(_NUM_BADGES) else f"{n}."
-
-
-def _platform_emoji(platform: str | None) -> str:
-    return _PLATFORM_EMOJI.get((platform or "").lower(), "🔗")
+    """Plain numeric label for a history row, e.g. ``1.`` (no keycap emoji)."""
+    return f"{n}."
 
 
 def _format_duration(seconds: int) -> str:
@@ -90,7 +75,7 @@ async def handle_history(
     svc = history_service_factory(session)
     page = await svc.list_history(user.id, page=0)
     text, keyboard = _render(page, callback_signer, translate, locale)
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard, link_preview_options=_NO_PREVIEW)
 
 
 @router.callback_query(F.data.startswith("h|"))
@@ -113,7 +98,9 @@ async def handle_history_page(
     page = await svc.list_history(user.id, page=page_num, format_filter=format_filter)
     text, keyboard = _render(page, callback_signer, translate, locale)
     if isinstance(callback.message, Message):
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        await callback.message.edit_text(
+            text, reply_markup=keyboard, link_preview_options=_NO_PREVIEW
+        )
     await callback.answer()
 
 
@@ -194,7 +181,6 @@ def _render(
     subtitle = translate("history.subtitle", locale)
     lines = [header, subtitle, ""]
     for index, row in enumerate(page.rows, start=1):
-        platform_emoji = _platform_emoji(row.platform)
         title_text = escape(row.title[:40]) if row.title else escape(row.format)
         # Clickable title → original source (item #8). Only http(s) to avoid unsafe
         # schemes; href is attribute-escaped. Old rows (no source_url) render as plain text.
@@ -205,16 +191,17 @@ def _render(
             else title_text
         )
         lines.append(f"{_badge(index)} {title}")
+        # Detail line is plain text — no time/format/source emoji (Owner request).
         detail_parts: list[str] = []
         duration = getattr(row, "duration_seconds", None)
         if duration is not None:
-            detail_parts.append(f"🕐 {_format_duration(duration)}")
+            detail_parts.append(_format_duration(duration))
         size = getattr(row, "size_bytes", None) or getattr(row, "file_size", None)
         if size is not None:
             detail_parts.append(_humanize_size(size))
         detail_parts.append(escape(row.format))
         detail_parts.append(escape(row.quality))
-        detail_parts.append(f"{platform_emoji} {escape(row.platform or 'unknown').capitalize()}")
+        detail_parts.append(escape(row.platform or "unknown").capitalize())
         lines.append(f"   {'  ·  '.join(detail_parts)}")
     lines.append("")
     lines.append(f"💡 {translate('history.tip', locale)}")

@@ -1,7 +1,9 @@
 """Quality-selection inline keyboard (MASTER_PLAN Task 5.7).
 
-One button per quality available for the chosen format, labelled with an approximate
-size when known. Each carries a signed ``(media_id, format, quality)`` callback.
+One button per quality available for the chosen format. The button is labelled with
+the quality/codec only — the per-quality size is shown in the message description
+(``_formats_block`` in the download handler), not on the button. Each carries a signed
+``(media_id, format, quality)`` callback.
 """
 
 from __future__ import annotations
@@ -36,16 +38,6 @@ def build_quality_keyboard(
 
 
 def _label(option: MediaFormatOption) -> str:
+    """Quality/codec label only — the size lives in the message description now."""
     target = AUDIO_TARGET_BY_QUALITY.get(option.quality)
-    base = target.label if target is not None else option.quality.value
-    size = _human_size(option.approx_size_bytes)
-    return f"{base} (~{size})" if size else base
-
-
-def _human_size(size_bytes: int | None) -> str | None:
-    if not size_bytes:
-        return None
-    mb = size_bytes / (1024 * 1024)
-    if mb >= 1024:
-        return f"{mb / 1024:.1f} GB"
-    return f"{mb:.0f} MB"
+    return target.label if target is not None else option.quality.value

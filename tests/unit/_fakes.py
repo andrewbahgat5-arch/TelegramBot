@@ -495,7 +495,13 @@ class FakeProvider:
         )
 
     async def download(
-        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+        self,
+        media: MediaInfo,
+        format_: MediaFormat,
+        quality: Quality,
+        dest: Path,
+        *,
+        progress_cb: object | None = None,
     ) -> DownloadedFile:
         self.calls += 1
         if self._error is not None:
@@ -1137,7 +1143,13 @@ class FakeFileDownloader:
         return MediaInfo(platform="generic", video_id="vid", title="T", source_url=url)
 
     async def download(
-        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+        self,
+        media: MediaInfo,
+        format_: MediaFormat,
+        quality: Quality,
+        dest: Path,
+        *,
+        progress_cb: object | None = None,
     ) -> DownloadedFile:
         self.calls += 1
         if self._error is not None:

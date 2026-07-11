@@ -39,7 +39,7 @@ from typing import Any
 
 from core import metrics
 from core.config import Settings
-from core.i18n import resolve_locale
+from core.i18n import resolve_locale, translate
 from core.logging import get_logger
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaInfo
 from domain.enums import JobStatus, MediaFormat, Quality
@@ -52,7 +52,11 @@ from domain.exceptions import (
     TelegramUploadError,
 )
 from domain.protocols.advertising import AdButtonSpec, AdShowProtocol
-from domain.protocols.downloader import DownloaderProtocol, ProviderRetryElsewhere
+from domain.protocols.downloader import (
+    DownloaderProtocol,
+    DownloadProgress,
+    ProviderRetryElsewhere,
+)
 from domain.protocols.file_sender import FileSenderProtocol, UploadedFile
 from domain.protocols.repositories import (
     ActiveDownloadRepositoryProtocol,
@@ -102,6 +106,45 @@ def _delivery_caption_base(info: MediaInfo, format_: MediaFormat) -> str | None:
     if format_ is MediaFormat.IMAGE and info.source_url:
         return f"{title}\n{info.source_url}" if title else info.source_url
     return title
+
+
+_BAR_WIDTH = 10
+# Min seconds between progress edits — Telegram rate-limits rapid editMessageText.
+_PROGRESS_MIN_INTERVAL = 3.0
+
+
+def _human_size(num_bytes: int) -> str:
+    if num_bytes < 1024 * 1024:
+        return f"{num_bytes / 1024:.0f} KB"
+    if num_bytes < 1024 * 1024 * 1024:
+        return f"{num_bytes / (1024 * 1024):.1f} MB"
+    return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _render_progress(downloaded: int, total: int | None) -> str:
+    """A live download bar, e.g. ``⬇️ ▰▰▰▰▱▱▱▱▱▱  44%`` + ``12.3 MB / 28.0 MB``."""
+    if total and total > 0:
+        frac = min(1.0, downloaded / total)
+        filled = round(frac * _BAR_WIDTH)
+        bar = "▰" * filled + "▱" * (_BAR_WIDTH - filled)
+        return f"⬇️ {bar}  {int(frac * 100)}%\n{_human_size(downloaded)} / {_human_size(total)}"
+    return f"⬇️ {_human_size(downloaded)}"
+
+
+def _render_uploading(size_bytes: int, locale: str) -> str:
+    """The post-download status: a full bar + the *real* final file size, then upload.
+
+    Replaces the live download bar the moment the file is ready, so the user never
+    sees a stale/partial ``100%`` frame (which showed one stream's size, not the merged
+    file) while the — sometimes long — upload to Telegram runs.
+    """
+    bar = "▰" * _BAR_WIDTH
+    return f"⬆️ {bar}  100%\n{_human_size(size_bytes)}\n{translate('notification.uploading', locale)}"
+
+
+def _render_processing(locale: str) -> str:
+    """Shown while FFmpeg transcodes audio (between download and upload)."""
+    return translate("notification.processing", locale)
 
 
 def _safe_filename(title: str, suffix: str) -> str:
@@ -204,7 +247,11 @@ class DownloadService:
             )
             await self._enforce_size_limit(file_size)
 
+            # Replace the live download bar with a "ready → uploading" line showing the
+            # *real* file size, so the user isn't left staring at a stale/partial 100%
+            # frame while a large file uploads to Telegram (which can take a while).
             await self._stage(chat_id, message_id, ProgressStage.UPLOADING, locale)
+            await self._show_status(chat_id, message_id, _render_uploading(file_size, locale))
             upload_started = time.monotonic()
             uploaded = await self._deliver(
                 job_id, ctx, produced, info, format_, quality, file_size, media_id
@@ -233,6 +280,49 @@ class DownloadService:
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 
+    def _download_progress_cb(self, chat_id: int, message_id: int) -> DownloadProgress:
+        """A throttled callback that edits the progress message with a live bar.
+
+        Edits are rate-limit-safe: skipped unless the rendered text changed AND at least
+        ``_PROGRESS_MIN_INTERVAL`` has passed (the final 100% frame is always sent). Edit
+        failures are swallowed — progress is cosmetic, never a reason to fail a download.
+        """
+        last_at = 0.0
+        last_text = ""
+        max_total = 0
+
+        async def cb(downloaded: int, total: int | None) -> None:
+            nonlocal last_at, last_text, max_total
+            if total:
+                max_total = max(max_total, total)
+            # A merged video downloads video then audio as *separate* 0→100 passes. The
+            # trailing audio stream is tiny, so its ``100%`` frame would overwrite the
+            # bar with a misleading small size. Skip any stream far smaller than the
+            # largest seen — the real, final size is shown at the upload step instead.
+            if total and max_total and total < max_total // 2:
+                return
+            text = _render_progress(downloaded, total)
+            now = time.monotonic()
+            done = total is not None and downloaded >= total
+            if text == last_text or (now - last_at < _PROGRESS_MIN_INTERVAL and not done):
+                return
+            last_at, last_text = now, text
+            try:
+                await self._notifier.notify_text(chat_id, message_id, text)
+            except Exception:  # noqa: S110 - progress edits are best-effort
+                pass
+
+        return cb
+
+    async def _show_status(self, chat_id: int | None, message_id: int | None, text: str) -> None:
+        """Best-effort edit of the progress message to an arbitrary status line."""
+        if chat_id is None or message_id is None:
+            return
+        try:
+            await self._notifier.notify_text(chat_id, message_id, text)
+        except Exception:  # noqa: S110 - status edits are best-effort, never fatal
+            pass
+
     async def _produce_file(
         self,
         info: MediaInfo,
@@ -243,8 +333,15 @@ class DownloadService:
         message_id: int | None,
         locale: str,
     ) -> tuple[Path, int]:
+        progress_cb = (
+            self._download_progress_cb(chat_id, message_id)
+            if chat_id is not None and message_id is not None
+            else None
+        )
         download_started = time.monotonic()
-        downloaded = await self._downloader.download(info, format_, quality, dest)
+        downloaded = await self._downloader.download(
+            info, format_, quality, dest, progress_cb=progress_cb
+        )
         download_elapsed = time.monotonic() - download_started
         metrics.observe_download(download_elapsed)
         _log.info(
@@ -258,6 +355,7 @@ class DownloadService:
         target = AUDIO_TARGET_BY_QUALITY.get(quality)
         if format_ is MediaFormat.AUDIO and target is not None:
             await self._stage(chat_id, message_id, ProgressStage.PROCESSING, locale)
+            await self._show_status(chat_id, message_id, _render_processing(locale))
             produced = await self._transcoder.transcode_audio(produced, target)
         return produced, produced.stat().st_size
 

@@ -14,6 +14,7 @@ tightly bound to the protocol's contract; the broad domain exception hierarchy
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -21,6 +22,10 @@ from typing import Protocol, runtime_checkable
 from domain.entities.media import DownloadedFile, MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import AppError
+
+# Reports live download progress: (downloaded_bytes, total_bytes | None). ``total`` is
+# None when the source does not report a size. Best-effort — never raises to the caller.
+DownloadProgress = Callable[[int, int | None], Awaitable[None]]
 
 
 class Capability(StrEnum):
@@ -86,9 +91,19 @@ class DownloaderProtocol(Protocol):
         ...
 
     async def download(
-        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+        self,
+        media: MediaInfo,
+        format_: MediaFormat,
+        quality: Quality,
+        dest: Path,
+        *,
+        progress_cb: DownloadProgress | None = None,
     ) -> DownloadedFile:
-        """Produce a local file for the chosen (format, quality) under ``dest``."""
+        """Produce a local file for the chosen (format, quality) under ``dest``.
+
+        ``progress_cb`` (optional) is invoked with live (downloaded, total) byte counts
+        during the transfer so the caller can render a progress bar.
+        """
         ...
 
     async def health_check(self) -> ProviderHealth:

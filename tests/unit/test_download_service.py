@@ -178,6 +178,55 @@ async def test_video_happy_path(tmp_path: Path) -> None:
     assert jobs.jobs[uuid.UUID(job_id)].status == JobStatus.COMPLETED.value
 
 
+async def _seed_job_with_progress_message(
+    env: dict[str, Any], fmt: MediaFormat, quality: Quality
+) -> str:
+    """Seed a job whose context also carries the top-level progress message id, so the
+    download-bar / uploading-status path (skipped when absent) actually runs."""
+    job_id = await _seed_job(env, fmt, quality)
+    await env["cache_service"].set_job_context(
+        job_id,
+        {
+            "telegram_id": 555,
+            "message_id": 901,
+            "progress": {"7": {"telegram_id": 555, "message_id": 901}},
+        },
+        ttl=600,
+    )
+    return job_id
+
+
+async def test_video_shows_uploading_status_with_real_size(tmp_path: Path) -> None:
+    # Bug fix: after the download bar hits 100%, the message must switch to an
+    # "uploading" line showing the *real* merged file size — not a stale partial frame
+    # — so the user knows the (sometimes long) upload is in progress.
+    content = b"x" * 3_000_000
+    env = _build(downloader=FakeFileDownloader(content=content), temp_dir=tmp_path)
+    job_id = await _seed_job_with_progress_message(env, MediaFormat.VIDEO, Quality.P720)
+
+    await env["service"].process(job_id)
+
+    edits = [text for _chat, mid, text in env["msg"].edits if mid == 901 and "⬆️" in text]
+    assert edits, "expected an uploading status edit on the progress message"
+    assert "2.9 MB" in edits[-1]  # the real file size, not one stream's partial size
+
+
+async def test_progress_cb_suppresses_tiny_trailing_stream(tmp_path: Path) -> None:
+    # A merged video downloads video then a tiny audio stream as separate 0→100 passes.
+    # The trailing audio stream's "100%" must not overwrite the bar with a small size.
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
+    cb = env["service"]._download_progress_cb(555, 901)
+
+    await cb(100_000_000, 200_000_000)  # video stream, 50%
+    await cb(200_000_000, 200_000_000)  # video stream done (100%)
+    await cb(2_000_000, 2_000_000)  # tiny audio stream — must be suppressed
+
+    edits = [text for _chat, mid, text in env["msg"].edits if mid == 901]
+    assert edits, "expected download-bar edits"
+    assert "2.0 MB / 2.0 MB" not in edits[-1]  # the tiny stream did not overwrite the bar
+    assert "190.7 MB / 190.7 MB" in edits[-1]  # last meaningful frame = the video stream
+
+
 async def test_caption_ad_rides_on_the_delivered_media(tmp_path: Path) -> None:
     # Two-layer ads: a caption ad's text + button are injected into the delivered media's
     # own caption/keyboard (same message), via the shared mixer — no separate message.

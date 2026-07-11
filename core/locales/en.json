@@ -14,6 +14,8 @@
   "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",
 
   "notification.preparing": "⏳ Preparing your file…",
+  "notification.uploading": "⬆️ Uploading to Telegram…",
+  "notification.processing": "⚙️ Processing…",
   "notification.failed": "❌ Sorry, that download failed. Please try again.",
 
   "language.change_button": "🌐 Change Language",
@@ -50,6 +52,7 @@
   "download.choose_quality": "Choose a quality:",
   "download.format.video": "🎬 Video",
   "download.format.audio": "🎵 Audio",
+  "download.subscribers": "subscribers",
 
   "common.back": "⬅️ Back",
   "common.prev": "⬅️ Prev",

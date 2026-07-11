@@ -31,6 +31,7 @@ from domain.exceptions import (
 )
 from domain.protocols.downloader import (
     Capability,
+    DownloadProgress,
     ProviderHealth,
     ProviderRetryElsewhere,
 )
@@ -49,6 +50,13 @@ _DEFAULT_HEALTH_TIMEOUT = 10.0
 # the job layer already re-queues).
 _EXTRACT_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 0.5
+
+# Machine-readable per-chunk progress on stdout (parsed in _run_with_progress). Prefix
+# "DLP" disambiguates it from any other output; fields are downloaded/total/estimate.
+_PROGRESS_TEMPLATE = (
+    "download:DLP %(progress.downloaded_bytes)s "
+    "%(progress.total_bytes)s %(progress.total_bytes_estimate)s"
+)
 
 # Quality tiers keyed by their standard *short* side (the "Np" label) and by their
 # standard *long* side. Real pixel dimensions are matched to the nearest tier rather
@@ -164,17 +172,24 @@ class YtdlpProvider:
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
     async def download(
-        self, media: MediaInfo, format_: MediaFormat, quality: Quality, dest: Path
+        self,
+        media: MediaInfo,
+        format_: MediaFormat,
+        quality: Quality,
+        dest: Path,
+        *,
+        progress_cb: DownloadProgress | None = None,
     ) -> DownloadedFile:
         dest.mkdir(parents=True, exist_ok=True)
         out_template = str(dest / f"{media.video_id}.%(ext)s")
         if format_ is MediaFormat.IMAGE:
             # Fetch the image URL directly (no format selector / no merge). The URL was
-            # stashed on the IMAGE option at extraction time.
+            # stashed on the IMAGE option at extraction time. Images are tiny — no bar.
             image_url = _selected_image_url(media)
             if not image_url:
                 raise ExtractionFailedError("No image URL to download.")
             args = [self._bin, "--no-playlist", "--no-warnings", "-o", out_template, image_url]
+            await self._run(args, timeout_s=self._download_timeout)
         else:
             selector = _format_selector(media, format_, quality)
             args = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
@@ -183,8 +198,17 @@ class YtdlpProvider:
                 # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
                 # native container and Telegram falls back to a document.
                 args += ["--merge-output-format", "mp4"]
-            args += ["-o", out_template, media.source_url]
-        await self._run(args, timeout_s=self._download_timeout)
+            if progress_cb is not None:
+                # Emit machine-parseable per-chunk progress on stdout so the caller can
+                # render a live bar (merged video reports one 0→100 pass per stream).
+                args += ["--newline", "--progress-template", _PROGRESS_TEMPLATE]
+                args += ["-o", out_template, media.source_url]
+                await self._run_with_progress(
+                    args, timeout_s=self._download_timeout, progress_cb=progress_cb
+                )
+            else:
+                args += ["-o", out_template, media.source_url]
+                await self._run(args, timeout_s=self._download_timeout)
         produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
         if not produced:
             raise ExtractionFailedError("Download produced no file.")
@@ -231,6 +255,60 @@ class YtdlpProvider:
             )
             raise error
         return stdout
+
+    async def _run_with_progress(
+        self, args: list[str], *, timeout_s: float, progress_cb: DownloadProgress
+    ) -> None:
+        """Run a download, streaming stdout to feed ``progress_cb`` live byte counts.
+
+        stderr is buffered for error mapping (same as :meth:`_run`); progress callback
+        errors are swallowed so a flaky Telegram edit never fails the download.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except (OSError, ValueError) as exc:
+            raise InfrastructureError(f"yt-dlp could not be launched: {exc}") from exc
+
+        stderr_chunks: list[bytes] = []
+
+        async def _drain_stderr() -> None:
+            assert proc.stderr is not None
+            async for line in proc.stderr:
+                stderr_chunks.append(line)
+
+        async def _read_stdout() -> None:
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                parsed = _parse_progress(raw.decode(errors="replace"))
+                if parsed is not None:
+                    try:
+                        await progress_cb(parsed[0], parsed[1])
+                    except Exception:  # noqa: S110 - progress is best-effort
+                        pass
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(_read_stdout(), _drain_stderr()), timeout=timeout_s
+            )
+            await proc.wait()
+        except TimeoutError as exc:
+            proc.kill()
+            raise ProviderRetryElsewhere("yt-dlp timed out.") from exc
+
+        if proc.returncode != 0:
+            decoded = b"".join(stderr_chunks).decode(errors="replace")
+            error = _map_error(decoded)
+            _log.warning(
+                "ytdlp_nonzero_exit",
+                returncode=proc.returncode,
+                mapped=type(error).__name__,
+                stderr=decoded.strip()[:500],
+            )
+            raise error
 
     def _to_media_info(self, url: str, info: dict[str, Any]) -> MediaInfo:
         platform = detect_platform(url)
@@ -279,6 +357,24 @@ _IMAGE_EXTS = frozenset(
 def _looks_like_image(url: str) -> bool:
     tail = url.split("?", 1)[0].rsplit("/", 1)[-1].lower()
     return "." in tail and tail.rsplit(".", 1)[-1] in _IMAGE_EXTS
+
+
+def _parse_progress(line: str) -> tuple[int, int | None] | None:
+    """Parse a ``DLP <downloaded> <total> <estimate>`` progress line → (downloaded, total).
+
+    ``total`` falls back to the estimate, then None (unknown size). Non-progress lines
+    and unparseable counts return None.
+    """
+    parts = line.split()
+    if len(parts) < 3 or parts[0] != "DLP":
+        return None
+    downloaded = _opt_int(parts[1])
+    if downloaded is None:
+        return None
+    total = _opt_int(parts[2])
+    if total is None and len(parts) >= 4:
+        total = _opt_int(parts[3])  # total_bytes_estimate
+    return downloaded, total
 
 
 def _best_image_url(info: dict[str, Any]) -> str | None:
@@ -543,7 +639,19 @@ def _format_selector(media: MediaInfo, format_: MediaFormat, quality: Quality) -
 
 
 def _curated_metadata(info: dict[str, Any]) -> dict[str, Any]:
-    keys = ("extractor", "uploader", "uploader_id", "view_count", "like_count", "webpage_url")
+    keys = (
+        "extractor",
+        "uploader",
+        "uploader_id",
+        "view_count",
+        "like_count",
+        "webpage_url",
+        # Extra fields surfaced in the chooser caption (best-effort; providers vary).
+        "upload_date",
+        "comment_count",
+        "channel",
+        "channel_follower_count",
+    )
     return {k: info[k] for k in keys if info.get(k) is not None}
 
 
