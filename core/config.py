@@ -83,6 +83,10 @@ class Settings(BaseSettings):
     )
     ytdlp_path: str = Field("yt-dlp", alias="YTDLP_PATH")
     ffmpeg_path: str = Field("ffmpeg", alias="FFMPEG_PATH")
+    # Optional residential/ISP HTTP proxy (secret; set in .env, never committed). When set,
+    # it's the primary egress for extraction + the fast aria2c download path (clean IP +
+    # many parallel connections). Empty ⇒ use the config-file proxy (WARP) as before.
+    ytdlp_proxy: str = Field("", alias="YTDLP_PROXY")
 
     # --- Cache TTLs (seconds) ---
     cache_fileid_ttl: int = Field(2_592_000, alias="CACHE_FILEID_TTL")

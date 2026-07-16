@@ -19,15 +19,17 @@ FROM python:3.13-slim AS final
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
-# Runtime binaries the download pipeline shells out to (neither is imported as a
+# Runtime binaries the download pipeline shells out to (none is imported as a
 # Python module):
 #   * ffmpeg — the transcoder (FFMPEG_PATH).
+#   * aria2  — fast external downloader (16 parallel connections via the residential
+#     HTTP proxy); the yt-dlp fast path shells out to it.
 #   * yt-dlp — the downloader; YtDlpProvider wraps the `yt-dlp` binary (YTDLP_PATH),
 #     so the image MUST ship it or every download fails with "yt-dlp not found".
 # yt-dlp is pinned exactly (§6.4) and date-versioned — bump on the agreed cadence
 # (OQ-9). Installed via pip so the `yt-dlp` console script lands on PATH.
 RUN apt-get update \
-    && apt-get install --no-install-recommends -y ffmpeg \
+    && apt-get install --no-install-recommends -y ffmpeg aria2 \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir yt-dlp==2026.7.4
 

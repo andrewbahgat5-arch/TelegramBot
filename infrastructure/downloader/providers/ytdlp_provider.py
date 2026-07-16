@@ -39,7 +39,7 @@ from domain.protocols.downloader import (
 _log = get_logger("infrastructure.downloader.providers.ytdlp")
 
 _DEFAULT_EXTRACT_TIMEOUT = 30.0
-_DEFAULT_DOWNLOAD_TIMEOUT = 300.0
+_DEFAULT_DOWNLOAD_TIMEOUT = 600.0  # room for the slow WARP fallback on large 4K files
 _DEFAULT_HEALTH_TIMEOUT = 10.0
 
 # In-provider retry for metadata extraction (UX sprint #12). V1 runs a single provider, so
@@ -57,6 +57,18 @@ _PROGRESS_TEMPLATE = (
     "download:DLP %(progress.downloaded_bytes)s "
     "%(progress.total_bytes)s %(progress.total_bytes_estimate)s"
 )
+
+# Fast download: aria2c with 16 parallel range connections. Requires an HTTP proxy (the
+# residential proxy) — aria2c has no SOCKS support, so this never runs on the WARP path.
+# aria2c reports progress only per completed stream, so the live bar is coarser here — an
+# easy trade for a ~8x faster transfer (large 4K files finish in tens of seconds).
+_ARIA2C_DOWNLOAD_ARGS = [
+    "--downloader",
+    "aria2c",
+    "--downloader-args",
+    "aria2c:-x16 -s16 -k1M --file-allocation=none --console-log-level=warn "
+    "--max-tries=5 --retry-wait=2",
+]
 
 # Quality tiers keyed by their standard *short* side (the "Np" label) and by their
 # standard *long* side. Real pixel dimensions are matched to the nearest tier rather
@@ -114,6 +126,7 @@ _TRANSIENT_MARKERS = (
     "connection refused",
     "http error 5",
     "http error 429",
+    "http error 403",  # GVS media URL / PO token expired mid-download — a retry re-mints it
     "too many requests",
     "rate-limit",
     "rate limit",
@@ -123,6 +136,13 @@ _TRANSIENT_MARKERS = (
     "failed to extract",
     "nsig",
     "unable to download webpage",
+    # Interrupted media transfer (common on large 1080p+ streams through the WARP proxy):
+    # a fragment 403s/resets, so the .part is gone when yt-dlp tries to finalise it. A
+    # retry re-downloads from a fresh URL — empirically it then succeeds.
+    "unable to download video data",
+    "unable to rename",
+    "content too short",
+    "the read operation timed out",
 )
 
 
@@ -133,6 +153,7 @@ class YtdlpProvider:
         *,
         extract_timeout: float = _DEFAULT_EXTRACT_TIMEOUT,
         download_timeout: float = _DEFAULT_DOWNLOAD_TIMEOUT,
+        proxy: str = "",
     ) -> None:
         self.name = "ytdlp"
         self.supported_platforms = {"*"}
@@ -141,21 +162,37 @@ class YtdlpProvider:
         self._bin = ytdlp_path
         self._extract_timeout = extract_timeout
         self._download_timeout = download_timeout
+        # Residential/ISP HTTP proxy (empty ⇒ fall back to the config-file proxy, WARP).
+        self._proxy = proxy
 
     async def extract_info(self, url: str) -> MediaInfo:
-        stdout = await self._run_with_retries(
-            # --ignore-no-formats-error: image-only sources (e.g. a Pinterest image pin)
-            # have no *video* formats; without this yt-dlp exits non-zero ("No video
-            # formats found") and we lose the metadata + image. With it, the info dict
-            # (incl. thumbnails) is still returned and we emit an IMAGE option below.
-            [self._bin, "-J", "--no-playlist", "--no-warnings", "--ignore-no-formats-error", url],
-            timeout_s=self._extract_timeout,
-        )
+        # --ignore-no-formats-error: image-only sources (e.g. a Pinterest image pin) have no
+        # *video* formats; without this yt-dlp exits non-zero ("No video formats found") and
+        # we lose the metadata + image. With it, the info dict (incl. thumbnails) is returned
+        # and we emit an IMAGE option below (guarded by platform in _to_media_info).
+        base = [self._bin, "-J", "--no-playlist", "--no-warnings", "--ignore-no-formats-error"]
+        stdout = await self._extract_with_fallback(base, url)
         try:
             info: dict[str, Any] = orjson.loads(stdout)
         except orjson.JSONDecodeError as exc:
             raise ExtractionFailedError("Could not parse media metadata.") from exc
         return self._to_media_info(url, info)
+
+    async def _extract_with_fallback(self, base: list[str], url: str) -> bytes:
+        """Extract via the residential proxy (clean IP); fall back to the config proxy.
+
+        The residential proxy is the reliable egress. If it has a transient hiccup, we
+        retry the extraction through the config-file proxy (WARP) so metadata resolution
+        never depends on a single upstream being up.
+        """
+        if self._proxy:
+            try:
+                return await self._run_with_retries(
+                    [*base, "--proxy", self._proxy, url], timeout_s=self._extract_timeout
+                )
+            except (ProviderRetryElsewhere, InfrastructureError) as exc:
+                _log.warning("extract_proxy_failed", error=str(exc), fallback="config-proxy")
+        return await self._run_with_retries([*base, url], timeout_s=self._extract_timeout)
 
     async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> bytes:
         """Run yt-dlp, retrying only *transient* failures a few times (#12)."""
@@ -192,23 +229,18 @@ class YtdlpProvider:
             await self._run(args, timeout_s=self._download_timeout)
         else:
             selector = _format_selector(media, format_, quality)
-            args = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
+            base = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
             if format_ is MediaFormat.VIDEO:
                 # Merge into an mp4 container so Telegram plays it inline (sendVideo). The
                 # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
                 # native container and Telegram falls back to a document.
-                args += ["--merge-output-format", "mp4"]
+                base += ["--merge-output-format", "mp4"]
             if progress_cb is not None:
                 # Emit machine-parseable per-chunk progress on stdout so the caller can
                 # render a live bar (merged video reports one 0→100 pass per stream).
-                args += ["--newline", "--progress-template", _PROGRESS_TEMPLATE]
-                args += ["-o", out_template, media.source_url]
-                await self._run_with_progress(
-                    args, timeout_s=self._download_timeout, progress_cb=progress_cb
-                )
-            else:
-                args += ["-o", out_template, media.source_url]
-                await self._run(args, timeout_s=self._download_timeout)
+                base += ["--newline", "--progress-template", _PROGRESS_TEMPLATE]
+            tail = ["-o", out_template, media.source_url]
+            await self._download_with_fallback(base, tail, dest, media.video_id, progress_cb)
         produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
         if not produced:
             raise ExtractionFailedError("Download produced no file.")
@@ -216,6 +248,41 @@ class YtdlpProvider:
         return DownloadedFile(
             path=path, size_bytes=path.stat().st_size, format=format_, quality=quality
         )
+
+    async def _download_with_fallback(
+        self,
+        base: list[str],
+        tail: list[str],
+        dest: Path,
+        video_id: str,
+        progress_cb: DownloadProgress | None,
+    ) -> None:
+        """Fast path: aria2c (16 parallel connections) via the residential HTTP proxy —
+        ~50 MB/s vs. ~6 MB/s single-stream. On any failure (proxy hiccup, aria2c missing)
+        wipe the partial output and fall back to the native downloader on the config proxy
+        (WARP), so delivery never depends on the residential proxy staying up. When no
+        residential proxy is configured, only the native (config-proxy) path runs.
+        """
+        if self._proxy:
+            fast = [*base, "--proxy", self._proxy, *_ARIA2C_DOWNLOAD_ARGS, *tail]
+            try:
+                await self._invoke_download(fast, progress_cb)
+                return
+            except Exception as exc:  # noqa: BLE001 - any fast-path failure ⇒ safe path
+                _log.warning("fast_download_failed", error=str(exc), fallback="config-proxy")
+                for leftover in dest.glob(f"{video_id}.*"):
+                    leftover.unlink(missing_ok=True)
+        await self._invoke_download([*base, *tail], progress_cb)
+
+    async def _invoke_download(
+        self, args: list[str], progress_cb: DownloadProgress | None
+    ) -> None:
+        if progress_cb is not None:
+            await self._run_with_progress(
+                args, timeout_s=self._download_timeout, progress_cb=progress_cb
+            )
+        else:
+            await self._run(args, timeout_s=self._download_timeout)
 
     async def health_check(self) -> ProviderHealth:
         try:
@@ -316,10 +383,14 @@ class YtdlpProvider:
         formats = tuple(_parse_formats(info.get("formats") or [], duration))
         title = str(info.get("title") or "Untitled")
         if not formats:
-            # No playable audio/video streams — offer the image if the source is one
-            # (image pins etc.). The full-resolution image URL rides in the option's
-            # provider_format_id; download() fetches it directly.
-            image_url = _best_image_url(info)
+            # The image fallback exists for genuine image-only sources (Pinterest pins,
+            # direct image links) — those classify as "generic". A NAMED video platform
+            # (youtube, tiktok, …) that returns no playable formats has FAILED extraction,
+            # usually a transient bot-block: yt-dlp still emits metadata + a storyboard/
+            # thumbnail under ``--ignore-no-formats-error``. We must NEVER deliver that as a
+            # photo — users were getting a storyboard grid instead of the video. Raise a
+            # transient error so the request is retried / the user is asked to try again.
+            image_url = _best_image_url(info) if platform == "generic" else None
             if image_url:
                 # yt-dlp labels image pins "Pinterest video #<id>"; the human text lives
                 # in description — prefer it for a clean caption.
@@ -336,6 +407,11 @@ class YtdlpProvider:
                         provider_format_id=image_url,
                         codec="image",
                     ),
+                )
+            else:
+                raise ProviderRetryElsewhere(
+                    "No playable formats were found — the site returned only metadata "
+                    "(often a temporary block). Please try again."
                 )
         return MediaInfo(
             platform=platform,
@@ -377,6 +453,19 @@ def _parse_progress(line: str) -> tuple[int, int | None] | None:
     return downloaded, total
 
 
+def _is_storyboard(fmt: dict[str, Any]) -> bool:
+    """A YouTube storyboard (``sb0``/``sb1``/… — a grid of frame thumbnails, ext mhtml).
+
+    These are never real content; treating one as an image is exactly the bug that
+    delivered a storyboard grid instead of the video.
+    """
+    return (
+        str(fmt.get("format_id") or "").startswith("sb")
+        or str(fmt.get("ext") or "").lower() == "mhtml"
+        or "storyboard" in str(fmt.get("format_note") or "").lower()
+    )
+
+
 def _best_image_url(info: dict[str, Any]) -> str | None:
     """The highest-resolution still image for an image-only source (any site), or None.
 
@@ -388,6 +477,8 @@ def _best_image_url(info: dict[str, Any]) -> str | None:
       3. a top-level image ``url``, else the ``thumbnail`` preview.
     """
     for fmt in info.get("formats") or []:
+        if _is_storyboard(fmt):
+            continue  # a storyboard contact-sheet is never deliverable content
         url = fmt.get("url")
         if isinstance(url, str) and (
             str(fmt.get("ext") or "").lower() in _IMAGE_EXTS or _looks_like_image(url)
