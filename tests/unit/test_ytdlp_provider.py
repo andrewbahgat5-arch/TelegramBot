@@ -304,7 +304,11 @@ async def test_audio_download_skips_mp4_merge(
     assert "--merge-output-format" not in captured["args"]
 
 
-async def test_proxy_fast_path_uses_aria2c_and_proxy(
+def _proxied_provider() -> YtdlpProvider:
+    return YtdlpProvider(proxy="http://u:p@res.example:7577", warp_proxy="socks5://warp-lb:1080")
+
+
+async def test_protected_platform_uses_residential_proxy_and_aria2c(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, tuple[Any, ...]] = {}
@@ -315,37 +319,35 @@ async def test_proxy_fast_path_uses_aria2c_and_proxy(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
-    provider = YtdlpProvider(proxy="http://u:p@res.example:7577")
-    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
-    await provider.download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)  # protected
+    await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
     args = captured["args"]
     assert "aria2c" in args and "--downloader" in args  # fast aria2c path
-    assert "--proxy" in args and "http://u:p@res.example:7577" in args  # via residential proxy
+    assert "--proxy" in args and "http://u:p@res.example:7577" in args  # residential proxy
 
 
-async def test_proxy_fast_path_falls_back_to_native(
+async def test_protected_platform_falls_back_to_warp_native(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[tuple[Any, ...]] = []
 
     async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
         calls.append(args)
-        if len(calls) == 1:  # aria2c/residential fast path fails
-            return _FakeProc(b"", b"ERROR: proxy connection failed", 1)
-        (tmp_path / "vid.mp4").write_bytes(b"x" * 30)  # native fallback succeeds
+        if len(calls) == 1:  # residential aria2c egress fails transiently
+            return _FakeProc(b"", b"ERROR: aria2c exited with code 1", 1)
+        (tmp_path / "vid.mp4").write_bytes(b"x" * 30)  # WARP native egress succeeds
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    provider = YtdlpProvider(proxy="http://u:p@res.example:7577")
     media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
-    result = await provider.download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    result = await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
     assert result.size_bytes == 30 and len(calls) == 2
-    assert "aria2c" in calls[0]  # fast path first
-    # fallback is native and does NOT force the residential proxy (uses the config proxy)
-    assert "aria2c" not in calls[1] and "--proxy" not in calls[1]
+    assert "aria2c" in calls[0] and "http://u:p@res.example:7577" in calls[0]  # residential first
+    # WARP fallback: native (no aria2c) via the WARP SOCKS proxy
+    assert "aria2c" not in calls[1] and "socks5://warp-lb:1080" in calls[1]
 
 
-async def test_no_proxy_uses_native_only(
+async def test_unprotected_platform_uses_direct_aria2c(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     captured: dict[str, tuple[Any, ...]] = {}
@@ -356,9 +358,15 @@ async def test_no_proxy_uses_native_only(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
-    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
-    await YtdlpProvider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)  # no proxy
-    assert "aria2c" not in captured["args"]  # no fast path without a proxy
+    # tiktok is NOT protected → DIRECT egress (no proxy), still fast via aria2c.
+    media = MediaInfo(platform="tiktok", video_id="vid", title="T", source_url=_URL)
+    await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    args = captured["args"]
+    assert "aria2c" in args  # DIRECT still uses aria2c (HTTP, no proxy)
+    assert "http://u:p@res.example:7577" not in args  # residential proxy NOT spent here
+    # DIRECT is expressed as an empty --proxy value (forces the server's own IP)
+    idx = args.index("--proxy")
+    assert args[idx + 1] == ""
 
 
 async def test_download_no_file_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

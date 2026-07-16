@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import orjson
 
@@ -35,6 +36,9 @@ from domain.protocols.downloader import (
     ProviderHealth,
     ProviderRetryElsewhere,
 )
+from infrastructure.downloader.routing import Egress, plan_egress
+
+_T = TypeVar("_T")
 
 _log = get_logger("infrastructure.downloader.providers.ytdlp")
 
@@ -143,6 +147,12 @@ _TRANSIENT_MARKERS = (
     "unable to rename",
     "content too short",
     "the read operation timed out",
+    # Egress/proxy failures — an egress hiccup must fail over to the next in the plan,
+    # not permanently fail the job (routing.plan_egress).
+    "aria2c exited",
+    "unable to connect to proxy",
+    "connection to proxy",
+    "proxy server",
 )
 
 
@@ -154,6 +164,7 @@ class YtdlpProvider:
         extract_timeout: float = _DEFAULT_EXTRACT_TIMEOUT,
         download_timeout: float = _DEFAULT_DOWNLOAD_TIMEOUT,
         proxy: str = "",
+        warp_proxy: str = "",
     ) -> None:
         self.name = "ytdlp"
         self.supported_platforms = {"*"}
@@ -162,8 +173,52 @@ class YtdlpProvider:
         self._bin = ytdlp_path
         self._extract_timeout = extract_timeout
         self._download_timeout = download_timeout
-        # Residential/ISP HTTP proxy (empty ⇒ fall back to the config-file proxy, WARP).
+        # Per-egress proxies (see infrastructure.downloader.routing). Residential HTTP proxy
+        # is the fast/clean primary for protected platforms; WARP SOCKS is the fallback.
         self._proxy = proxy
+        self._warp_proxy = warp_proxy
+
+    def _proxy_for(self, egress: Egress) -> str:
+        """The ``--proxy`` value for an egress ("" ⇒ DIRECT, i.e. the server's own IP)."""
+        if egress is Egress.PROXY:
+            return self._proxy
+        if egress is Egress.WARP:
+            return self._warp_proxy
+        return ""
+
+    async def _run_egress_plan(
+        self,
+        platform: str,
+        size_bytes: int | None,
+        run: Callable[[Egress, str], Awaitable[_T]],
+    ) -> _T:
+        """Try each egress in the platform's policy order until one succeeds (Section: routing).
+
+        A configured-but-transiently-failing egress falls over to the next; an egress with
+        no proxy configured (e.g. WARP address empty) is skipped. The last transient error
+        is surfaced if every egress fails.
+        """
+        last_exc: Exception | None = None
+        attempted = False
+        for egress in plan_egress(platform, size_bytes=size_bytes):
+            proxy = self._proxy_for(egress)
+            if egress is not Egress.DIRECT and not proxy:
+                continue  # this upstream isn't configured — try the next
+            attempted = True
+            try:
+                return await run(egress, proxy)
+            except (ProviderRetryElsewhere, InfrastructureError) as exc:
+                last_exc = exc
+                _log.warning(
+                    "egress_attempt_failed", platform=platform, egress=str(egress), error=str(exc)
+                )
+        if not attempted:
+            # A protected platform whose proxy/WARP are both unconfigured — attempt DIRECT
+            # rather than failing outright (also the default in tests / dev).
+            return await run(Egress.DIRECT, "")
+        if last_exc is not None:
+            raise last_exc
+        raise ExtractionFailedError("No usable egress for this request.")
 
     async def extract_info(self, url: str) -> MediaInfo:
         # --ignore-no-formats-error: image-only sources (e.g. a Pinterest image pin) have no
@@ -171,28 +226,20 @@ class YtdlpProvider:
         # we lose the metadata + image. With it, the info dict (incl. thumbnails) is returned
         # and we emit an IMAGE option below (guarded by platform in _to_media_info).
         base = [self._bin, "-J", "--no-playlist", "--no-warnings", "--ignore-no-formats-error"]
-        stdout = await self._extract_with_fallback(base, url)
+        platform = detect_platform(url)
+
+        async def run(_egress: Egress, proxy: str) -> bytes:
+            # ``--proxy ""`` forces DIRECT (overrides any ambient config); a value routes it.
+            return await self._run_with_retries(
+                [*base, "--proxy", proxy, url], timeout_s=self._extract_timeout
+            )
+
+        stdout = await self._run_egress_plan(platform, None, run)
         try:
             info: dict[str, Any] = orjson.loads(stdout)
         except orjson.JSONDecodeError as exc:
             raise ExtractionFailedError("Could not parse media metadata.") from exc
         return self._to_media_info(url, info)
-
-    async def _extract_with_fallback(self, base: list[str], url: str) -> bytes:
-        """Extract via the residential proxy (clean IP); fall back to the config proxy.
-
-        The residential proxy is the reliable egress. If it has a transient hiccup, we
-        retry the extraction through the config-file proxy (WARP) so metadata resolution
-        never depends on a single upstream being up.
-        """
-        if self._proxy:
-            try:
-                return await self._run_with_retries(
-                    [*base, "--proxy", self._proxy, url], timeout_s=self._extract_timeout
-                )
-            except (ProviderRetryElsewhere, InfrastructureError) as exc:
-                _log.warning("extract_proxy_failed", error=str(exc), fallback="config-proxy")
-        return await self._run_with_retries([*base, url], timeout_s=self._extract_timeout)
 
     async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> bytes:
         """Run yt-dlp, retrying only *transient* failures a few times (#12)."""
@@ -240,7 +287,10 @@ class YtdlpProvider:
                 # render a live bar (merged video reports one 0→100 pass per stream).
                 base += ["--newline", "--progress-template", _PROGRESS_TEMPLATE]
             tail = ["-o", out_template, media.source_url]
-            await self._download_with_fallback(base, tail, dest, media.video_id, progress_cb)
+            size = _selected_size_bytes(media, format_, quality)
+            await self._download_via_egress(
+                base, tail, dest, media.video_id, media.platform, size, progress_cb
+            )
         produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
         if not produced:
             raise ExtractionFailedError("Download produced no file.")
@@ -249,30 +299,38 @@ class YtdlpProvider:
             path=path, size_bytes=path.stat().st_size, format=format_, quality=quality
         )
 
-    async def _download_with_fallback(
+    async def _download_via_egress(
         self,
         base: list[str],
         tail: list[str],
         dest: Path,
         video_id: str,
+        platform: str,
+        size_bytes: int | None,
         progress_cb: DownloadProgress | None,
     ) -> None:
-        """Fast path: aria2c (16 parallel connections) via the residential HTTP proxy —
-        ~50 MB/s vs. ~6 MB/s single-stream. On any failure (proxy hiccup, aria2c missing)
-        wipe the partial output and fall back to the native downloader on the config proxy
-        (WARP), so delivery never depends on the residential proxy staying up. When no
-        residential proxy is configured, only the native (config-proxy) path runs.
+        """Download through the platform's egress plan (routing.plan_egress).
+
+        Over an HTTP egress (DIRECT / residential PROXY) the fast aria2c path runs — 16
+        parallel connections, ~50 MB/s vs. ~6 MB/s single-stream. WARP is SOCKS, which
+        aria2c can't use, so that egress downloads natively. A failed egress wipes its
+        partial output and falls over to the next in the plan.
         """
-        if self._proxy:
-            fast = [*base, "--proxy", self._proxy, *_ARIA2C_DOWNLOAD_ARGS, *tail]
-            try:
-                await self._invoke_download(fast, progress_cb)
-                return
-            except Exception as exc:  # noqa: BLE001 - any fast-path failure ⇒ safe path
-                _log.warning("fast_download_failed", error=str(exc), fallback="config-proxy")
+
+        first = True
+
+        async def run(egress: Egress, proxy: str) -> None:
+            nonlocal first
+            if not first:  # wipe the previous egress's partial before re-downloading
                 for leftover in dest.glob(f"{video_id}.*"):
                     leftover.unlink(missing_ok=True)
-        await self._invoke_download([*base, *tail], progress_cb)
+            first = False
+            args = [*base, "--proxy", proxy]
+            if egress is not Egress.WARP:  # aria2c speaks HTTP, not SOCKS (WARP)
+                args += _ARIA2C_DOWNLOAD_ARGS
+            await self._invoke_download([*args, *tail], progress_cb)
+
+        await self._run_egress_plan(platform, size_bytes, run)
 
     async def _invoke_download(
         self, args: list[str], progress_cb: DownloadProgress | None
@@ -696,6 +754,20 @@ def _selected_video_format_id(media: MediaInfo, quality: Quality) -> str | None:
             and option.provider_format_id
         ):
             return option.provider_format_id
+    return None
+
+
+def _selected_size_bytes(
+    media: MediaInfo, format_: MediaFormat, quality: Quality
+) -> int | None:
+    """Expected size of the chosen (format, quality), for the egress policy — best-effort.
+
+    Feeds ``routing.plan_egress(size_bytes=...)`` so a future size-based rule (WARP under
+    500 MB, proxy at/over) needs no change here. ``None`` when the size is unknown.
+    """
+    for option in media.formats:
+        if option.format is format_ and option.quality is quality:
+            return option.approx_size_bytes
     return None
 
 

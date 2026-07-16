@@ -87,7 +87,7 @@ def build_registry(
         ProviderSettingsAdapter(session_factory),
         redis=redis_cache,  # type: ignore[arg-type]
     )
-    registry.register(YtdlpProvider(settings.ytdlp_path, proxy=settings.ytdlp_proxy))
+    registry.register(YtdlpProvider(settings.ytdlp_path, proxy=settings.ytdlp_proxy, warp_proxy=settings.ytdlp_warp_proxy))
     return registry
 
 

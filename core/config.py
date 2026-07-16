@@ -83,10 +83,14 @@ class Settings(BaseSettings):
     )
     ytdlp_path: str = Field("yt-dlp", alias="YTDLP_PATH")
     ffmpeg_path: str = Field("ffmpeg", alias="FFMPEG_PATH")
-    # Optional residential/ISP HTTP proxy (secret; set in .env, never committed). When set,
-    # it's the primary egress for extraction + the fast aria2c download path (clean IP +
-    # many parallel connections). Empty ⇒ use the config-file proxy (WARP) as before.
+    # Optional residential/ISP HTTP proxy (secret; set in .env, never committed). Used —
+    # only for platforms that block our datacenter IP (see routing.PROTECTED_PLATFORMS) —
+    # as the primary egress for extraction + the fast aria2c download path (clean IP + many
+    # parallel connections). Empty ⇒ that egress is skipped and WARP is used instead.
     ytdlp_proxy: str = Field("", alias="YTDLP_PROXY")
+    # WARP (Cloudflare) SOCKS proxy — the resilient fallback egress for protected platforms.
+    # Internal address, not a secret. Empty ⇒ WARP egress is skipped.
+    ytdlp_warp_proxy: str = Field("socks5://warp-lb:1080", alias="YTDLP_WARP_PROXY")
 
     # --- Cache TTLs (seconds) ---
     cache_fileid_ttl: int = Field(2_592_000, alias="CACHE_FILEID_TTL")
