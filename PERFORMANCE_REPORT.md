@@ -224,6 +224,50 @@ For `pytest-benchmark` runs under `tests/performance/`.
 
 ## Standing Entries
 
+### 2026-07-17 18:40 UTC — Bounded real-sample download benchmark (real yt-dlp+ffmpeg+proxy, no upload) — REAL capacity data
+
+> **Scope:** real end-to-end downloads (yt-dlp through the residential proxy + ffmpeg
+> merge) run **inside the live `tgbot_worker`** with the production config/POT/proxy, at
+> bounded scale. Measures true per-download cost + the real bottlenecks. No Telegram
+> upload (excluded to avoid flood limits; upload is local to the self-hosted bot-api).
+> Files deleted immediately. ~2 GB proxy bandwidth used; live bot unaffected.
+
+| Field | Value |
+|---|---|
+| Git SHA | `8f5fafe` (deployed; worktree `happy-bose-71ed46`) |
+| Environment | live prod VPS, 4 vCPU / 7.9 GB RAM, single residential proxy, `WORKER_COUNT=8` |
+| Method | `realsample.py` — 2 verified URLs (~16–18 min videos), yt-dlp height-capped selector + `--merge-output-format mp4`; audio = `bestaudio` |
+| Sample | Phase 1: 4 dl @ concurrency 1 (baseline). Phase 2: 24 dl @ concurrency 8. 24/24 success. |
+
+**Phase 1 — uncontended (concurrency 1)**
+| Quality | Avg time | Size | Speed |
+|---|---|---|---|
+| 720p | 21.9 s | 134 MB | 6.1 MB/s |
+| 480p | 15.3 s | 56 MB | 3.6 MB/s |
+
+**Phase 2 — saturated (concurrency 8 = prod WORKER_COUNT)** — 24 dl in **134 s, 100% success**, ~2 GB, aggregate proxy ~15 MB/s
+| Quality | Avg time | Size | Speed/stream |
+|---|---|---|---|
+| 1080p | 131.7 s | 323 MB | 2.4 MB/s |
+| 720p | 54.4 s | 111 MB | 2.0 MB/s |
+| 480p | 39.7 s | 70 MB | 1.8 MB/s |
+| audio | 14.1 s | 15 MB | 1.1 MB/s |
+
+**Host CPU:** loadavg 0.99 → **4.62 (1-min) on 4 cores** during Phase 2 — CPU saturated (ffmpeg merges are CPU-bound). Mem ~3.9 GB used, disk 113 GB free.
+
+**Bottlenecks (real):**
+1. **CPU** — 8 concurrent downloads+merges oversubscribe 4 cores (load 4.6). `WORKER_COUNT=8` exceeds what the CPU feeds.
+2. **Proxy bandwidth** — per-stream drops 6.1 → 2.0 MB/s from concurrency 1 → 8; aggregate plateaus ~15 MB/s. Single residential proxy is a shared ceiling. Above ~4–6 workers, more workers thrash CPU without raising download throughput.
+
+**Capacity projection (500 simultaneous):** system queues all and drains 8-at-a-time.
+- Typical mix (~44 s avg/dl at saturation): last user ≈ `500 ÷ 8 × 44 s ≈ ~46 min`.
+- 4K (extrapolated, not downloaded): 913 MB @ 2.4 MB/s ≈ ~6–7 min each; a 4K-heavy 500-burst ≈ hours.
+- The `file_id` cache serves repeat/popular content instantly (never re-downloads), so real bursts are far cheaper than worst case.
+
+**Scaling recommendation:** scale **host CPU (8+) and proxy bandwidth/pool together** (coupled ceilings); cap concurrent 4K jobs; on the current 4-vCPU box `WORKER_COUNT ≈ 4–6` reduces CPU thrash at ~equal throughput. `WORKER_COUNT` alone is not the lever.
+
+**Caveat:** upload-to-Telegram time excluded; Phase-B framework L4 (SLO p95s) still pending.
+
 ### 2026-07-17 18:23 UTC — Isolated concurrency load run (queue + worker pool, stub download) — NOT an SLO/capacity measurement
 
 > **Scope & honesty:** this exercises the **real** `QueueService` + Redis reliable
