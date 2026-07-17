@@ -34,6 +34,7 @@ from bot.handlers import ads as ads_handler
 from bot.handlers import download as download_handler
 from bot.handlers import help as help_handler
 from bot.handlers import history as history_handler
+from bot.handlers import membership as membership_handler
 from bot.handlers import start as start_handler
 from bot.middlewares.auth import AuthMiddleware
 from bot.middlewares.db_session import DbSessionMiddleware
@@ -83,6 +84,7 @@ from infrastructure.telegram.alerter import TelegramAlerter, make_alert_sink
 from infrastructure.telegram.client import build_bot
 from infrastructure.telegram.file_sender import TelegramFileSender, TelegramMessageSender
 from services.ad_service import AdService
+from services.admin_notification_service import AdminNotificationService
 from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
@@ -109,6 +111,7 @@ def build_dispatcher(
     settings: Settings,
     *,
     user_service_factory: Callable[[AsyncSession], UserService],
+    admin_notification_factory: Callable[[AsyncSession], AdminNotificationService],
     rate_limit_service_factory: Callable[[AsyncSession], RateLimitService],
     analyzer_factory: Callable[[AsyncSession], URLAnalyzerService],
     job_service_factory: Callable[[AsyncSession], JobService],
@@ -141,6 +144,7 @@ def build_dispatcher(
     dp["history_service_factory"] = history_service_factory
     dp["rate_limit_service_factory"] = rate_limit_service_factory
     dp["user_service_factory"] = user_service_factory
+    dp["admin_notification_factory"] = admin_notification_factory
     dp["settings_service_factory"] = settings_service_factory
     dp["broadcast_service_factory"] = broadcast_service_factory
     dp["ad_service_factory"] = ad_service_factory
@@ -173,6 +177,7 @@ def build_dispatcher(
         observer.outer_middleware(throttle)
 
     dp.include_router(start_handler.router)
+    dp.include_router(membership_handler.router)
     dp.include_router(help_handler.router)
     dp.include_router(admin_handler.router)
     dp.include_router(admin_panel_handler.router)
@@ -232,11 +237,18 @@ async def main() -> None:
             extra_processors=[TelegramAlertProcessor(make_alert_sink(alerter))],
         )
 
+    # Shared raw-text sender for admin event notifications (Owner + Moderators).
+    admin_message_sender = TelegramMessageSender(bot)
+
+    def make_admin_notification(session: AsyncSession) -> AdminNotificationService:
+        return AdminNotificationService(admin_message_sender, UserRepository(session))
+
     def make_user_service(session: AsyncSession) -> UserService:
         return UserService(
             UserRepository(session),
             cache_service,
             owner_telegram_id=settings.bot_owner_telegram_id,
+            admin_notification=make_admin_notification(session),
         )
 
     def make_reward_service(session: AsyncSession) -> RewardService:
@@ -349,6 +361,7 @@ async def main() -> None:
     dp = build_dispatcher(
         settings,
         user_service_factory=make_user_service,
+        admin_notification_factory=make_admin_notification,
         rate_limit_service_factory=make_rate_limit_service,
         analyzer_factory=make_url_analyzer,
         job_service_factory=make_job_service,
@@ -380,6 +393,7 @@ async def main() -> None:
         else:
             await dp.start_polling(bot)
     finally:
+        _log.info("bot_stopped")
         await bot.session.close()
         await redis_clients.aclose()
         await engine.dispose()

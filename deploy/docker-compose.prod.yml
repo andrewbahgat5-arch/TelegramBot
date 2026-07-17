@@ -39,6 +39,14 @@ x-app: &app
     DB_HOST: pgbouncer
     DB_PORT: "6432"
   restart: unless-stopped
+  # Structured JSON logs go to stdout; cap the on-disk json-file so they survive
+  # container recreation and stay `docker logs`-reviewable without growing unbounded
+  # (~200 MB retained per app service). Review: `docker logs --tail N tgbot_<svc>`.
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "10"
 
 services:
   postgres:

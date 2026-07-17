@@ -92,6 +92,7 @@ async def handle_url(
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
     ack = await message.answer(translate("download.analyzing", locale))
+    _log.info("download_requested", user_id=user.telegram_id)
     analyzer = analyzer_factory(session)
     try:
         analyzed = await analyzer.analyze(message.text or "")

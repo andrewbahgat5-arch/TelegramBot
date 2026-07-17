@@ -123,6 +123,10 @@ class UserRepositoryProtocol(Repository[T], Protocol[T]):
         """Users with an Owner or Moderator role (admin stats)."""
         ...
 
+    async def list_staff(self) -> Sequence[T]:
+        """Every Owner/Moderator row (Owner first) — admin notification recipients."""
+        ...
+
     # User-health detection (Sprint 13.5).
     async def count_blocked(self) -> int:
         """Users flagged as having blocked the bot."""

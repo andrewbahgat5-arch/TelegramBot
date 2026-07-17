@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.callbacks.factory import CallbackSigner
 from bot.main import build_dispatcher
 from services.ad_service import AdService
+from services.admin_notification_service import AdminNotificationService
 from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
@@ -35,6 +36,10 @@ from tests.unit._fakes import FakeMessageSender, FakeQueueBackend, load_settings
 
 def _user_factory(session: AsyncSession) -> UserService:
     return cast(UserService, None)
+
+
+def _admin_notification_factory(session: AsyncSession) -> AdminNotificationService:
+    return cast(AdminNotificationService, None)
 
 
 def _rate_factory(session: AsyncSession) -> RateLimitService:
@@ -94,6 +99,7 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
     dp = build_dispatcher(
         load_settings(),
         user_service_factory=_user_factory,
+        admin_notification_factory=_admin_notification_factory,
         rate_limit_service_factory=_rate_factory,
         analyzer_factory=_analyzer_factory,
         job_service_factory=_job_factory,
@@ -114,6 +120,6 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         storage=storage,
     )
     assert isinstance(dp, Dispatcher)
-    # start + help + admin + admin_panel + ads + download + history routers.
-    assert len(dp.sub_routers) == 7
+    # start + membership + help + admin + admin_panel + ads + download + history routers.
+    assert len(dp.sub_routers) == 8
     assert dp.fsm.storage is storage

@@ -172,6 +172,19 @@ class UserRepository(SqlAlchemyRepository[User]):
         )
         return int(result.scalar_one())
 
+    async def list_staff(self) -> Sequence[User]:
+        """Every Owner/Moderator row — the recipients of admin event notifications.
+
+        Ordered Owner-first so the Owner is always notified first. Bounded implicitly
+        by the staff count (a handful of rows), so no pagination is needed.
+        """
+        result = await self.session.execute(
+            select(User)
+            .where(User.role.in_(_STAFF_ROLES))
+            .order_by(case((User.role == UserRole.OWNER.value, 0), else_=1), User.id.asc())
+        )
+        return result.scalars().all()
+
     # --- User-health detection (Sprint 13.5) ------------------------------
 
     async def count_blocked(self) -> int:

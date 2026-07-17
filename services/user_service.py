@@ -24,6 +24,7 @@ from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from domain.protocols.repositories import UserRepositoryProtocol
+from services.admin_notification_service import AdminNotificationService
 from services.cache_service import CacheService
 
 _log = get_logger("services.user_service")
@@ -97,11 +98,15 @@ class UserService:
         *,
         owner_telegram_id: int,
         debounce_seconds: int = LAST_ACTIVITY_DEBOUNCE_SECONDS,
+        admin_notification: AdminNotificationService | None = None,
     ) -> None:
         self._repo = repo
         self._cache = cache
         self._owner_telegram_id = owner_telegram_id
         self._debounce = datetime.timedelta(seconds=debounce_seconds)
+        # Optional: fan out important user events (new user, block, return, ban) to
+        # the Owner + all Moderators. None in tests / non-bot processes.
+        self._admin_notification = admin_notification
 
     async def get_or_create_user(
         self,
@@ -121,6 +126,7 @@ class UserService:
             return UserSnapshot.from_cache_dict(cached)
 
         row = await self._repo.get_by_telegram_id(telegram_id)
+        created = row is None
         if row is None:
             role = UserRole.OWNER if telegram_id == self._owner_telegram_id else UserRole.USER
             row = await self._repo.create_user(
@@ -130,10 +136,12 @@ class UserService:
                 language=language,
                 role=role.value,
             )
-            _log.info("user_created", user_id=row.id, role=role.value)
+            _log.info("user_created", user_id=row.id, telegram_id=telegram_id, role=role.value)
 
         snapshot = UserSnapshot.from_row(row)
         await self._cache.set_user(telegram_id, snapshot.to_cache_dict())
+        if created and self._admin_notification is not None:
+            await self._admin_notification.notify_new_user(snapshot)
         return snapshot
 
     async def record_activity(self, snapshot: UserSnapshot) -> None:
@@ -274,27 +282,64 @@ class UserService:
             telegram_id, lambda row: _apply(row, language=language), event="user_language_changed"
         )
 
-    async def ban(self, telegram_id: int, reason: str | None = None) -> UserSnapshot | None:
+    async def ban(
+        self,
+        telegram_id: int,
+        reason: str | None = None,
+        *,
+        by_admin: UserSnapshot | None = None,
+    ) -> UserSnapshot | None:
         """Ban a user, recording the audit fields (``banned_at``, ``ban_reason``)."""
         now = datetime.datetime.now(datetime.UTC)
-        return await self._mutate(
+        snapshot = await self._mutate(
             telegram_id,
             lambda row: _apply(row, is_banned=True, banned_at=now, ban_reason=reason),
             event="user_banned",
         )
+        if snapshot is not None and self._admin_notification is not None:
+            await self._admin_notification.notify_user_banned(
+                snapshot, by_admin=by_admin, reason=reason
+            )
+        return snapshot
 
-    async def unban(self, telegram_id: int) -> UserSnapshot | None:
+    async def unban(
+        self, telegram_id: int, *, by_admin: UserSnapshot | None = None
+    ) -> UserSnapshot | None:
         """Lift a ban and clear the ban fields (``banned_at``, ``ban_reason``) → NULL.
 
         An unbanned user has no active ban, so the reason/timestamp are cleared rather
         than retained (Owner directive 2026-06-26, D-054): a non-banned user must never
         show a stale ban reason. Durable ban history lives in the audit log (V3).
         """
-        return await self._mutate(
+        snapshot = await self._mutate(
             telegram_id,
             lambda row: _apply(row, is_banned=False, banned_at=None, ban_reason=None),
             event="user_unbanned",
         )
+        if snapshot is not None and self._admin_notification is not None:
+            await self._admin_notification.notify_user_unbanned(snapshot, by_admin=by_admin)
+        return snapshot
+
+    async def record_bot_blocked(self, telegram_id: int) -> None:
+        """A user blocked the bot (real-time ``my_chat_member`` → kicked). Flag + notify."""
+        row = await self._repo.get_by_telegram_id(telegram_id)
+        await self._repo.mark_blocked(telegram_id)
+        await self._cache.delete_user(telegram_id)
+        _log.info("bot_blocked", telegram_id=telegram_id)
+        if row is not None and self._admin_notification is not None:
+            await self._admin_notification.notify_bot_blocked(UserSnapshot.from_row(row))
+
+    async def record_bot_unblocked(self, telegram_id: int) -> None:
+        """A previously-blocked user unblocked/restarted the bot. Clear flag + notify."""
+        row = await self._repo.get_by_telegram_id(telegram_id)
+        was_blocked = bool(getattr(row, "bot_blocked", False)) if row is not None else False
+        await self._repo.mark_active(telegram_id)
+        await self._cache.delete_user(telegram_id)
+        _log.info("bot_unblocked", telegram_id=telegram_id, was_blocked=was_blocked)
+        # Only announce a *return* when they had actually blocked before (avoids a
+        # notification on every benign my_chat_member=member, e.g. the first /start).
+        if was_blocked and row is not None and self._admin_notification is not None:
+            await self._admin_notification.notify_user_returned(UserSnapshot.from_row(row))
 
     async def set_premium(
         self,

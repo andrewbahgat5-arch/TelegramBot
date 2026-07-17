@@ -589,12 +589,14 @@ class _FakeUsersRW:
     async def find(self, telegram_id: int) -> UserSnapshot | None:
         return self.target if telegram_id == self.target.telegram_id else None
 
-    async def ban(self, telegram_id: int, reason: str | None = None) -> UserSnapshot | None:
+    async def ban(
+        self, telegram_id: int, reason: str | None = None, *, by_admin: Any = None
+    ) -> UserSnapshot | None:
         self.calls.append(("ban", telegram_id))
         self.target = replace(self.target, is_banned=True)
         return self.target
 
-    async def unban(self, telegram_id: int) -> UserSnapshot | None:
+    async def unban(self, telegram_id: int, *, by_admin: Any = None) -> UserSnapshot | None:
         self.calls.append(("unban", telegram_id))
         self.target = replace(self.target, is_banned=False)
         return self.target

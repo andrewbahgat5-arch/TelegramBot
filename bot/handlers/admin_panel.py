@@ -83,6 +83,7 @@ from core.logging import get_logger
 from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from services.ad_service import AdDetailedStats, AdService
+from services.admin_notification_service import AdminNotificationService
 from services.admin_service import AdminService
 from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService, InvalidBroadcastError
@@ -108,6 +109,7 @@ HealthCheckerFactory = Callable[[Bot], UserHealthChecker]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 BroadcastServiceFactory = Callable[[AsyncSession], BroadcastService]
 AudienceServiceFactory = Callable[[AsyncSession], AudienceService]
+AdminNotificationFactory = Callable[[AsyncSession], AdminNotificationService]
 
 OwnerFilter = RoleFilter(UserRole.OWNER)
 
@@ -268,6 +270,7 @@ async def panel_write(
     callback_signer: CallbackSigner,
     translate: Translator,
     locale: str,
+    admin_notification_factory: AdminNotificationFactory | None = None,
 ) -> None:
     if panel.section == "w":  # compose wizard — manages its own FSM state (no clear)
         await admin_wizard.dispatch(
@@ -356,6 +359,10 @@ async def panel_write(
         except InvalidBroadcastError as exc:
             await callback.answer(str(exc), show_alert=True)
             return
+        if admin_notification_factory is not None:
+            await admin_notification_factory(session).notify_broadcast_published(
+                by_admin=user, broadcast_id=bc.id, expected_total=bc.expected_total
+            )
         await callback.answer(
             translate("panel.wizard.broadcast_published", locale, id=bc.id, count=bc.expected_total)
         )
@@ -666,7 +673,7 @@ async def _users_write(
             )
         await callback.answer()
         return
-    result = await _apply_user_action(users, action, tid, translate, locale)
+    result = await _apply_user_action(users, action, tid, translate, locale, by_admin=actor)
     if result is None:
         await callback.answer(translate("panel.users.not_found", locale), show_alert=True)
         return
@@ -681,17 +688,23 @@ async def _users_write(
 
 
 async def _apply_user_action(
-    users: UserService, action: str, tid: int, translate: Translator, locale: str
+    users: UserService,
+    action: str,
+    tid: int,
+    translate: Translator,
+    locale: str,
+    *,
+    by_admin: UserSnapshot | None = None,
 ) -> tuple[UserSnapshot, str] | None:
     """Perform a (possibly already-confirmed) user write. Returns (snapshot, toast) or None."""
     if action == "ubn":
-        snap = await users.unban(tid)
+        snap = await users.unban(tid, by_admin=by_admin)
         return (snap, translate("panel.users.toast.unbanned", locale)) if snap else None
     if action == "up":
         snap = await users.set_premium(tid, is_premium=True)
         return (snap, translate("panel.users.toast.premium_granted", locale)) if snap else None
     if action == "banc":
-        snap = await users.ban(tid)
+        snap = await users.ban(tid, by_admin=by_admin)
         return (snap, translate("panel.users.toast.banned", locale)) if snap else None
     if action == "rpc":
         snap = await users.set_premium(tid, is_premium=False)

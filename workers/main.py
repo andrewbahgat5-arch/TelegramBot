@@ -333,6 +333,7 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     try:
         await asyncio.gather(*tasks)
     finally:
+        _log.info("worker_stopped")
         await bot.session.close()
         await redis_clients.aclose()
         await engine.dispose()

@@ -110,12 +110,13 @@ async def handle_ban(
     user_service_factory: UserServiceFactory,
     translate: Translator,
     locale: str,
+    user: UserSnapshot | None = None,
 ) -> None:
     telegram_id, reason = _parse_id_and_rest(command.args)
     if telegram_id is None:
         await message.answer(translate("admin.ban.usage", locale))
         return
-    snap = await user_service_factory(session).ban(telegram_id, reason)
+    snap = await user_service_factory(session).ban(telegram_id, reason, by_admin=user)
     if snap is None:
         await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
@@ -131,12 +132,13 @@ async def handle_unban(
     user_service_factory: UserServiceFactory,
     translate: Translator,
     locale: str,
+    user: UserSnapshot | None = None,
 ) -> None:
     telegram_id = _parse_int(command.args)
     if telegram_id is None:
         await message.answer(translate("admin.unban.usage", locale))
         return
-    snap = await user_service_factory(session).unban(telegram_id)
+    snap = await user_service_factory(session).unban(telegram_id, by_admin=user)
     if snap is None:
         await message.answer(translate("admin.userinfo.not_found", locale, id=telegram_id))
         return
