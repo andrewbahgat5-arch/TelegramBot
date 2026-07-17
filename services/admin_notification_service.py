@@ -180,7 +180,10 @@ class AdminNotificationService:
         for row in staff:
             locale = resolve_locale(getattr(row, "language", None))
             try:
-                await self._sender.send_message(row.telegram_id, build(locale))
+                # These bodies contain HTML (<b>, <code>); request HTML explicitly —
+                # the shared sender passes parse_mode through, and an unset value would
+                # be sent as None, overriding the bot's HTML default (tags shown raw).
+                await self._sender.send_message(row.telegram_id, build(locale), parse_mode="HTML")
             except Exception as exc:
                 _log.info(
                     "admin_notify_send_failed",

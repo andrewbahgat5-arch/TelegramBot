@@ -23,12 +23,14 @@ class _Staff:
 class _Sender:
     def __init__(self, fail_for: set[int] | None = None) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.parse_modes: list[str | None] = []
         self._fail_for = fail_for or set()
 
     async def send_message(self, chat_id: int, text: str, *, parse_mode: str | None = None) -> int:
         if chat_id in self._fail_for:
             raise RuntimeError("blocked")
         self.sent.append((chat_id, text))
+        self.parse_modes.append(parse_mode)
         return 1
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None: ...
@@ -77,6 +79,7 @@ async def test_new_user_fans_out_to_every_staff_in_their_locale() -> None:
     assert "A new user joined the bot" in en    # English title for the en admin
     assert "@AccountyAdmin" in ar and "6512068704" in ar
     assert "2284" in ar                         # running total
+    assert sender.parse_modes == ["HTML", "HTML"]  # HTML so <b>/<code> render, not raw
 
 
 async def test_blocked_shows_total_blocked() -> None:
