@@ -78,6 +78,47 @@ def test_audio_expands_into_per_codec_catalog() -> None:
     assert wav > mp3
 
 
+def test_audio_target_sizes_match_encoder_output() -> None:
+    # dur 1000s, 48 kHz stereo source → per-codec bitrate / raw PCM, not one flat size.
+    raw = (
+        MediaFormatOption(
+            MediaFormat.AUDIO, Quality.AUDIO, 16_000_000, "a", codec="opus",
+            asr=48000, channels=2,
+        ),
+    )
+    by_q = {
+        o.quality: o.approx_size_bytes
+        for o in normalize_formats(raw, duration=1000)
+        if o.format is MediaFormat.AUDIO
+    }
+    assert by_q[Quality.MP3] == 16_000_000    # 128 kbps
+    assert by_q[Quality.OPUS] == 11_000_000   # 88 kbps — smaller than MP3, not equal
+    assert by_q[Quality.OGG] == 12_000_000    # 96 kbps
+    assert by_q[Quality.WAV] == 192_000_000   # 48000*2*2*1000 raw PCM
+    assert by_q[Quality.FLAC] == 172_800_000  # 0.9 * PCM
+    assert by_q[Quality.OPUS] < by_q[Quality.MP3] < by_q[Quality.WAV]
+
+
+def test_audio_wav_uses_source_sample_rate() -> None:
+    # A 44.1 kHz source yields a smaller WAV than the 48 kHz default.
+    raw = (
+        MediaFormatOption(
+            MediaFormat.AUDIO, Quality.AUDIO, 8_000_000, "a", codec="mp4a",
+            asr=44100, channels=2,
+        ),
+    )
+    by_q = {o.quality: o.approx_size_bytes for o in normalize_formats(raw, duration=1000)}
+    assert by_q[Quality.WAV] == 44100 * 2 * 2 * 1000
+
+
+def test_audio_falls_back_without_duration() -> None:
+    # No duration -> lossy uses the source size, lossless the x6 fallback (still sorts last).
+    raw = (MediaFormatOption(MediaFormat.AUDIO, Quality.AUDIO, 1_000_000, "a", codec="opus"),)
+    by_q = {o.quality: o.approx_size_bytes for o in normalize_formats(raw)}
+    assert by_q[Quality.MP3] == 1_000_000
+    assert by_q[Quality.WAV] == 6_000_000
+
+
 def test_no_audio_means_no_audio_options() -> None:
     raw = (MediaFormatOption(MediaFormat.VIDEO, Quality.P720, 4_000_000, "v", codec="avc1"),)
     result = normalize_formats(raw)

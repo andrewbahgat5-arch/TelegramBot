@@ -34,6 +34,10 @@ class MediaFormatOption:
     # Descriptive, provider-agnostic codec family (e.g. "avc1", "vp9", "opus") — D-041.
     # Used for consistent per-tier video selection and for audio remux/transcode hints.
     codec: str | None = None
+    # Audio-source sampling metadata (Hz, channel count), when known. Used to size the
+    # lossless targets accurately (WAV = asr·channels·2·duration); None for video.
+    asr: int | None = None
+    channels: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

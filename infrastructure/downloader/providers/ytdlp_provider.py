@@ -648,6 +648,8 @@ def _parse_formats(
                     approx_size_bytes=est,
                     provider_format_id=str(format_id),
                     codec=acodec,
+                    asr=_opt_int(fmt.get("asr")),
+                    channels=_opt_int(fmt.get("audio_channels")),
                 )
             )
 

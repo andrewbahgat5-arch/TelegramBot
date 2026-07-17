@@ -63,7 +63,7 @@ class URLAnalyzerService:
             extracted,
             platform=platform,
             video_id=video_id,
-            formats=normalize_formats(extracted.formats),
+            formats=normalize_formats(extracted.formats, duration=extracted.duration),
         )
 
         row = await self._media_repo.upsert_metadata(
