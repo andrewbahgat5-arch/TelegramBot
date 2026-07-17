@@ -224,6 +224,47 @@ For `pytest-benchmark` runs under `tests/performance/`.
 
 ## Standing Entries
 
+### 2026-07-17 18:23 UTC — Isolated concurrency load run (queue + worker pool, stub download) — NOT an SLO/capacity measurement
+
+> **Scope & honesty:** this exercises the **real** `QueueService` + Redis reliable
+> queue (atomic Lua dequeue) + the **real** `DownloadWorker` pool at N-way concurrency,
+> with a **stub** `DownloadService` (per-job work simulated as `asyncio.sleep`). It
+> validates the coordination layer — queue integrity, worker concurrency, failure/ack
+> handling, memory stability — and deliberately does **not** touch the residential
+> proxy, YouTube, ffmpeg, disk, or Telegram. It is therefore **not** an SLO or capacity
+> result (download→delivery, URL→keyboard, cache-hit are unmeasurable here); the LOCKED
+> Status-Summary rows stay empty pending the real Phase-B L4 run. External bottlenecks
+> (proxy bandwidth/ban, ffmpeg CPU on 4 cores, disk for concurrent temp files, Telegram
+> upload flood limits) are the real ceiling for 500 *real* downloads and are untested here.
+
+| Field | Value |
+|---|---|
+| Git SHA | `8f5fafe` (worktree `happy-bose-71ed46`) |
+| Environment | throwaway Redis (`redis:7`) on its own Docker network on the prod VPS host; harness in an ephemeral `telegram-bot/worker:v1` container. Fully isolated from the live stack; torn down after. |
+| Hardware | prod VPS: 4 vCPU, 7.8 GB RAM (shared host; live bot running) |
+| Harness | `loadtest.py` — real `QueueService`/`RedisQueue`/`DownloadWorker`, stub `DownloadService` (sleep = simulated download+transcode+upload) |
+| Prod reference | live `WORKER_COUNT=8`, 1 worker container, `DB_POOL_SIZE=10` |
+
+**Scenarios**
+
+| Scenario | Config | Drain | Throughput | Peak concurrency | Integrity | Peak RSS | Verdict |
+|---|---|---|---|---|---|---|---|
+| A baseline | 500 jobs / 8 workers, sim 0.05–0.20 s | 8.73 s | 57.3 jobs/s | 8/8 | 500 ok · 0 lost · 0 dup | 68 MB | PASS |
+| B headroom | 500 jobs / 64 workers, sim 0.05–0.20 s | 1.56 s | 321.5 jobs/s | 64/64 | 500 ok · 0 lost · 0 dup | 69 MB | PASS |
+| C failure/ack | 200 jobs / 8 workers, 20% fail | 1.55 s | 109.5 jobs/s | 8/8 | 170 ok + 30 failed = 200 · 0 lost · 0 dup | 68 MB | PASS |
+| D realistic | 120 jobs / 8 workers, sim 4–14 s | 138.75 s | 0.9 jobs/s | 8/8 | 120 ok · 0 lost · 0 dup | 68 MB | PASS |
+
+**Observations**
+- **Enqueue burst:** 500 jobs enqueue in ~0.3 s (~1,700/s) — a simultaneous 500-user hit is trivial for the queue.
+- **Integrity:** every job processed exactly once in all runs (atomic dequeue → no double-delivery; failed jobs ack without wedging). 0 lost, 0 duplicate throughout.
+- **Concurrency:** workers saturate fully (8/8, and 64/64 in B); the queue scales cleanly to 8× `WORKER_COUNT` with no loss.
+- **Memory:** flat ~68 MB across every run — no leak under 500-job load.
+- **Throughput is worker-bound:** drain ≈ `N_JOBS ÷ WORKER_COUNT × avg_job_time`. Scenario D (~9 s/job, 8 workers) → **~500 jobs would drain in ~9–10 min**; with real 4K per-download times (~20–40 s incl. transcode+upload) the 500th user waits **~20–45 min**, first 8 start immediately.
+
+**Action items**
+- Real bounded end-to-end sample (24–40 real downloads) to measure true per-download cost + CPU/proxy headroom, then right-size `WORKER_COUNT` vs. 4 vCPU + single proxy.
+- Phase-B real L4 (500) via the simulation framework for the LOCKED SLO/capacity rows.
+
 ### 2026-06-27 — Sprint 11 (11.10 partial) — FRAMEWORK DRY-RUN (stub transport, NOT a capacity measurement)
 
 > **Important:** these numbers come from the deterministic in-memory `StubBotClient`,
