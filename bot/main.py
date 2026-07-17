@@ -193,6 +193,8 @@ async def main() -> None:
     settings = Settings()  # type: ignore[call-arg]
     configure_logging(settings.log_level, settings.log_format)
     i18n.configure(settings.default_locale)
+    # Bind the Start-home "Contact us" deep link from config (single source).
+    start_handler.SUPPORT_CONTACT_URL = settings.support_contact_url
     if settings.sentry_enabled:
         init_sentry(settings)
         set_component("bot")

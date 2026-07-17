@@ -48,6 +48,11 @@ from services.user_service import UserService
 router = Router(name="start")
 _log = get_logger("bot.handlers.start")
 
+# Deep link the Start-home "Contact us" button opens (bugs / problems / suggestions).
+# Set once from Settings at the composition root (bot/main.py); the default is the
+# configured support account.
+SUPPORT_CONTACT_URL = "https://t.me/i_wbot"
+
 UserServiceFactory = Callable[[AsyncSession], UserService]
 ReferralServiceFactory = Callable[[AsyncSession], ReferralService]
 SettingsServiceFactory = Callable[[AsyncSession], SettingsService]
@@ -65,7 +70,10 @@ def render_home(
         if name
         else translate("start.welcome_anonymous", locale)
     )
-    text = f"{greeting}\n\n{translate('start.home_body', locale)}"
+    text = (
+        f"{greeting}\n\n{translate('start.home_body', locale)}"
+        f"\n\n{translate('start.contact_hint', locale)}"
+    )
 
     def button(label_key: str, data: str) -> list[InlineKeyboardButton]:
         return [InlineKeyboardButton(text=translate(label_key, locale), callback_data=data)]
@@ -75,6 +83,12 @@ def render_home(
             button("start.button.my_files", signer.pack_history_page(0)),
             button("settings.open_button", signer.pack_user_setting(-1)),
             button("start.button.try_premium", signer.pack_referral()),
+            # "Contact us" opens the support account directly (URL button, not a callback).
+            [
+                InlineKeyboardButton(
+                    text=translate("start.button.contact_us", locale), url=SUPPORT_CONTACT_URL
+                )
+            ],
             button("language.change_button", signer.pack_language(OPEN_PICKER_SENTINEL, "s")),
         ]
     )

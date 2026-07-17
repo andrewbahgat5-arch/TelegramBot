@@ -584,5 +584,7 @@
   "adminnotify.total_users": "📊 إجمالي المستخدمين: <b>{count}</b>",
   "adminnotify.total_blocked": "📊 إجمالي الحظر: <b>{count}</b>",
   "adminnotify.by": "👮 بواسطة: {name}",
-  "adminnotify.reason": "📝 السبب: {reason}"
+  "adminnotify.reason": "📝 السبب: {reason}",
+  "start.button.contact_us": "📞 تواصل معنا",
+  "start.contact_hint": "🐞 واجهت مشكلة أو خطأ أو لديك اقتراح؟ فقط اضغط على <b>تواصل معنا</b>."
 }

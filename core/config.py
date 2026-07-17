@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Telegram Bot API server base URL (e.g. http://bot-api:8081) to raise the cap
     # to 2 GB (D-040). Used by the bot + worker Telegram clients.
     bot_api_base_url: str = Field("", alias="BOT_API_BASE_URL")
+    # Support contact the Start-home "Contact us" button opens (bugs / problems /
+    # suggestions). A t.me deep link to the support account/bot.
+    support_contact_url: str = Field("https://t.me/i_wbot", alias="SUPPORT_CONTACT_URL")
 
     # --- Deployment environment / test isolation (D-060, D-032) ---
     # Selects the deployment environment. `test` activates the §25.6 isolation

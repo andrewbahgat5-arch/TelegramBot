@@ -135,11 +135,19 @@ async def test_start_offers_all_working_menu_buttons() -> None:
         "start.button.my_files",
         "settings.open_button",
         "start.button.try_premium",
+        "start.button.contact_us",
         "language.change_button",
     ):
         assert translate(key, "en") in labels
+    # Contact-us is a URL button (opens the support account), not a callback.
+    contact = next(
+        b for row in keyboard.inline_keyboard for b in row
+        if b.text == translate("start.button.contact_us", "en")
+    )
+    assert contact.url and contact.callback_data is None
     body = message.answer.await_args.args[0]
     assert "Features" in body and "How to use" in body  # the redesigned home text
+    assert translate("start.contact_hint", "en") in body  # the bug/suggestion hint
 
 
 async def test_help_replies() -> None:

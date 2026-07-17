@@ -584,5 +584,7 @@
   "adminnotify.total_users": "📊 Total users: <b>{count}</b>",
   "adminnotify.total_blocked": "📊 Total blocked: <b>{count}</b>",
   "adminnotify.by": "👮 By: {name}",
-  "adminnotify.reason": "📝 Reason: {reason}"
+  "adminnotify.reason": "📝 Reason: {reason}",
+  "start.button.contact_us": "📞 Contact us",
+  "start.contact_hint": "🐞 Found a problem, a bug, or have a suggestion? Just tap <b>Contact us</b>."
 }
