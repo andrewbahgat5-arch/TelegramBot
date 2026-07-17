@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import uuid
 from pathlib import Path
 from typing import Any
@@ -211,20 +213,36 @@ async def test_video_shows_uploading_status_with_real_size(tmp_path: Path) -> No
     assert "2.9 MB" in edits[-1]  # the real file size, not one stream's partial size
 
 
-async def test_progress_cb_suppresses_tiny_trailing_stream(tmp_path: Path) -> None:
-    # A merged video downloads video then a tiny audio stream as separate 0→100 passes.
-    # The trailing audio stream's "100%" must not overwrite the bar with a small size.
-    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
-    cb = env["service"]._download_progress_cb(555, 901)
+async def test_poll_download_progress_reads_disk_and_edits_bar(tmp_path: Path) -> None:
+    # The live bar is driven by polling the growing file on disk (downloader-agnostic —
+    # works for aria2c, which reports almost no progress). Here we grow the file between
+    # polls and assert the bar reflects it.
+    import services.download_service as ds
 
-    await cb(100_000_000, 200_000_000)  # video stream, 50%
-    await cb(200_000_000, 200_000_000)  # video stream done (100%)
-    await cb(2_000_000, 2_000_000)  # tiny audio stream — must be suppressed
+    monkeypatch_interval = 0.01
+    dest = tmp_path / "job"
+    dest.mkdir()
+    env = _build(downloader=FakeFileDownloader(), temp_dir=tmp_path)
+    (dest / "v.mp4.part").write_bytes(b"x" * 5_000_000)  # 5 MB downloaded of 10 MB
+    original = ds._PROGRESS_POLL_INTERVAL
+    ds._PROGRESS_POLL_INTERVAL = monkeypatch_interval
+    try:
+        task = asyncio.create_task(
+            env["service"]._poll_download_progress(dest, 10_000_000, 555, 901)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    finally:
+        ds._PROGRESS_POLL_INTERVAL = original
 
     edits = [text for _chat, mid, text in env["msg"].edits if mid == 901]
-    assert edits, "expected download-bar edits"
-    assert "2.0 MB / 2.0 MB" not in edits[-1]  # the tiny stream did not overwrite the bar
-    assert "190.7 MB / 190.7 MB" in edits[-1]  # last meaningful frame = the video stream
+    assert edits and "50%" in edits[-1]  # 5 MB / 10 MB rendered live from disk
+    # aria2c control files are ignored in the byte count
+    assert ds._downloaded_bytes(dest) == 5_000_000
+    (dest / "v.mp4.aria2").write_bytes(b"c" * 1000)
+    assert ds._downloaded_bytes(dest) == 5_000_000
 
 
 async def test_caption_ad_rides_on_the_delivered_media(tmp_path: Path) -> None:

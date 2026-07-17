@@ -21,6 +21,7 @@ from infrastructure.downloader.providers.ytdlp_provider import (
     YtdlpProvider,
     _format_selector,
     _map_error,
+    _parse_formats,
     _quality_for_format,
 )
 
@@ -177,6 +178,25 @@ def test_quality_for_format_handles_non_16x9(
 )
 def test_map_error(stderr: str, exc: type[Exception]) -> None:
     assert isinstance(_map_error(stderr), exc)
+
+
+def test_parse_formats_skips_hls_manifest_dupes_so_size_is_real() -> None:
+    # YouTube lists an HLS 1080p (protocol m3u8, no filesize, inflated tbr) next to the
+    # real DASH one. The HLS format must be dropped so the *displayed* size matches the
+    # real download (bug: showed 475 MB from the bogus tbr estimate; real file was ~198).
+    raw = [
+        {"format_id": "96", "protocol": "m3u8_native", "vcodec": "avc1", "acodec": "none",
+         "height": 1080, "tbr": 3393.0},  # no filesize → would estimate ~475 MB
+        {"format_id": "137", "protocol": "https", "vcodec": "avc1", "acodec": "none",
+         "height": 1080, "filesize": 179_000_000},
+        {"format_id": "140", "protocol": "https", "vcodec": "none", "acodec": "mp4a",
+         "filesize": 4_000_000},
+    ]
+    opts = _parse_formats(raw, duration=1176)
+    videos = [o for o in opts if o.format is MediaFormat.VIDEO]
+    assert [o.provider_format_id for o in videos] == ["137"]  # HLS 96 dropped
+    # size = real 179 MB video + 4 MB audio, NOT the 475 MB tbr estimate
+    assert 175_000_000 < (videos[0].approx_size_bytes or 0) < 190_000_000
 
 
 async def test_extract_info_success(monkeypatch: pytest.MonkeyPatch) -> None:

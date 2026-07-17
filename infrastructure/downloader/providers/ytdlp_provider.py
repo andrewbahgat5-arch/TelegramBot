@@ -578,6 +578,13 @@ def _map_error(stderr: str) -> Exception:
     return ExtractionFailedError("Extraction failed.")
 
 
+def _is_hls(fmt: dict[str, Any]) -> bool:
+    """A YouTube HLS/manifest format (``protocol`` m3u8). These mirror the DASH streams
+    but carry no reliable ``filesize`` and an inflated ``tbr``, so their size can only be
+    (mis)estimated — the source of the displayed-vs-actual size mismatch."""
+    return "m3u8" in str(fmt.get("protocol") or "").lower()
+
+
 def _parse_formats(
     raw_formats: list[dict[str, Any]], duration: int | None
 ) -> list[MediaFormatOption]:
@@ -596,11 +603,18 @@ def _parse_formats(
     video_rows: list[_VideoRow] = []
     audio_options: list[MediaFormatOption] = []
     best_audio_size = 0
+    mp4a_audio_size = 0  # best m4a audio — what a VIDEO download actually merges
     has_audio = False
 
     for fmt in raw_formats:
         format_id = fmt.get("format_id")
         if not format_id:
+            continue
+        if _is_hls(fmt):
+            # HLS/manifest duplicates of the DASH streams (e.g. YouTube format 96): no real
+            # filesize and an inflated peak ``tbr`` that estimated a wildly wrong size (475
+            # vs. the real 198 MB) — and, being "larger", it won the per-tier tie-break and
+            # was both displayed and selected. Skip them; the DASH formats carry real sizes.
             continue
         has_v = _present(fmt.get("vcodec"))
         has_a = _present(fmt.get("acodec"))
@@ -621,24 +635,31 @@ def _parse_formats(
                 )
             )
         elif not has_v and has_a:
+            acodec = _codec_family(fmt.get("acodec"))
             est = size or _bitrate_size(abr or tbr, duration)
             if est:
                 best_audio_size = max(best_audio_size, est)
+                if acodec == "mp4a":  # the codec the video selector merges (bestaudio[mp4a])
+                    mp4a_audio_size = max(mp4a_audio_size, est)
             audio_options.append(
                 MediaFormatOption(
                     format=MediaFormat.AUDIO,
                     quality=Quality.AUDIO,
                     approx_size_bytes=est,
                     provider_format_id=str(format_id),
-                    codec=_codec_family(fmt.get("acodec")),
+                    codec=acodec,
                 )
             )
 
+    # A video is merged with the best *m4a* audio (see _format_selector), so size the merged
+    # file with that exact stream — keeping the displayed size in step with the real file —
+    # falling back to the best audio overall when a source has no m4a.
+    merge_audio_size = mp4a_audio_size or best_audio_size
     options: list[MediaFormatOption] = [
         MediaFormatOption(
             format=MediaFormat.VIDEO,
             quality=row.quality,
-            approx_size_bytes=_video_size(row, best_audio_size),
+            approx_size_bytes=_video_size(row, merge_audio_size),
             provider_format_id=row.format_id,
             codec=row.codec,
         )

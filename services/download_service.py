@@ -29,6 +29,8 @@ waiters are offered one).
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import datetime
 import re
 import shutil
@@ -54,7 +56,6 @@ from domain.exceptions import (
 from domain.protocols.advertising import AdButtonSpec, AdShowProtocol
 from domain.protocols.downloader import (
     DownloaderProtocol,
-    DownloadProgress,
     ProviderRetryElsewhere,
 )
 from domain.protocols.file_sender import FileSenderProtocol, UploadedFile
@@ -109,8 +110,37 @@ def _delivery_caption_base(info: MediaInfo, format_: MediaFormat) -> str | None:
 
 
 _BAR_WIDTH = 10
-# Min seconds between progress edits — Telegram rate-limits rapid editMessageText.
-_PROGRESS_MIN_INTERVAL = 3.0
+# Seconds between live-bar edits — Telegram rate-limits rapid editMessageText.
+_PROGRESS_POLL_INTERVAL = 3.0
+
+
+def _downloaded_bytes(dest: Path) -> int:
+    """Bytes actually written for the in-flight download — the growing media file(s),
+    ignoring aria2c's tiny ``.aria2`` control files.
+
+    Uses **allocated blocks** (``st_blocks * 512``), not ``st_size``: aria2c downloads 16
+    segments in parallel into a *sparse* file, so ``st_size`` leaps to the full size at
+    once (the highest-offset segment) and then sits there — which made the bar jump to
+    ~90% and freeze. Allocated blocks exclude the not-yet-written holes, so they track the
+    real progress. ``min`` with ``st_size`` keeps the exact value for a normal (native,
+    sequentially-written) file where blocks round up. Downloader-agnostic; advances
+    monotonically across the video→audio streams (no per-stream 0→100 reset)."""
+    total = 0
+    for p in dest.glob("*"):
+        if p.is_file() and p.suffix != ".aria2":
+            with contextlib.suppress(OSError):
+                st = p.stat()
+                blocks = getattr(st, "st_blocks", None)
+                total += st.st_size if blocks is None else min(st.st_size, blocks * 512)
+    return total
+
+
+def _expected_size(info: MediaInfo, format_: MediaFormat, quality: Quality) -> int | None:
+    """The displayed size of the chosen option — the live bar's denominator."""
+    for option in info.formats:
+        if option.format is format_ and option.quality is quality:
+            return option.approx_size_bytes
+    return None
 
 
 def _human_size(num_bytes: int) -> str:
@@ -124,10 +154,13 @@ def _human_size(num_bytes: int) -> str:
 def _render_progress(downloaded: int, total: int | None) -> str:
     """A live download bar, e.g. ``⬇️ ▰▰▰▰▱▱▱▱▱▱  44%`` + ``12.3 MB / 28.0 MB``."""
     if total and total > 0:
-        frac = min(1.0, downloaded / total)
+        # Cap the shown bytes at the total: during the video+audio merge the source and
+        # output files coexist for a moment, so the polled size can briefly exceed it.
+        shown = min(downloaded, total)
+        frac = shown / total
         filled = round(frac * _BAR_WIDTH)
         bar = "▰" * filled + "▱" * (_BAR_WIDTH - filled)
-        return f"⬇️ {bar}  {int(frac * 100)}%\n{_human_size(downloaded)} / {_human_size(total)}"
+        return f"⬇️ {bar}  {int(frac * 100)}%\n{_human_size(shown)} / {_human_size(total)}"
     return f"⬇️ {_human_size(downloaded)}"
 
 
@@ -280,39 +313,29 @@ class DownloadService:
         finally:
             shutil.rmtree(dest, ignore_errors=True)
 
-    def _download_progress_cb(self, chat_id: int, message_id: int) -> DownloadProgress:
-        """A throttled callback that edits the progress message with a live bar.
+    async def _poll_download_progress(
+        self, dest: Path, expected_total: int | None, chat_id: int, message_id: int
+    ) -> None:
+        """Edit the live download bar from the file growing on disk, until cancelled.
 
-        Edits are rate-limit-safe: skipped unless the rendered text changed AND at least
-        ``_PROGRESS_MIN_INTERVAL`` has passed (the final 100% frame is always sent). Edit
-        failures are swallowed — progress is cosmetic, never a reason to fail a download.
+        Runs as a side task next to the download so it works for *any* downloader —
+        crucially aria2c, which yt-dlp barely reports progress for. Edits are best-effort
+        (a failed/duplicate edit is skipped) and never affect the download.
         """
-        last_at = 0.0
         last_text = ""
-        max_total = 0
-
-        async def cb(downloaded: int, total: int | None) -> None:
-            nonlocal last_at, last_text, max_total
-            if total:
-                max_total = max(max_total, total)
-            # A merged video downloads video then audio as *separate* 0→100 passes. The
-            # trailing audio stream is tiny, so its ``100%`` frame would overwrite the
-            # bar with a misleading small size. Skip any stream far smaller than the
-            # largest seen — the real, final size is shown at the upload step instead.
-            if total and max_total and total < max_total // 2:
-                return
-            text = _render_progress(downloaded, total)
-            now = time.monotonic()
-            done = total is not None and downloaded >= total
-            if text == last_text or (now - last_at < _PROGRESS_MIN_INTERVAL and not done):
-                return
-            last_at, last_text = now, text
+        while True:
+            await asyncio.sleep(_PROGRESS_POLL_INTERVAL)
+            got = _downloaded_bytes(dest)
+            if got <= 0:
+                continue
+            text = _render_progress(got, expected_total)
+            if text == last_text:
+                continue
+            last_text = text
             try:
                 await self._notifier.notify_text(chat_id, message_id, text)
             except Exception:  # noqa: S110 - progress edits are best-effort
                 pass
-
-        return cb
 
     async def _show_status(self, chat_id: int | None, message_id: int | None, text: str) -> None:
         """Best-effort edit of the progress message to an arbitrary status line."""
@@ -333,15 +356,21 @@ class DownloadService:
         message_id: int | None,
         locale: str,
     ) -> tuple[Path, int]:
-        progress_cb = (
-            self._download_progress_cb(chat_id, message_id)
-            if chat_id is not None and message_id is not None
-            else None
-        )
+        poller: asyncio.Task[None] | None = None
+        if chat_id is not None and message_id is not None:
+            poller = asyncio.create_task(
+                self._poll_download_progress(
+                    dest, _expected_size(info, format_, quality), chat_id, message_id
+                )
+            )
         download_started = time.monotonic()
-        downloaded = await self._downloader.download(
-            info, format_, quality, dest, progress_cb=progress_cb
-        )
+        try:
+            downloaded = await self._downloader.download(info, format_, quality, dest)
+        finally:
+            if poller is not None:
+                poller.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await poller
         download_elapsed = time.monotonic() - download_started
         metrics.observe_download(download_elapsed)
         _log.info(
