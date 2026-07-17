@@ -4,10 +4,15 @@
 > this repository. It does **not** duplicate other docs — it tells you *what each file is*
 > and *when to open it*, so you can orient in 2–3 minutes instead of reading everything.
 >
-> **Keep this in sync:** when a markdown doc is added/removed/repurposed, or a major
-> component moves, update this index in the same change.
+> **Keep this in sync — this file is the single source of truth for any AI on this project.**
+> It must ALWAYS reflect the latest project structure, documentation, workflows, and
+> development/deployment guidelines. Whenever the **architecture, workflow, deployment
+> process/topology, or documentation** changes — a markdown doc added/removed/repurposed, a
+> major component moved or added, a new service/process, or a change to how the project is
+> developed or deployed — update this index **in the same change** (and mirror workflow/
+> deployment changes into the sections below). Do not let it drift.
 >
-> **Last updated:** 2026-07-17 · Covers the live `claude/happy-bose-71ed46` branch (production).
+> **Last updated:** 2026-07-18 · Covers the live `claude/happy-bose-71ed46` branch (production).
 
 ---
 
@@ -39,6 +44,44 @@ panel), **worker** (download → transcode → upload + progress), **api** (read
 PostgreSQL (via PgBouncer) · Redis (reliable queue + cache) · yt-dlp + ffmpeg · Docker Compose.
 Production runs on a VPS with a self-hosted 2 GB Telegram Bot API, a Cloudflare WARP pool, and
 a residential proxy used **only for YouTube** (per-platform egress routing).
+
+---
+
+## Development Workflow & Deployment Topology
+
+> **Canonical workflow — assume this for all development and deployment unless explicitly
+> changed.** When the workflow or topology changes, update this section (see the "keep in
+> sync" mandate at the top).
+
+**Workflow (always in this order):**
+
+1. **Develop locally.** Make all code changes on the local development machine (the git
+   worktree is the source of truth). Follow the layering + rules in *Important Rules* below.
+2. **Test locally.** Run the suite locally before deploying — `pytest tests/unit` (fast), plus
+   `tests/integration` / `tests/e2e` where relevant; type-check with `mypy`, lint with `ruff`.
+   Record outcomes in `TEST_RESULTS.md`. Never deploy an untested change.
+3. **Deploy to production.** Push the change, then roll it out to the production server(s):
+   upload the changed files to the same paths under `/opt/telegram-bot`, rebuild the affected
+   image(s), and recreate. See `deploy/VPS_DEPLOYMENT_CHANGES.md` (host + Windows/paramiko
+   procedure) and `deploy/README.md` (runbook). Bring-up:
+   `cd /opt/telegram-bot/deploy && docker compose --profile bot-api -f docker-compose.prod.yml up -d`.
+
+**Deployment topology:**
+
+| Tier | Role |
+|---|---|
+| **Local machine** | Development environment — write + test changes here first. |
+| **Production Server #1** | **Main Telegram Bot** — runs the app stack (bot/worker/api + Postgres/Redis/PgBouncer, WARP pool, residential-proxy egress) via Docker Compose at `/opt/telegram-bot`. |
+| **Production Server #2** | **Telegram Bot API server** — the self-hosted Telegram Bot API (2 GB upload cap) the bot talks to via `BOT_API_BASE_URL`. See `deploy/LOCAL_BOT_API.md`. |
+
+> **Current state note (2026-07-18):** as presently deployed, the self-hosted Bot API runs as
+> the `tgbot_bot_api` container **within the Server #1 Compose stack** (single-VPS). Treat
+> "Server #2" as the logical Bot API tier; when it is split onto a dedicated machine, record
+> that host here and in `deploy/VPS_DEPLOYMENT_CHANGES.md`.
+
+**Server-side logs** are structured JSON on stdout (captured by Docker, rotation-capped at
+20 MB × 10 per app service). Review with `docker logs --tail N tgbot_bot` / `tgbot_worker` /
+`tgbot_api` — grep/jq-searchable (e.g. `docker logs tgbot_bot 2>&1 | grep admin_event`).
 
 ---
 
@@ -209,8 +252,9 @@ not a project-content doc. · Read when: understanding the intended engineering 
 | **Admin Panel** | `bot/handlers/admin_panel.py`, `admin_wizard.py`, `admin.py`; shared panel UI in `bot/panel/` (`registry.py`, `states.py`, `ui.py`, `wizard.py`); HTTP admin in `api/routes/admin.py`; `services/admin_service.py`; templates `infrastructure/database/message_template_store.py` |
 | **Localization (i18n)** | `core/i18n.py` + catalogs `core/locales/en.json`, `core/locales/ar.json` |
 | **Configuration** | `core/config.py` (env-driven `Settings`), `core/constants.py`, `core/environment.py` |
+| **Admin notifications** | `services/admin_notification_service.py` — fans out important events (new user, block/return, ban/unban, broadcast published) to the Owner + all Moderators in each recipient's locale. Hooked from `services/user_service.py` (new user, ban/unban, block/return) and `bot/handlers/membership.py` (real-time `my_chat_member` block/unblock); broadcast hook in `bot/handlers/admin_panel.py`. Recipients via `UserRepository.list_staff()`. i18n keys `adminnotify.*` in `core/locales/{en,ar}.json` |
 | **Monitoring** | `api/readiness.py` (`/v1/ready`), `core/metrics.py`, `core/alerting.py`, `core/sentry.py`; uptime-kuma container in the compose stack |
-| **Logging** | `core/logging.py` (structured JSON logs; correlation ids) |
+| **Logging** | `core/logging.py` (structured JSON logs to stdout; correlation ids; secret scrubbing). Every meaningful event logs a consistent entry (`admin_event kind=…`, `download_requested`, `job_queued`, download/queue/worker failures, `bot/worker_starting`/`_stopped`, …). Prod compose caps the json-file log (20 MB × 10). Review via `docker logs` (grep/jq-searchable) |
 
 ---
 
