@@ -56,8 +56,9 @@ async def test_cache_miss_extracts_upserts_and_normalizes() -> None:
     assert len(videos) == 1
     assert len(audios) == 7
     # normalize_formats preserves the provider-supplied size (the provider already
-    # folds audio into video-only sizes); it does not re-add audio here.
-    assert videos[0].approx_size_bytes == 200
+    # folds audio into video-only sizes); it does not re-add audio here. On a same-tier
+    # same-codec tie the smaller/clean stream wins (200 vs 100 → 100), never re-summed.
+    assert videos[0].approx_size_bytes == 100
     # platform/video_id come from the URL, not the provider's claim.
     assert result.info.platform == "generic"
 

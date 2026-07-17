@@ -835,6 +835,9 @@ def _curated_metadata(info: dict[str, Any]) -> dict[str, Any]:
         "comment_count",
         "channel",
         "channel_follower_count",
+        # Canonical links for the chooser's inline hyperlinks (title → video, name → channel).
+        "channel_url",
+        "uploader_url",
     )
     return {k: info[k] for k in keys if info.get(k) is not None}
 

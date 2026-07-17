@@ -5,8 +5,8 @@ vendor format). ``normalize_formats`` turns them into the clean selection the us
 sees:
 
 * **Video** — one option per quality tier, picking a *consistent* codec per tier
-  (compatibility order avc1 → vp9 → av01 → other) instead of the largest variant,
-  and adding the best audio stream's size so the estimate reflects the final muxed
+  (order avc1 → av01 → vp9 → other) instead of the largest variant, and adding the
+  best audio stream's size so the estimate reflects the final muxed
   file. This makes the displayed sizes sensible and roughly monotonic (carry-in 3).
 * **Audio** — whenever the media has any audio stream, the explicit per-codec
   catalog (``AUDIO_TARGETS``: MP3/M4A/Opus/…; D-041) is offered. Each carries the
@@ -37,8 +37,13 @@ _QUALITY_RANK: dict[Quality, int] = {
 }
 
 # Preference order for a video codec family (lower = preferred). avc1/h264 first for
-# broad device compatibility and predictable, smaller-per-tier sizes.
-_CODEC_PREFERENCE: dict[str, int] = {"avc1": 0, "h264": 0, "vp9": 1, "av01": 2, "av1": 2}
+# broad device compatibility (and it's all YouTube offers at ≤1080p). Above 1080p there
+# is no avc1, so the next choice decides the high-res size: av01 (AV1) before vp9, because
+# AV1 is markedly more efficient — a 4K/1440p AV1 stream is ~30-40% smaller than the VP9
+# one for the same tier, which is why picking vp9 made our 2160p/1440p sizes far larger
+# than they need to be. (The exact chosen format is also what gets downloaded, so display
+# and delivery stay in step — D-046.)
+_CODEC_PREFERENCE: dict[str, int] = {"avc1": 0, "h264": 0, "av01": 1, "av1": 1, "vp9": 2}
 
 # Rough multipliers applied to the best lossy audio size to estimate a lossless
 # target's size (no source duration available here; labels are "~" approximations).
@@ -75,14 +80,25 @@ def _dedupe_video(options: Iterable[MediaFormatOption]) -> list[MediaFormatOptio
 
 
 def _prefer_video(candidate: MediaFormatOption, incumbent: MediaFormatOption) -> bool:
-    """Prefer a resolvable option, then a more compatible codec, then larger size."""
+    """Prefer a resolvable option, then a more compatible/efficient codec, then a known
+    size, then the *smaller* file.
+
+    Preferring smaller on a codec tie picks the clean DASH stream over a legacy muxed
+    one (e.g. YouTube's format 18: an oversized 360p that otherwise won the old
+    larger-wins tie-break and displayed/downloaded far bigger than the real thing).
+    A known size always beats an unknown one so we never trade a sized format for a
+    sizeless placeholder.
+    """
     if bool(candidate.provider_format_id) != bool(incumbent.provider_format_id):
         return bool(candidate.provider_format_id)
     cand_codec = _CODEC_PREFERENCE.get(candidate.codec or "", 99)
     inc_codec = _CODEC_PREFERENCE.get(incumbent.codec or "", 99)
     if cand_codec != inc_codec:
         return cand_codec < inc_codec
-    return (candidate.approx_size_bytes or 0) > (incumbent.approx_size_bytes or 0)
+    cand_size, inc_size = candidate.approx_size_bytes, incumbent.approx_size_bytes
+    if (cand_size is None) != (inc_size is None):
+        return inc_size is None  # keep the option whose size we actually know
+    return (cand_size or 0) < (inc_size or 0)
 
 
 def _best_audio(audio_sources: list[MediaFormatOption]) -> MediaFormatOption | None:

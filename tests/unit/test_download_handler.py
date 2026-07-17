@@ -634,6 +634,29 @@ def test_quality_caption_lists_sizes_in_description() -> None:
     assert "MP3" not in caption
 
 
+def test_caption_links_title_and_channel() -> None:
+    info = MediaInfo(
+        platform="youtube",
+        video_id="v",
+        title="A Clip",
+        source_url="https://www.youtube.com/watch?v=abc",
+        duration=60,
+        formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P1080, 3_250_000, "137"),),
+        raw={"channel": "Joe HaTTab", "channel_url": "https://www.youtube.com/@JoeHattab"},
+    )
+    caption = _media_caption(info, translate, "en")
+    # Title links to the source page; channel name links to the channel page.
+    assert '<a href="https://www.youtube.com/watch?v=abc"><b>A Clip</b></a>' in caption
+    assert '<a href="https://www.youtube.com/@JoeHattab">Joe HaTTab</a>' in caption
+
+
+def test_caption_without_channel_url_stays_plain_text() -> None:
+    # No channel_url in metadata → channel name is plain text, no dangling anchor.
+    caption = _quality_caption(_rich_info(), MediaFormat.VIDEO, translate, "en")
+    assert "👤 Uzu" in caption
+    assert "<a" not in caption.split("👤", 1)[1]
+
+
 def test_media_caption_defers_size_list_to_quality_screen() -> None:
     # The format screen shows the header but not the per-size list (formats_for=None).
     caption = _media_caption(_rich_info(), translate, "en")

@@ -25,6 +25,41 @@ def test_video_dedup_prefers_compatible_codec_and_preserves_size() -> None:
     assert video.approx_size_bytes == 5_000_000  # preserved, not re-augmented
 
 
+def test_high_res_prefers_av01_over_vp9() -> None:
+    # Above 1080p YouTube has no avc1, so the codec choice decides the 4K/1440p size.
+    # AV1 is the more efficient (smaller) stream and must win over VP9 — this is what
+    # kept our 2160p at ~1.4 GB (VP9) instead of the ~913 MB (AV1) shown elsewhere.
+    raw = (
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P2160, 1_400_000_000, "v-vp9", codec="vp9"),
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P2160, 913_000_000, "v-av01", codec="av01"),
+    )
+    video = next(o for o in normalize_formats(raw) if o.format is MediaFormat.VIDEO)
+    assert video.provider_format_id == "v-av01"
+    assert video.approx_size_bytes == 913_000_000
+
+
+def test_same_codec_tier_prefers_smaller_clean_stream() -> None:
+    # A legacy muxed 360p (format 18) is bulkier than the clean DASH 360p of the same
+    # codec; the smaller one must win so the displayed/downloaded size is the real one.
+    raw = (
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P360, 84_000_000, "18", codec="avc1"),
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P360, 49_000_000, "134", codec="avc1"),
+    )
+    video = next(o for o in normalize_formats(raw) if o.format is MediaFormat.VIDEO)
+    assert video.provider_format_id == "134"
+    assert video.approx_size_bytes == 49_000_000
+
+
+def test_known_size_beats_unknown_on_codec_tie() -> None:
+    # Never trade a sized format for a sizeless placeholder of the same codec.
+    raw = (
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P720, None, "sizeless", codec="avc1"),
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P720, 60_000_000, "sized", codec="avc1"),
+    )
+    video = next(o for o in normalize_formats(raw) if o.format is MediaFormat.VIDEO)
+    assert video.provider_format_id == "sized"
+
+
 def test_audio_expands_into_per_codec_catalog() -> None:
     raw = (
         MediaFormatOption(MediaFormat.VIDEO, Quality.P720, 4_000_000, "v", codec="avc1"),

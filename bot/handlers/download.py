@@ -233,6 +233,19 @@ async def _auto_download(
     await show_placement_ad(ad_service_factory(session), user, AdPlacement.QUALITY_SELECT.value)
 
 
+def _link(inner_html: str, url: object) -> str:
+    """Wrap already-escaped ``inner_html`` in an <a> when ``url`` is a usable http(s) link.
+
+    Used for the chooser's inline links (title → source page, channel name → channel
+    page), mirroring the reference bot. ``url`` comes from provider metadata and is only
+    trusted when it's an http(s) string; anything else falls back to plain text so a
+    stray value can never inject markup or a non-web scheme.
+    """
+    if isinstance(url, str) and url.startswith(("http://", "https://")):
+        return f'<a href="{escape(url, quote=True)}">{inner_html}</a>'
+    return inner_html
+
+
 def _build_caption(
     info: MediaInfo,
     footer: str,
@@ -250,7 +263,8 @@ def _build_caption(
     options for that format are listed with their sizes, so the size is shown in the
     description rather than on the buttons.
     """
-    lines = [f"🎬 <b>{escape(info.title)}</b>"]
+    title_html = _link(f"<b>{escape(info.title)}</b>", info.source_url)
+    lines = [f"🎬 {title_html}"]
     meta: list[str] = []
     if info.duration:
         meta.append(f"⏱ {_format_duration(info.duration)}")
@@ -277,7 +291,8 @@ def _build_caption(
 
     channel = info.raw.get("channel") or info.raw.get("uploader")
     if channel:
-        chan = f"👤 {escape(str(channel))}"
+        channel_url = info.raw.get("channel_url") or info.raw.get("uploader_url")
+        chan = f"👤 {_link(escape(str(channel)), channel_url)}"
         subscribers = info.raw.get("channel_follower_count")
         if subscribers is not None:
             chan += f" · {_fmt_count(subscribers)} {translate('download.subscribers', locale)}"
