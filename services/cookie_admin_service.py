@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.logging import get_logger
-from domain.entities.cookie import CookieSnapshot
+from domain.entities.cookie import CookieEvent, CookieSnapshot
 from domain.enums.cookie_health import SELECTABLE_HEALTH, CookieHealth
 from domain.protocols.cookies import (
     CookieCanaryProtocol,
@@ -58,6 +58,13 @@ class CookieAdminService:
 
     async def get(self, cookie_id: int) -> CookieSnapshot | None:
         return await self._repo.get(cookie_id)
+
+    async def history(self, cookie_id: int, *, limit: int = 15) -> list[CookieEvent]:
+        """Recent audit events for one cookie (newest first), for the panel."""
+        lister = getattr(self._repo, "list_events", None)
+        if lister is None:  # protocol keeps this optional; fakes need not implement it
+            return []
+        return list(await lister(cookie_id, limit=limit))
 
     async def pool_summary(self) -> tuple[int, int]:
         """``(healthy, total)`` — the line every notification carries."""

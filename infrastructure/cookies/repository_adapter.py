@@ -16,7 +16,7 @@ from typing import TypeVar
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.logging import get_logger
-from domain.entities.cookie import CookieSnapshot, CookieVerdict
+from domain.entities.cookie import CookieEvent, CookieSnapshot, CookieVerdict
 from domain.enums.cookie_health import CookieHealth
 from infrastructure.database.repositories.youtube_cookie import YoutubeCookieRepository
 
@@ -135,6 +135,21 @@ class CookieRepositoryAdapter:
                 actor_user_id=actor_user_id,
             )
         )
+
+    async def list_events(self, cookie_id: int, *, limit: int = 20) -> list[CookieEvent]:
+        """Recent audit events, detached from the ORM so the caller never touches rows
+        whose session has already closed."""
+        rows = await self._run(lambda repo: repo.list_events(cookie_id, limit=limit))
+        return [
+            CookieEvent(
+                created_at=r.created_at,
+                event=r.event,
+                to_status=r.to_status,
+                reason=r.reason,
+                actor_user_id=r.actor_user_id,
+            )
+            for r in rows
+        ]
 
     async def add_event(
         self,

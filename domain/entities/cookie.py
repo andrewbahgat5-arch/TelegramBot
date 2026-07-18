@@ -92,6 +92,17 @@ class CookieSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class CookieEvent:
+    """One row of a cookie's audit trail, detached from the ORM session."""
+
+    created_at: datetime.datetime | None
+    event: str
+    to_status: str | None = None
+    reason: str | None = None
+    actor_user_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CookieLease:
     """An exclusive, time-limited claim on one cookie for a single yt-dlp run.
 

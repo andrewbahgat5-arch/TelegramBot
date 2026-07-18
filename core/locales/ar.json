@@ -601,5 +601,18 @@
   "cookies.test.failed": "❌ {label} فشل: {detail}",
   "cookies.disabled": "⏸ تم تعطيل {label}. لن يُستخدم حتى تعيد تفعيله.",
   "cookies.enabled": "▶️ تم تفعيل {label}.",
-  "cookies.not_found": "هذا الكوكي لم يعد موجودًا."
+  "cookies.not_found": "هذا الكوكي لم يعد موجودًا.",
+  "panel.settings.field.cookie_selection_strategy": "استراتيجية الكوكيز",
+  "panel.settings.field.cookie_max_concurrent_leases": "تزامن الكوكيز",
+  "panel.settings.field.cookie_warning_threshold": "حد تحذير الكوكي",
+  "panel.settings.field.cookie_cooldown_threshold": "حد تهدئة الكوكي",
+  "panel.settings.field.cookie_cooldown_seconds": "تهدئة الكوكي (ث)",
+  "panel.settings.field.cookie_cooldown_max_seconds": "أقصى تهدئة للكوكي (ث)",
+  "panel.settings.field.cookie_max_cooldown_cycles": "أقصى دورات تهدئة",
+  "panel.settings.field.cookie_lease_ttl_seconds": "مهلة حجز الكوكي (ث)",
+  "panel.settings.field.cookie_allow_affinity_break": "السماح بكسر الارتباط",
+  "panel.settings.field.cookie_recovery_probe_interval": "فاصل فحص التعافي (ث)",
+  "cookies.btn_history": "📜 السجل",
+  "cookies.history.title": "📜 <b>{label}</b> — الأحداث الأخيرة",
+  "cookies.history.empty": "لا توجد أحداث مسجّلة بعد."
 }

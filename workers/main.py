@@ -74,6 +74,7 @@ from services.settings_service import SettingsService
 from services.url_analyzer import URLAnalyzerService
 from workers.broadcast_worker import BroadcastWorker
 from workers.cleanup_worker import CleanupWorker
+from workers.cookie_prober import CookieProber
 from workers.download_worker import DownloadWorker
 
 _log = get_logger("workers.main")
@@ -82,26 +83,33 @@ _DEFAULT_HEALTH_INTERVAL = 120
 _DEFAULT_BROADCAST_CHUNK_SIZE = 25
 
 
+def build_ytdlp_provider(
+    settings: Settings, cookies: CookiePoolService | None = None
+) -> YtdlpProvider:
+    """The yt-dlp provider. Returned separately because it doubles as the cookie
+    canary runner (it already owns the binary)."""
+    return YtdlpProvider(
+        settings.ytdlp_path,
+        proxy=settings.ytdlp_proxy,
+        warp_proxy=settings.ytdlp_warp_proxy,
+        warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
+        cookies=cookies,
+    )
+
+
 def build_registry(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     redis_cache: object,
     cookies: CookiePoolService | None = None,
+    provider: YtdlpProvider | None = None,
 ) -> DownloaderRegistry:
     """Build the registry with every V1 provider registered (Section 12.6.5)."""
     registry = DownloaderRegistry(
         ProviderSettingsAdapter(session_factory),
         redis=redis_cache,  # type: ignore[arg-type]
     )
-    registry.register(
-        YtdlpProvider(
-            settings.ytdlp_path,
-            proxy=settings.ytdlp_proxy,
-            warp_proxy=settings.ytdlp_warp_proxy,
-            warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
-            cookies=cookies,
-        )
-    )
+    registry.register(provider or build_ytdlp_provider(settings, cookies))
     return registry
 
 
@@ -151,6 +159,18 @@ async def _read_health_interval(
     async with session_factory() as session:
         row = await SettingsRepository(session).get_by_key("provider_health_check_interval_seconds")
     return int(row.value) if row is not None else _DEFAULT_HEALTH_INTERVAL
+
+
+async def _read_int_setting(
+    session_factory: async_sessionmaker[AsyncSession], key: str, default: int
+) -> int:
+    """Read an int setting, falling back to ``default`` when absent or unparseable."""
+    async with session_factory() as session:
+        row = await SettingsRepository(session).get_by_key(key)
+    try:
+        return int(row.value) if row is not None else default
+    except (TypeError, ValueError):
+        return default
 
 
 async def _read_broadcast_chunk_size(
@@ -241,7 +261,20 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         legacy_master=settings.ytdlp_cookie_legacy_file,
         default_egress_id=DEFAULT_WARP_ID,
     )
-    registry = build_registry(settings, session_factory, redis_clients.cache, cookie_pool)
+    ytdlp_provider = build_ytdlp_provider(settings, cookie_pool)
+    registry = build_registry(
+        settings, session_factory, redis_clients.cache, cookie_pool, ytdlp_provider
+    )
+    # Recovery prober: re-tests EXPIRED cookies on their own egress and restores the
+    # ones YouTube starts accepting again. The provider is its canary runner.
+    cookie_prober = CookieProber(
+        cookie_repo,
+        cookie_store,
+        ytdlp_provider,
+        interval_reader=lambda: _read_int_setting(
+            session_factory, "cookie_recovery_probe_interval", 3600
+        ),
+    )
 
     bot = build_bot(settings)
     file_sender = TelegramFileSender(bot)
@@ -355,6 +388,7 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
         heartbeat_task(heartbeat, worker_ids, settings.worker_heartbeat_interval),
         cleanup.run_forever(),
         broadcast_worker.run_forever(),
+        cookie_prober.run(),
     ]
     for _ in range(settings.worker_count):
         worker = DownloadWorker(

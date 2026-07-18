@@ -45,6 +45,9 @@ OwnerFilter = RoleFilter(UserRole.OWNER)
 #: Panel section code for every cookie callback.
 SECTION = "ck"
 
+#: Joiner for multi-line panel bodies.
+NEWLINE = "\n"
+
 CookieAdminFactory = Callable[[], CookieAdminService]
 
 _MAX_UPLOAD_BYTES = 1024 * 1024
@@ -190,6 +193,12 @@ def _detail_markup(
                     callback_data=signer.pack_panel(SECTION, toggle[1], cookie.id),
                 ),
                 InlineKeyboardButton(
+                    text=translate("cookies.btn_history", locale),
+                    callback_data=signer.pack_panel(SECTION, "hist", cookie.id),
+                ),
+            ],
+            [
+                InlineKeyboardButton(
                     text=translate("cookies.btn_back", locale),
                     callback_data=signer.pack_panel(SECTION, "list"),
                 ),
@@ -270,6 +279,32 @@ async def on_cookie_action(
         await state.set_state(PanelStates.cookie_upload)
         await state.update_data(cookie_id=cookie.id, file_version=cookie.file_version)
         await _reply(callback, translate("cookies.upload.prompt", locale, label=cookie.label))
+    elif parsed.action == "hist":
+        events = await service.history(cookie.id)
+        lines = [translate("cookies.history.title", locale, label=cookie.label), ""]
+        if not events:
+            lines.append(translate("cookies.history.empty", locale))
+        for record in events:
+            when = record.created_at.strftime("%m-%d %H:%M") if record.created_at else "—"
+            status = f" → {record.to_status}" if record.to_status else ""
+            detail = f" · {record.reason[:60]}" if record.reason else ""
+            lines.append(f"<code>{when}</code> {record.event}{status}{detail}")
+        await _edit(
+            callback,
+            NEWLINE.join(lines),
+            InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=translate("cookies.btn_back", locale),
+                            callback_data=callback_signer.pack_panel(
+                                SECTION, "view", cookie.id
+                            ),
+                        )
+                    ]
+                ]
+            ),
+        )
     elif parsed.action == "test":
         await callback.answer(translate("cookies.test.running", locale, label=cookie.label))
         result = await service.test(cookie.id)

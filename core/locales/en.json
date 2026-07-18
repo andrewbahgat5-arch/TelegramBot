@@ -601,5 +601,18 @@
   "cookies.test.failed": "❌ {label} failed: {detail}",
   "cookies.disabled": "⏸ {label} disabled. It will not be used until you enable it again.",
   "cookies.enabled": "▶️ {label} enabled.",
-  "cookies.not_found": "That cookie no longer exists."
+  "cookies.not_found": "That cookie no longer exists.",
+  "panel.settings.field.cookie_selection_strategy": "Cookie Strategy",
+  "panel.settings.field.cookie_max_concurrent_leases": "Cookie Concurrency",
+  "panel.settings.field.cookie_warning_threshold": "Cookie Warn Threshold",
+  "panel.settings.field.cookie_cooldown_threshold": "Cookie Cooldown Threshold",
+  "panel.settings.field.cookie_cooldown_seconds": "Cookie Cooldown (s)",
+  "panel.settings.field.cookie_cooldown_max_seconds": "Cookie Cooldown Max (s)",
+  "panel.settings.field.cookie_max_cooldown_cycles": "Cookie Max Cycles",
+  "panel.settings.field.cookie_lease_ttl_seconds": "Cookie Lease TTL (s)",
+  "panel.settings.field.cookie_allow_affinity_break": "Cookie Affinity Break",
+  "panel.settings.field.cookie_recovery_probe_interval": "Cookie Probe Interval (s)",
+  "cookies.btn_history": "📜 History",
+  "cookies.history.title": "📜 <b>{label}</b> — recent events",
+  "cookies.history.empty": "No events recorded yet."
 }
