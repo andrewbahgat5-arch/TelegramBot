@@ -273,3 +273,35 @@ session; it is included in this commit.
 | `bot/handlers/history.py` | Plain-number rows, no time/source emoji (F3); disable link preview (P10). |
 | `core/locales/{en,ar}.json` | `download.subscribers`, `notification.uploading`, `notification.processing`. |
 | `tests/unit/{test_download_handler,test_download_service,test_download_progress,test_keyboards,test_history_handler,_fakes}.py` | Tests for all of the above. |
+
+---
+
+## 6. Session (2026-07-18) — analysis observability, global error backstop, YouTube cookies disabled
+
+### Log review findings (what triggered this session)
+- `analyze_transient_failure` events carried only the error text — no platform/host — so
+  "which site is failing?" was unanswerable from production logs.
+- Every YouTube run warned 4×: *"The provided YouTube account cookies are no longer valid"*
+  (YouTube rotated the Jul 13 export). Extraction still worked logged-out via bgutil POT +
+  EJS; the dead cookies only added noise and account-flag risk.
+- `i18n_key_missing: platform.generic` (admin panel, generic-platform downloads).
+- No global aiogram error handler: an unexpected handler bug would strand the user on a
+  frozen "Analyzing…" message with no reply.
+
+### Code deployed (commit `1b851fc`, images `bot`/`worker` rebuilt + recreated)
+| File | Change |
+|---|---|
+| `bot/handlers/download.py` | All analysis log events now carry `platform` + `url_host` + 12-char `url_hash` (never the full URL); catch-all guard replies `errors.unexpected` instead of stranding the user. |
+| `bot/handlers/errors.py` (new) | Global errors backstop: logs `update_handling_failed` (traceback + update context), best-effort localized apology (callback alert / message reply). |
+| `bot/main.py` | Errors router installed first. |
+| `core/locales/{en,ar}.json` | + `errors.unexpected`, + `platform.generic`. |
+
+### Server-only change — YouTube cookies DISABLED (2026-07-18)
+- `/opt/telegram-bot/deploy/secrets/cookies.txt` **truncated to empty** (the ytdlp-wrapper's
+  `[ -s ]` check then skips `--cookies` entirely). Backup kept beside it:
+  `cookies.txt.invalid-20260718`.
+- Verified post-deploy: `yt-dlp -F` (worker container, residential proxy) → **0 cookie
+  warnings, 24 DASH formats** for the test video. YouTube runs logged-out; public videos
+  work via bgutil POT + EJS. **Consequence:** age-restricted / login-gated videos fail until
+  a fresh cookie export is uploaded (restore = upload new export to the same path + recreate
+  bot/worker).
