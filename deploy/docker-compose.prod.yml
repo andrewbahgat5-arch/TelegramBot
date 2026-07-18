@@ -149,6 +149,10 @@ services:
       # getFile and does not serve files over HTTP, so the bot must read them from the
       # same volume (read-only) to download admin uploads (cookie files, CSV imports).
       - botapi:/var/lib/telegram-bot-api:ro
+    # The Bot API server writes its files 0750 as uid/gid 101, so mounting the volume is
+    # not enough — the app user (10001) needs that group to traverse and read them.
+    group_add:
+      - "101"
     depends_on:
       postgres:
         condition: service_healthy
@@ -175,6 +179,10 @@ services:
       # getFile and does not serve files over HTTP, so the bot must read them from the
       # same volume (read-only) to download admin uploads (cookie files, CSV imports).
       - botapi:/var/lib/telegram-bot-api:ro
+    # The Bot API server writes its files 0750 as uid/gid 101, so mounting the volume is
+    # not enough — the app user (10001) needs that group to traverse and read them.
+    group_add:
+      - "101"
     depends_on:
       postgres:
         condition: service_healthy

@@ -452,3 +452,36 @@ not a real incident.
 
 **Outstanding (Phase 1 follow-up):** `CookiePolicy()` still uses its typed defaults; wiring
 the six knobs to `SettingsService` (admin-editable, per Owner point 6) is not yet done.
+
+### Fix (2026-07-18) — admin file uploads were broken by the self-hosted Bot API
+
+**Symptom:** the Owner's "Add cookie" upload replied *"Something went wrong on our side"*
+(the global error backstop, working as intended). The traceback showed
+`aiohttp ClientResponseError: 404` on
+`http://bot-api:8081/file/bot<token>/documents/file_0.txt`.
+
+**Root cause — not the cookie code.** Our self-hosted Bot API runs in `--local` mode,
+where `getFile` returns an **absolute path on the server's filesystem** and the file is
+never served over HTTP. aiogram was fetching a URL that cannot exist. This is a latent
+bug that predates the cookie pool: the Sprint 13.6 subscriber-CSV import calls
+`bot.download()` the same way and would have failed identically.
+
+**Fix — three parts, each necessary:**
+1. `TelegramAPIServer.from_base(..., is_local=True)` so aiogram reads the path from disk.
+   Verified `is_local` is consulted in exactly ONE place in aiogram
+   (`Bot.download_file`), so uploads — the worker's delivery path — are unaffected.
+2. Mount `botapi:/var/lib/telegram-bot-api:ro` into bot + worker.
+3. **`group_add: ["101"]`** — the mount alone was NOT enough: the Bot API writes files
+   `0750` owned by uid/gid **101**, and the app runs as `appuser` (10001), so reads were
+   denied. Caught by testing the actual read rather than assuming the mount sufficed.
+
+**Verified live:** `cat` of the leftover upload as `appuser` → `READ-OK`; reading it
+through aiogram's own `wrap_local_file.to_local()` returned 3063 bytes, and the validator
+accepted it (23 cookies, logged in). So the Owner's original upload was valid all along.
+
+### Same session — cookie policy is now admin-editable
+Migration `2026071802` seeds nine `cookie_*` settings; `CookiePolicyProvider` reads them
+(30 s cache) and `CookiePoolService` refreshes per acquire/report. Invalid input cannot
+take the pool down: unknown strategy → `lru`, non-numeric → ignored, `0` lease cap →
+clamped to 1, settings outage → last good policy. Verified in production: all nine rows
+seeded and the provider returns them.
