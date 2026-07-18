@@ -337,7 +337,8 @@ If you're working on… → read this doc **and** go to this code.
 | Overall design / a locked decision | `MASTER_PLAN.md` | — |
 | Current status / what's done | `PROJECT_PROGRESS.md` | — |
 | Download pipeline (analyze → download → deliver) | `PERFORMANCE_REPORT.md`, `deploy/LARGE_DOWNLOAD_STRESS_TEST.md` | `services/download_service.py`, `services/url_analyzer.py`, `infrastructure/downloader/` (`registry.py`, `routing.py`, `providers/ytdlp_provider.py`), `workers/download_worker.py` |
-| Proxy / WARP / per-platform egress | `deploy/VPS_DEPLOYMENT_CHANGES.md` | `infrastructure/downloader/routing.py`, `deploy/yt-dlp.conf` |
+| Proxy / WARP / per-platform egress | `deploy/VPS_DEPLOYMENT_CHANGES.md` | `infrastructure/downloader/routing.py` — `plan_egress`: YouTube **metadata always over WARP**; **downloads split by size** (≤ `YTDLP_WARP_MAX_DOWNLOAD_MB`, default 500 → WARP; above → residential proxy), each with the other as fallback. `deploy/yt-dlp.conf` |
+| YouTube cookies | `deploy/VPS_DEPLOYMENT_CHANGES.md` | `deploy/ytdlp-wrapper.sh` — **persistent, flock-protected cookie jar**: refreshed session cookies are **merged** back into the master (rotated values win, untouched auth cookies are never lost). Master lives only at `deploy/secrets/cookies.txt` on the server (git-ignored) |
 | Queue / jobs | `MASTER_PLAN.md` | `services/queue_service.py`, `services/job_service.py`, `infrastructure/redis/` |
 | Advertisements | `ADS_SCHEDULING.md`, `ADS_MANUAL_TEST.md` | `services/ad_service.py`, `services/caption_ad_mixer.py`, `bot/handlers/ads.py` |
 | Broadcast | `SPRINT_14_ADMIN_V2_PLAN.md`, `DESIGN_9.6_unified_audience_wizard.md` | `services/broadcast_service.py`, `services/audience_service.py`, `workers/broadcast_worker.py` |

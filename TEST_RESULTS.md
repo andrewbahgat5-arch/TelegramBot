@@ -67,6 +67,28 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (4) — Unit + in-container — Persistent cookie jar, WARP metadata, size-split downloads
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit; worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) + live production (`tgbot_bot` / `tgbot_worker`) |
+| Suite | unit (full) + a 9-case wrapper self-test executed inside the worker container |
+| Triggered by | Owner: fix cookie management (persist rotated cookies with locking), route YouTube metadata over WARP, split downloads by size |
+| Total tests | 971 | Passed | 970 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| New tests | `test_routing.py` rewritten (9: metadata=WARP-only, unprotected=DIRECT, small→WARP, large→PROXY, inclusive 500 MB boundary, unknown size, threshold override, default value); `test_ytdlp_provider.py` (+5: metadata never leaves WARP, small→WARP-native, large→proxy+aria2c, both fallback directions, configurable threshold); `.env.example` gained the 3 new keys to keep the locked env-parity test green |
+| Wrapper self-test (in-container, 9 cases) | persistence on success; persistence on rc≠0; exit-code passthrough; truncated jar rejected; no temp-jar leaks; **10 concurrent runs without corruption**; merge keeps auth cookies + applies rotation + adds new; master never shrinks; empty master degrades to a plain run — all PASS |
+| Notes | `deploy/ytdlp-wrapper.sh` rewritten: shared flock to snapshot, no lock during the run, exclusive flock for an in-place write-back (bind-mounted file cannot be renamed over), optimistic-concurrency guard. **A first implementation replaced the master with yt-dlp's jar and was measured in production to destroy SID/HSID/SSID/APISID/SAPISID/LOGIN_INFO/`__Secure-1P*`; it was changed to MERGE before final deploy** and re-verified: 25 → 27 cookies, checksum changed, every auth cookie intact. Production checks: routing table (metadata=`['warp']`, 20 MB/500 MB=`['warp','proxy']`, 501 MB/900 MB=`['proxy','warp']`, tiktok=`['direct']`); all three test videos extract via the real provider in both containers (27/11/27 formats), including the Owner's failing link. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+**Method note**
+- Two of my own intermediate diagnostics were invalid and were re-run: `$YTDLP_WARP_PROXY` is not set inside the containers (the app uses its config default), so shell tests passing that variable silently ran DIRECT; and one inline-Python format count was mis-quoted and reported 0 for every video. Egress results in this entry come from runs using the literal `socks5://warp-lb:1080`.
+
+---
+
 ### 2026-07-18 (2) — Unit — Bot-check classification + error_logs write path + burst alerts
 
 | Field | Value |

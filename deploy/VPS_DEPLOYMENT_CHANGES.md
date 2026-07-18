@@ -323,3 +323,50 @@ session; it is included in this commit.
     `/v1/admin/errors` or SQL.
   - ≥5 failed analyses within 10 min fire ONE CRITICAL `analyze_failure_burst` through the
     existing CRITICAL→Telegram alert pipeline (`TELEGRAM_ALERTS_CHAT_ID` is set in prod).
+
+### Session (2026-07-18, later) — persistent cookie jar + WARP-first egress
+> Supersedes the routing decisions in follow-up #2 and its CORRECTION above.
+
+**1. Cookie management rewritten (`deploy/ytdlp-wrapper.sh`).** The old wrapper gave each
+run a private copy and deleted it, discarding the session cookies YouTube rotates on almost
+every request — which is why every fresh export died within minutes. Now:
+- shared `flock` to snapshot the master → private jar (brief);
+- **no lock during the run** (downloads take minutes and must not serialise);
+- exclusive `flock` for the write-back, rewritten **in place** (a bind-mounted file cannot
+  be renamed over, so the lock is what stops a reader seeing a half-written file);
+- optimistic concurrency: skip the write-back if another run already refreshed the master;
+- write-back gated on jar **validity, not exit code** (cookies rotate during runs that end
+  in a wall, and those are exactly the ones we must not discard).
+
+**⚠️ Important correction found during verification:** the first version *replaced* the
+master with yt-dlp's jar. In production that immediately destroyed `SID`, `HSID`, `SSID`,
+`APISID`, `SAPISID`, `LOGIN_INFO` and the whole `__Secure-1P*` set (24 → 12 cookies),
+because a jar only contains what that run happened to keep. It now **merges**: rotated
+values win, new cookies are added, untouched cookies are preserved, and the write is
+rejected if the merged file would have fewer cookies than the master. Re-verified live:
+25 → 27 cookies, checksum changed, **every auth cookie intact**.
+
+**2 & 3. Egress policy (`routing.py`, Owner's instruction).**
+| Traffic | Egress |
+|---|---|
+| YouTube **metadata** | **WARP only** (no proxy, no direct) |
+| YouTube download **≤ 500 MB** | WARP (proxy as fallback) |
+| YouTube download **> 500 MB** | residential proxy (WARP as fallback) |
+| Everything else | DIRECT |
+
+Threshold = `YTDLP_WARP_MAX_DOWNLOAD_MB` (default 500) → `core.config` → `YtdlpProvider` →
+`plan_egress`, so retuning needs no code change. Verified in the running image.
+
+**Measured egress state (2026-07-18, literal `socks5://warp-lb:1080`):** WARP extracts all
+tested videos (37/31/11 formats); the residential proxy — now `82.23.83.239`, already
+rotated by the Owner — and DIRECT both still return 0 formats for the same two videos, so
+the wall follows the *route*, not just one bad IP. This is what makes WARP-for-metadata the
+right call.
+
+**Note on large walled videos:** a > 500 MB download tries the proxy first and, if that
+route is walled for the video, falls back to WARP — correct, but it pays one wasted attempt.
+Lower `YTDLP_WARP_MAX_DOWNLOAD_MB` if that becomes noticeable.
+
+**Repo hygiene:** `.gitignore` now covers `deploy/secrets/` and `scratch_*.py`. A
+`git add -A` had swept the live cookie file and a scratch script containing a plaintext
+proxy password into a local commit; both were removed before any push.
