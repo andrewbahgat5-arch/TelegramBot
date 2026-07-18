@@ -410,3 +410,45 @@ both containers, and a real download produced 1276×718 h264 + aac. YouTube unch
 **Known cosmetic issue (not fixed):** X reports an inflated `filesize_approx` — the chooser
 shows ~10.3 MB for a file that is really 4.0 MB. Delivered file is smaller than advertised,
 so it is harmless; fixing it would need a risky heuristic about which sizes to trust.
+
+### Session (2026-07-18, evening #2) — Cookie pool Phase 1 deployed
+
+First deploy that touches the download hot path on every YouTube request.
+
+**Procedure used (note the new first step):**
+1. `sh deploy/capture-logs.sh` — archived bot/worker/api logs before anything else.
+2. `mkdir -p deploy/secrets/cookies.d && chown 10001:10001 && chmod 700` — the pool
+   directory, mounted into bot + worker by compose. **Git-ignored; server-only.**
+3. Uploaded 30 changed files (the uploader now `mkdir -p`s parent directories —
+   `infrastructure/cookies/` was a brand-new package and the first attempt failed on it).
+4. Built images, then ran the migration **from the new image** so the migration file was
+   present: `docker compose run --rm --no-deps --entrypoint "" bot alembic upgrade head`.
+   `alembic_version` 2026070906 → **2026071801**.
+5. Recreated bot + worker.
+
+**Verified live (not inferred) — every claim below came from a command against production:**
+
+| Check | Result |
+|---|---|
+| Bootstrap import | legacy `cookies.txt` → **yt-01**, 29 cookies, pinned `warp-1`, file `0600`, audit row `cookie_imported` |
+| Lease → report → release | works; `cookie_selected` logged with label, egress and strategy |
+| **Concurrency cap** | a second lease returns `None` while one is held (`max_concurrent_leases=1`) |
+| Real extraction via the provider | leases yt-01 and returns 27 formats |
+| Canary (upload + "Test now") | `37 formats via warp-1` |
+| **Route failure ≠ cookie failure** | bot-check wall moved `other_failures 0→1`; `status` stayed `healthy`, `auth_failures` stayed `0` |
+| Notification | renders in en **and** ar with a signed Replace button (22 B, verifies; tampered callback rejected). Composition verified with a capturing sender so no admin was messaged |
+| Health | 0 error/critical log lines post-deploy; all 13 containers up |
+
+**Behaviour for users is unchanged** — one cookie, same file, now leased and health-tracked.
+
+**Rollback:** the pool degrades to anonymous by design (measured: most YouTube videos
+extract fine without cookies), so a misbehaving pool costs logged-in content, not the
+service. A full revert is `git checkout 16afde3 -- <files>` + rebuild; the migration is
+additive and safe to leave in place.
+
+**Known state after verification:** yt-01 carries `uses=4, success=2, other_failures=1`.
+The single "other failure" is the synthetic wall stderr fed in during the guarantee test,
+not a real incident.
+
+**Outstanding (Phase 1 follow-up):** `CookiePolicy()` still uses its typed defaults; wiring
+the six knobs to `SettingsService` (admin-editable, per Owner point 6) is not yet done.

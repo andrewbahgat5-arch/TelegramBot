@@ -67,6 +67,26 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (6) — Unit + production — Cookie pool Phase 1 (DESIGN_COOKIE_POOL.md)
+
+| Field | Value |
+|---|---|
+| Git SHA | `aae8769` (+ this docs commit); worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) + live production (`tgbot_bot` / `tgbot_worker`) |
+| Suite | unit (full) + end-to-end pool verification inside the live containers |
+| Triggered by | Owner-approved Phase 1 of the cookie pool design |
+| Total tests | 1059 | Passed | 1058 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| New tests | 78 across `test_cookie_classifier.py` (33), `test_cookie_pool_service.py` (23), `test_cookie_admin_service.py` (13), `test_cookie_validator.py` (9); routing/provider tests extended for the `EgressId` model |
+| Migration | `2026071801` applied to production; `alembic_version` 2026070906 → 2026071801; `youtube_cookies` + `youtube_cookie_events` created |
+| Production verification | Bootstrap imported the legacy `cookies.txt` as **yt-01** (29 cookies, pinned `warp-1`, file 0600, audit event `cookie_imported`). Lease → report → release works. **Concurrency cap proven**: a second lease returns None while one is held (`max_concurrent_leases=1`). Real extraction through the provider leases the cookie and returns 27 formats. Canary returns "37 formats via warp-1". **The central guarantee proven live**: a bot-check wall moved `other_failures 0→1` while `status` stayed `healthy` and `auth_failures` stayed `0`. Notification renders in en + ar with a signed Replace button (22 B, verifies; tampered callback rejected). 0 error/critical log lines post-deploy. |
+| Notes | Nothing behaves differently for users yet — one cookie, same file, now leased and health-tracked. Verification left honest counters on yt-01 (`uses=4, success=2, other_failures=1`); the single "other failure" is the synthetic wall stderr fed in during step 6, not a real incident. `CookiePolicy()` still uses its typed defaults — wiring the six knobs to `SettingsService` is the one Phase-1 follow-up outstanding. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+---
+
 ### 2026-07-18 (5) — Unit + production — X/Twitter format bug, honest permanent errors, log persistence
 
 | Field | Value |
