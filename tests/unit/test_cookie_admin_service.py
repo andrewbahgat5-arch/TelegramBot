@@ -239,3 +239,20 @@ def test_snapshot_success_rate_is_none_before_first_use() -> None:
         datetime.UTC
     ))
     assert used.success_rate == 0.9
+
+
+async def test_a_failed_row_insert_removes_the_orphan_file() -> None:
+    """REGRESSION: the first real upload wrote yt-02.v1.txt and then hit a FK violation,
+    leaving a file with no row — invisible to the pool and never cleaned up."""
+
+    class _FailingRepo(_FakeRepo):
+        async def create(self, **_kw: object) -> CookieSnapshot:
+            raise RuntimeError("FK violation")
+
+    repo, store = _FailingRepo(), _FakeStore()
+    service = _service(repo, store)
+    try:
+        await service.add(_valid_export())
+    except RuntimeError:
+        pass
+    assert ("yt-01", 1) in store.deleted  # the file it just wrote was removed

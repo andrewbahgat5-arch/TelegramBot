@@ -31,6 +31,7 @@ from bot.panel.states import PanelStates
 from core.i18n import Translator
 from core.logging import get_logger
 from domain.entities.cookie import CookieSnapshot
+from domain.entities.user import UserSnapshot
 from domain.enums import UserRole
 from domain.enums.cookie_health import SELECTABLE_HEALTH, CookieHealth
 from services.cookie_admin_service import CookieAdminService
@@ -219,6 +220,7 @@ async def open_pool(
 async def on_cookie_action(
     callback: CallbackQuery,
     state: FSMContext,
+    user: UserSnapshot,
     cookie_admin_factory: CookieAdminFactory,
     callback_signer: CallbackSigner,
     translate: Translator,
@@ -279,7 +281,7 @@ async def on_cookie_action(
     elif parsed.action in {"dis", "ena"}:
         enabled = parsed.action == "ena"
         updated = await service.set_enabled(
-            cookie.id, enabled=enabled, actor_user_id=_actor_id(callback)
+            cookie.id, enabled=enabled, actor_user_id=user.id
         )
         await _reply(
             callback,
@@ -303,6 +305,7 @@ async def on_cookie_upload(
     message: Message,
     state: FSMContext,
     bot: Bot,
+    user: UserSnapshot,
     cookie_admin_factory: CookieAdminFactory,
     translate: Translator,
     locale: str,
@@ -333,7 +336,9 @@ async def on_cookie_upload(
 
     notice = await message.answer(translate("cookies.upload.testing", locale))
     service = cookie_admin_factory()
-    actor = message.from_user.id if message.from_user else None
+    # The INTERNAL users.id — youtube_cookies.created_by is a FK to it. Passing the
+    # Telegram id here produced a ForeignKeyViolation on the very first real upload.
+    actor = user.id
 
     if cookie_id is None:
         result = await service.add(content, actor_user_id=actor)
@@ -370,10 +375,6 @@ async def on_cookie_upload(
 
 
 # -------------------------------------------------------------------- helpers ---
-
-
-def _actor_id(callback: CallbackQuery) -> int | None:
-    return callback.from_user.id if callback.from_user else None
 
 
 async def _reply(callback: CallbackQuery, text: str) -> None:

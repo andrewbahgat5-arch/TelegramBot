@@ -116,9 +116,17 @@ class CookieAdminService:
             return IngestResult(False, "error", f"label {chosen} already exists")
 
         digest = await self._store.write(chosen, 1, content)
-        cookie = await self._repo.create(
-            label=chosen, file_version=1, content_hash=digest, created_by=actor_user_id
-        )
+        try:
+            cookie = await self._repo.create(
+                label=chosen, file_version=1, content_hash=digest, created_by=actor_user_id
+            )
+        except Exception:
+            # The row is the source of truth; a file with no row is invisible to the
+            # pool and would linger forever. (A real FK violation on the first live
+            # upload left exactly such an orphan.)
+            await self._store.delete(chosen, 1)
+            _log.warning("cookie_add_rolled_back", cookie_label=chosen)
+            raise
         await self._repo.add_event(
             cookie.id,
             event="cookie_added",
