@@ -305,3 +305,21 @@ session; it is included in this commit.
   work via bgutil POT + EJS. **Consequence:** age-restricted / login-gated videos fail until
   a fresh cookie export is uploaded (restore = upload new export to the same path + recreate
   bot/worker).
+
+### Same-day follow-up (commit `01fb033`) — root cause of "same error" + fixes deployed
+- **Root cause found:** YouTube serves a per-video *"Sign in to confirm you're not a bot"*
+  wall to our (reputation-degraded) residential-proxy egress IP. Verified live: the same IP
+  passes for some videos (dQw4w9WgXcQ → 27 formats) and is walled for others
+  (2oPfC_Pwfu8, jNQXAC9IVRw, CtE81HqupwU); nightly yt-dlp (2026.7.14.dev0) and the
+  tv/web/web_safari clients and the WARP pool ALL fail; the wall is embedded in the initial
+  webpage response, so PO tokens cannot bypass it. **Real cure = rotate the proxy IP with
+  the provider, or restore fresh cookies.**
+- **Deployed mitigations** (bot+worker rebuilt/recreated 07:48 UTC; verified in-container:
+  walled video → `VideoUnavailableError` + `ytdlp_bot_check_wall` log; good video → OK):
+  - Extraction keeps stderr; the wall is classified → users now get the honest localized
+    "this video needs extra verification — try a different one" instead of "busy, retry".
+  - Every analysis failure is persisted to the `error_logs` table (user, error_type,
+    correlation id, platform/host/hash) — first writer to that table; browse via
+    `/v1/admin/errors` or SQL.
+  - ≥5 failed analyses within 10 min fire ONE CRITICAL `analyze_failure_burst` through the
+    existing CRITICAL→Telegram alert pipeline (`TELEGRAM_ALERTS_CHAT_ID` is set in prod).
