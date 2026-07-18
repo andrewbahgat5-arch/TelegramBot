@@ -199,16 +199,22 @@ class YtdlpProvider:
         platform: str,
         size_bytes: int | None,
         run: Callable[[Egress, str], Awaitable[_T]],
+        *,
+        metadata_only: bool = False,
     ) -> _T:
         """Try each egress in the platform's policy order until one succeeds (Section: routing).
 
         A configured-but-transiently-failing egress falls over to the next; an egress with
         no proxy configured (e.g. WARP address empty) is skipped. The last transient error
         is surfaced if every egress fails.
+
+        ``metadata_only`` narrows the plan for protected platforms to the residential
+        proxy alone (see :func:`plan_egress`). The DIRECT last resort below still applies
+        when *nothing* is configured — that is the dev/test path, never production.
         """
         last_exc: Exception | None = None
         attempted = False
-        for egress in plan_egress(platform, size_bytes=size_bytes):
+        for egress in plan_egress(platform, size_bytes=size_bytes, metadata_only=metadata_only):
             proxy = self._proxy_for(egress)
             if egress is not Egress.DIRECT and not proxy:
                 continue  # this upstream isn't configured — try the next
@@ -245,7 +251,7 @@ class YtdlpProvider:
                 [*base, "--proxy", proxy, url], timeout_s=self._extract_timeout
             )
 
-        stdout, stderr = await self._run_egress_plan(platform, None, run)
+        stdout, stderr = await self._run_egress_plan(platform, None, run, metadata_only=True)
         try:
             info: dict[str, Any] = orjson.loads(stdout)
         except orjson.JSONDecodeError as exc:

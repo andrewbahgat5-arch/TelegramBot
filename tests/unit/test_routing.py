@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from infrastructure.downloader.routing import Egress, PROTECTED_PLATFORMS, plan_egress
+from infrastructure.downloader.routing import PROTECTED_PLATFORMS, Egress, plan_egress
 
 
 def test_protected_platform_prefers_proxy_then_warp() -> None:
     assert "youtube" in PROTECTED_PLATFORMS
     assert plan_egress("youtube") == (Egress.PROXY, Egress.WARP)
+
+
+def test_protected_platform_metadata_is_proxy_only() -> None:
+    # Metadata (extraction) must never fall back to WARP or DIRECT: the account
+    # cookies ride along with it and the session stays pinned to one egress IP.
+    assert plan_egress("youtube", metadata_only=True) == (Egress.PROXY,)
+
+
+def test_metadata_only_does_not_change_unprotected_platforms() -> None:
+    assert plan_egress("tiktok", metadata_only=True) == (Egress.DIRECT,)
 
 
 def test_unprotected_platforms_go_direct() -> None:

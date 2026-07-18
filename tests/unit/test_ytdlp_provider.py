@@ -238,6 +238,39 @@ async def test_extract_info_bot_check_wall_is_video_unavailable(
         await YtdlpProvider().extract_info(_URL)
 
 
+async def test_youtube_extraction_never_falls_back_off_the_proxy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Metadata for a protected platform must be attempted through the residential
+    # proxy ONLY — a failure must not retry over WARP or DIRECT (the account cookies
+    # ride along, and the session must stay pinned to one egress IP).
+    seen: list[str] = []
+
+    async def fake_exec(*args: Any, **_kw: Any) -> _FakeProc:
+        seen.append(args[args.index("--proxy") + 1])
+        return _FakeProc(b"", b"ERROR: HTTP Error 503", 1)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+
+    provider = YtdlpProvider(proxy="http://residential:1", warp_proxy="socks5://warp:1080")
+    with pytest.raises(ProviderRetryElsewhere):
+        await provider.extract_info(_URL)
+    assert set(seen) == {"http://residential:1"}  # never the WARP proxy, never ""
+
+
+async def test_youtube_download_still_falls_back_to_warp(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The narrowing above is metadata-only: downloads keep the WARP fallback, since a
+    # stalled media transfer genuinely benefits from a second route.
+    from infrastructure.downloader.routing import Egress, plan_egress
+
+    assert plan_egress("youtube") == (Egress.PROXY, Egress.WARP)
+
+
 async def test_extract_info_no_formats_without_bot_check_stays_transient(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

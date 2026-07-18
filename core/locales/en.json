@@ -10,7 +10,7 @@
   "errors.file_too_large": "The file is too large to send.",
   "errors.rate_limit_exceeded": "Too many requests. Please slow down.",
   "errors.unexpected": "Something went wrong on our side. Please try again.",
-  "errors.video_unavailable": "⚠️ This video can't be fetched right now — the site is asking us for extra verification on it. Please try a different video, or try this one again later.",
+  "errors.video_unavailable": "⚠️ This video isn't available for download right now. Please try another link, or try this one again later.",
 
   "user.banned": "🚫 You are banned from using this bot.",
   "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",

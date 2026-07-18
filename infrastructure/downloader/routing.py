@@ -41,8 +41,24 @@ class Egress(StrEnum):
 PROTECTED_PLATFORMS: frozenset[str] = frozenset({"youtube"})
 
 
-def plan_egress(platform: str, *, size_bytes: int | None = None) -> tuple[Egress, ...]:
+def plan_egress(
+    platform: str, *, size_bytes: int | None = None, metadata_only: bool = False
+) -> tuple[Egress, ...]:
     """Ordered egresses to try for ``platform`` — primary first, then fallbacks.
+
+    ``metadata_only`` marks the extraction (metadata) step. A protected platform's
+    metadata goes through the residential proxy **and nothing else** — no WARP, no
+    DIRECT. Two reasons:
+
+    * WARP exits from shared Cloudflare ranges that YouTube challenges far more often
+      than a residential IP, so a WARP retry after a proxy failure mostly just burns
+      seconds and returns the same block.
+    * Account cookies are attached to extraction. Presenting one account's session
+      from a second, different-looking IP is exactly the pattern that gets a Google
+      session invalidated — so the session must stay pinned to one egress.
+
+    Downloads keep the WARP fallback: media fetches are the expensive, resumable part
+    and benefit from a second route when the proxy stalls mid-transfer.
 
     ``size_bytes`` (the download's expected size, or ``None`` at extraction time) is
     accepted now and currently ignored, so a future size-based split lives here only:
@@ -53,6 +69,8 @@ def plan_egress(platform: str, *, size_bytes: int | None = None) -> tuple[Egress
             return (Egress.PROXY, Egress.WARP)       # large ⇒ proxy first
     """
     if platform in PROTECTED_PLATFORMS:
+        if metadata_only:
+            return (Egress.PROXY,)
         # Residential proxy first (fast + clean); WARP as the resilient fallback.
         return (Egress.PROXY, Egress.WARP)
     return (Egress.DIRECT,)
