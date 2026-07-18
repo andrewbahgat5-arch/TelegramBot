@@ -141,6 +141,10 @@ services:
       - downloads:/tmp/downloads
       - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
       - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
+      # Cookie pool (DESIGN_COOKIE_POOL.md): versioned per-cookie files. Writable —
+      # the wrapper persists rotated session cookies and the admin replace flow
+      # writes new versions here. Never committed (deploy/secrets is git-ignored).
+      - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,6 +163,10 @@ services:
     volumes:
       - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
       - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
+      # Cookie pool (DESIGN_COOKIE_POOL.md): versioned per-cookie files. Writable —
+      # the wrapper persists rotated session cookies and the admin replace flow
+      # writes new versions here. Never committed (deploy/secrets is git-ignored).
+      - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
     depends_on:
       postgres:
         condition: service_healthy

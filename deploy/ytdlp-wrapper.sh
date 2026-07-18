@@ -36,10 +36,15 @@
 # Degrades safely: no master file, no mktemp, no flock, or an unwritable master ->
 # fall back to a plain run / skip the write-back. yt-dlp is never blocked.
 
-MASTER=/etc/yt-dlp/cookies.txt
-LOCK=/tmp/ytdlp-cookies.lock
+# WHICH cookie file to use is decided in Python (the cookie pool picks one and exports
+# YTDLP_COOKIE_FILE); HOW to use it safely is decided here. Falling back to the single
+# master keeps every pre-pool deployment working unchanged.
+MASTER="${YTDLP_COOKIE_FILE:-/etc/yt-dlp/cookies.txt}"
 REAL=/usr/local/bin/yt-dlp.real
 MIN_COOKIE_LINES=5
+
+# One lock per cookie file, so two different cookies never serialise against each other.
+LOCK="/tmp/ytdlp-cookies.$(printf %s "$MASTER" | tr -c 'A-Za-z0-9' '_').lock"
 
 # No cookies configured -> nothing to manage.
 [ -s "$MASTER" ] || exec "$REAL" "$@"

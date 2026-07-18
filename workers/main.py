@@ -26,6 +26,7 @@ from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
+from infrastructure.cookies import CookieRepositoryAdapter, LocalCookieStore
 from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.maintenance import DbMaintenance
@@ -49,6 +50,7 @@ from infrastructure.downloader.ffmpeg_client import FFmpegClient
 from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
 from infrastructure.downloader.providers.ytdlp_provider import YtdlpProvider
 from infrastructure.downloader.registry import DownloaderRegistry
+from infrastructure.downloader.routing import DEFAULT_WARP_ID
 from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.heartbeat import WorkerHeartbeat
@@ -62,6 +64,8 @@ from services.ad_service import AdService
 from services.audience_service import AudienceService
 from services.cache_service import CacheService
 from services.caption_ad_mixer import CaptionAdMixer
+from services.cookie_bootstrap import bootstrap_cookie_pool
+from services.cookie_pool_service import CookiePolicy, CookiePoolService, LeaseBackend
 from services.download_service import DownloadService
 from services.notification_service import NotificationService
 from services.queue_service import QueueService
@@ -81,6 +85,7 @@ def build_registry(
     settings: Settings,
     session_factory: async_sessionmaker[AsyncSession],
     redis_cache: object,
+    cookies: CookiePoolService | None = None,
 ) -> DownloaderRegistry:
     """Build the registry with every V1 provider registered (Section 12.6.5)."""
     registry = DownloaderRegistry(
@@ -93,9 +98,27 @@ def build_registry(
             proxy=settings.ytdlp_proxy,
             warp_proxy=settings.ytdlp_warp_proxy,
             warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
+            cookies=cookies,
         )
     )
     return registry
+
+
+def build_cookie_pool(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+    redis_client: object,
+) -> tuple[CookiePoolService, CookieRepositoryAdapter, LocalCookieStore]:
+    """The YouTube cookie pool (DESIGN_COOKIE_POOL.md), shared by every worker loop."""
+    store = LocalCookieStore(settings.ytdlp_cookie_pool_dir)
+    repo = CookieRepositoryAdapter(session_factory)
+    pool = CookiePoolService(
+        repo,
+        store,
+        LeaseBackend(RedisLock(redis_client)),  # type: ignore[arg-type]
+        CookiePolicy(),
+    )
+    return pool, repo, store
 
 
 async def provider_health_check_task(registry: DownloaderRegistry, interval_seconds: int) -> None:
@@ -207,7 +230,16 @@ async def main() -> None:  # pragma: no cover - process entry; wiring covered by
     redis_cache = RedisCache(redis_clients.cache)
     cache_service = CacheService(redis_cache, RedisLock(redis_clients.cache), settings)
     queue_service = QueueService(RedisQueue(redis_clients.queue))
-    registry = build_registry(settings, session_factory, redis_clients.cache)
+    cookie_pool, cookie_repo, cookie_store = build_cookie_pool(
+        settings, session_factory, redis_clients.cache
+    )
+    await bootstrap_cookie_pool(
+        cookie_repo,
+        cookie_store,
+        legacy_master=settings.ytdlp_cookie_legacy_file,
+        default_egress_id=DEFAULT_WARP_ID,
+    )
+    registry = build_registry(settings, session_factory, redis_clients.cache, cookie_pool)
 
     bot = build_bot(settings)
     file_sender = TelegramFileSender(bot)

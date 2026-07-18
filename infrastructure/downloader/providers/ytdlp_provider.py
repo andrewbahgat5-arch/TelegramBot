@@ -13,8 +13,10 @@ format. The provider-agnostic dedup/sort lives in ``services/format_extraction.p
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
@@ -32,6 +34,7 @@ from domain.exceptions import (
     URLNotSupportedError,
     VideoUnavailableError,
 )
+from domain.protocols.cookies import CookieProviderProtocol
 from domain.protocols.downloader import (
     Capability,
     DownloadProgress,
@@ -47,6 +50,28 @@ from infrastructure.downloader.routing import (
 )
 
 _T = TypeVar("_T")
+
+
+@dataclass
+class _CookieRun:
+    """Mutable handle for one leased run: the env to pass, and the outcome to report."""
+
+    lease: Any | None
+    returncode: int = 0
+    stderr: str = ""
+
+    @property
+    def env(self) -> dict[str, str] | None:
+        """Subprocess environment, or None to inherit unchanged (no cookie leased).
+
+        ``YTDLP_COOKIE_FILE`` is what ``deploy/ytdlp-wrapper.sh`` reads to pick the jar,
+        so selection stays in Python while the wrapper keeps owning the safe file
+        mechanics (private copy, flock, merge write-back).
+        """
+        if self.lease is None:
+            return None
+        return {**os.environ, "YTDLP_COOKIE_FILE": str(self.lease.path)}
+
 
 _log = get_logger("infrastructure.downloader.providers.ytdlp")
 
@@ -190,6 +215,7 @@ class YtdlpProvider:
         warp_proxy: str = "",
         warp_max_download_bytes: int = WARP_MAX_DOWNLOAD_BYTES,
         egress_registry: EgressRegistry | None = None,
+        cookies: CookieProviderProtocol | None = None,
     ) -> None:
         self.name = "ytdlp"
         self.supported_platforms = {"*"}
@@ -208,6 +234,40 @@ class YtdlpProvider:
         self._egress = egress_registry or EgressRegistry.from_addresses(
             proxy=proxy, warp_proxy=warp_proxy
         )
+        # The cookie pool. None ⇒ no pool wired (dev/tests, or a deployment that has not
+        # imported any cookies): every run then goes out anonymously, which is exactly
+        # the pre-pool behaviour.
+        self._cookies = cookies
+
+    @contextlib.asynccontextmanager
+    async def _cookie_session(
+        self, platform: str, endpoint: EgressEndpoint
+    ) -> AsyncIterator[_CookieRun]:
+        """Lease a cookie for this endpoint, then report how the run went.
+
+        Yields a small handle carrying the subprocess ``env`` (with
+        ``YTDLP_COOKIE_FILE`` pointing at the leased jar, which the wrapper picks up).
+        The lease is always released, and a raised error is reported as a failed run so
+        the pool sees the outcome even when the caller re-raises.
+        """
+        lease = None
+        if self._cookies is not None:
+            with contextlib.suppress(Exception):  # the pool must never block a download
+                lease = await self._cookies.acquire(platform=platform, egress_id=endpoint.id)
+        handle = _CookieRun(lease)
+        try:
+            yield handle
+        except Exception as exc:
+            handle.returncode = 1
+            handle.stderr = str(getattr(exc, "provider_stderr", "") or str(exc))
+            raise
+        finally:
+            if lease is not None and self._cookies is not None:
+                with contextlib.suppress(Exception):
+                    await self._cookies.report_run(
+                        lease, returncode=handle.returncode, stderr=handle.stderr
+                    )
+                    await self._cookies.release(lease)
 
     async def _run_egress_plan(
         self,
@@ -268,9 +328,16 @@ class YtdlpProvider:
 
         async def run(endpoint: EgressEndpoint) -> tuple[bytes, bytes]:
             # ``--proxy ""`` forces DIRECT (overrides any ambient config); a value routes it.
-            return await self._run_with_retries(
-                [*base, "--proxy", endpoint.address, url], timeout_s=self._extract_timeout
-            )
+            async with self._cookie_session(platform, endpoint) as session:
+                out, err = await self._run_with_retries(
+                    [*base, "--proxy", endpoint.address, url],
+                    timeout_s=self._extract_timeout,
+                    env=session.env,
+                )
+                # A clean exit can still carry the bot-check wall; the classifier reads
+                # stderr to decide whether the cookie earned any credit.
+                session.stderr = err.decode(errors="replace")
+                return out, err
 
         stdout, stderr = await self._run_egress_plan(platform, None, run, metadata_only=True)
         try:
@@ -295,12 +362,14 @@ class YtdlpProvider:
                 )
             raise
 
-    async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> tuple[bytes, bytes]:
+    async def _run_with_retries(
+        self, args: list[str], *, timeout_s: float, env: dict[str, str] | None = None
+    ) -> tuple[bytes, bytes]:
         """Run yt-dlp, retrying only *transient* failures a few times (#12)."""
         attempt = 0
         while True:
             try:
-                return await self._run(args, timeout_s=timeout_s)
+                return await self._run(args, timeout_s=timeout_s, env=env)
             except ProviderRetryElsewhere as exc:
                 attempt += 1
                 if attempt > _EXTRACT_RETRIES:
@@ -382,19 +451,23 @@ class YtdlpProvider:
             args = [*base, "--proxy", endpoint.address]
             if endpoint.kind is not Egress.WARP:  # aria2c speaks HTTP, not SOCKS (WARP)
                 args += _ARIA2C_DOWNLOAD_ARGS
-            await self._invoke_download([*args, *tail], progress_cb)
+            async with self._cookie_session(platform, endpoint) as session:
+                await self._invoke_download([*args, *tail], progress_cb, session.env)
 
         await self._run_egress_plan(platform, size_bytes, run)
 
     async def _invoke_download(
-        self, args: list[str], progress_cb: DownloadProgress | None
+        self,
+        args: list[str],
+        progress_cb: DownloadProgress | None,
+        env: dict[str, str] | None = None,
     ) -> None:
         if progress_cb is not None:
             await self._run_with_progress(
-                args, timeout_s=self._download_timeout, progress_cb=progress_cb
+                args, timeout_s=self._download_timeout, progress_cb=progress_cb, env=env
             )
         else:
-            await self._run(args, timeout_s=self._download_timeout)
+            await self._run(args, timeout_s=self._download_timeout, env=env)
 
     async def health_check(self) -> ProviderHealth:
         try:
@@ -404,7 +477,9 @@ class YtdlpProvider:
         return ProviderHealth.OK
 
     # --- subprocess + error mapping ---------------------------------------
-    async def _run(self, args: list[str], *, timeout_s: float) -> tuple[bytes, bytes]:
+    async def _run(
+        self, args: list[str], *, timeout_s: float, env: dict[str, str] | None = None
+    ) -> tuple[bytes, bytes]:
         """Run yt-dlp to completion → ``(stdout, stderr)``; maps non-zero exits to
         domain errors. stderr is returned even on success — with
         ``--ignore-no-formats-error`` the reason an extraction produced no formats
@@ -414,6 +489,7 @@ class YtdlpProvider:
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except (OSError, ValueError) as exc:  # binary missing / bad args
             raise InfrastructureError(f"yt-dlp could not be launched: {exc}") from exc
@@ -436,11 +512,19 @@ class YtdlpProvider:
                 mapped=type(error).__name__,
                 stderr=decoded.strip()[:500],
             )
+            # Carry the raw stderr on the exception: the cookie pool classifies from it,
+            # and the mapped message alone would lose the detail it needs.
+            error.provider_stderr = decoded  # type: ignore[attr-defined]
             raise error
         return stdout, stderr
 
     async def _run_with_progress(
-        self, args: list[str], *, timeout_s: float, progress_cb: DownloadProgress
+        self,
+        args: list[str],
+        *,
+        timeout_s: float,
+        progress_cb: DownloadProgress,
+        env: dict[str, str] | None = None,
     ) -> None:
         """Run a download, streaming stdout to feed ``progress_cb`` live byte counts.
 
@@ -452,6 +536,7 @@ class YtdlpProvider:
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
         except (OSError, ValueError) as exc:
             raise InfrastructureError(f"yt-dlp could not be launched: {exc}") from exc

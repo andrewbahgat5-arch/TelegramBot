@@ -27,6 +27,7 @@ from core.logging import get_logger
 from domain.entities.cookie import CookieImpact, CookieLease, CookieSnapshot, CookieVerdict
 from domain.enums.cookie_health import NOTIFY_HEALTH, CookieHealth
 from domain.protocols.cookies import CookieRepositoryProtocol, CookieStoreProtocol
+from services.cookie_classifier import classify
 
 _log = get_logger("services.cookie_pool")
 
@@ -195,6 +196,12 @@ class CookiePoolService:
         return sorted(group, key=lambda c: (c.last_used_at or never, c.id))
 
     # ------------------------------------------------------------------ outcome ---
+
+    async def report_run(
+        self, lease: CookieLease, *, returncode: int, stderr: str
+    ) -> None:
+        """Classify one yt-dlp run and apply it (the provider-facing entry point)."""
+        await self.report(lease, classify(returncode, stderr))
 
     async def report(self, lease: CookieLease, verdict: CookieVerdict) -> None:
         """Apply an outcome. Only ``verdict.affects_health`` may change health."""

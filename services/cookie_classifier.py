@@ -87,10 +87,16 @@ def classify(returncode: int, stderr: str) -> CookieVerdict:
     ``returncode == 0`` is success even if stderr carried warnings — a walled extraction
     exits non-zero, so a clean exit means the session did its job.
     """
-    if returncode == 0:
-        return CookieVerdict(CookieImpact.SUCCESS)
-
     text = stderr or ""
+
+    if returncode == 0:
+        # A clean exit still carries a route signal when ``--ignore-no-formats-error`` is
+        # in play: yt-dlp exits 0 with the bot-check wall in stderr and no formats. The
+        # session was not rejected, but it did not prove itself either — stay neutral
+        # rather than crediting a success that never happened.
+        if _matches(text, _ROUTE_PATTERNS):
+            return CookieVerdict(CookieImpact.NONE, "route/network failure")
+        return CookieVerdict(CookieImpact.SUCCESS)
 
     # Order matters: the terminal verdicts are checked before the recoverable one, so
     # "cookies are no longer valid" is never downgraded to a mere strike.

@@ -47,6 +47,7 @@ from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
+from infrastructure.cookies import CookieRepositoryAdapter, LocalCookieStore
 from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.message_template_store import MessageTemplateStore
@@ -76,6 +77,7 @@ from infrastructure.database.user_health_store import UserHealthStoreAdapter
 from infrastructure.downloader.provider_settings import ProviderSettingsAdapter
 from infrastructure.downloader.providers.ytdlp_provider import YtdlpProvider
 from infrastructure.downloader.registry import DownloaderRegistry
+from infrastructure.downloader.routing import DEFAULT_WARP_ID
 from infrastructure.redis.cache import RedisCache
 from infrastructure.redis.client import create_redis_clients
 from infrastructure.redis.locks import RedisLock
@@ -91,6 +93,8 @@ from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
 from services.caption_ad_mixer import CaptionAdMixer
+from services.cookie_bootstrap import bootstrap_cookie_pool
+from services.cookie_pool_service import CookiePolicy, CookiePoolService, LeaseBackend
 from services.error_log_service import ErrorLogService
 from services.history_service import HistoryService
 from services.job_service import JobService
@@ -224,12 +228,31 @@ async def main() -> None:
     registry = DownloaderRegistry(
         ProviderSettingsAdapter(session_factory), redis=redis_clients.cache
     )
+    # YouTube cookie pool (DESIGN_COOKIE_POOL.md). The repository adapter owns its own
+    # short-lived sessions, so cookie bookkeeping never joins a request transaction.
+    cookie_store = LocalCookieStore(settings.ytdlp_cookie_pool_dir)
+    cookie_repo = CookieRepositoryAdapter(session_factory)
+    cookie_pool = CookiePoolService(
+        cookie_repo,
+        cookie_store,
+        LeaseBackend(RedisLock(redis_clients.cache)),
+        CookiePolicy(),
+    )
+    # Idempotent: imports the pre-pool cookies.txt as yt-01 when the pool is empty, and
+    # flags rows whose file has vanished. Never blocks startup.
+    await bootstrap_cookie_pool(
+        cookie_repo,
+        cookie_store,
+        legacy_master=settings.ytdlp_cookie_legacy_file,
+        default_egress_id=DEFAULT_WARP_ID,
+    )
     registry.register(
         YtdlpProvider(
             settings.ytdlp_path,
             proxy=settings.ytdlp_proxy,
             warp_proxy=settings.ytdlp_warp_proxy,
             warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
+            cookies=cookie_pool,
         )
     )
     callback_signer = CallbackSigner(settings.bot_token.get_secret_value())

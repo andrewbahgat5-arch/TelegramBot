@@ -34,8 +34,13 @@ class CookieProviderProtocol(Protocol):
         """
         ...
 
-    async def report(self, lease: CookieLease, verdict: CookieVerdict) -> None:
-        """Record the outcome. Only ``verdict.affects_health`` changes health."""
+    async def report_run(self, lease: CookieLease, *, returncode: int, stderr: str) -> None:
+        """Record one yt-dlp run against the leased cookie.
+
+        The provider hands over the raw result and nothing else: *classifying* it is
+        business logic and lives in the service, so ``infrastructure`` never needs to
+        know what a verdict is (or import a service to build one).
+        """
         ...
 
     async def release(self, lease: CookieLease) -> None:
@@ -79,7 +84,13 @@ class CookieRepositoryProtocol(Protocol):
         ...
 
     async def create(
-        self, *, label: str, file_version: int, content_hash: str, created_by: int | None
+        self,
+        *,
+        label: str,
+        file_version: int,
+        content_hash: str,
+        created_by: int | None = None,
+        egress_id: str | None = None,
     ) -> CookieSnapshot: ...
 
     async def record_use(self, cookie_id: int, *, at: datetime.datetime) -> None: ...

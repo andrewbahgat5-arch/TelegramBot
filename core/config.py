@@ -99,6 +99,21 @@ class Settings(BaseSettings):
     # under this go over WARP, larger ones over the residential proxy (WARP is bandwidth-
     # capped and cannot use aria2c). Retune per deployment without a code change.
     ytdlp_warp_max_download_mb: int = Field(500, alias="YTDLP_WARP_MAX_DOWNLOAD_MB")
+    # --- YouTube cookie pool (DESIGN_COOKIE_POOL.md) ---
+    # Paths/infrastructure live here; the tunable *policy* (strategy, thresholds,
+    # cooldowns, lease cap) is admin-editable at runtime via SettingsService instead.
+    # Directory holding the versioned pool files (git-ignored, server-only).
+    ytdlp_cookie_pool_dir: str = Field(
+        "/etc/yt-dlp/cookies.d", alias="YTDLP_COOKIE_POOL_DIR"
+    )
+    # The pre-pool single master. Imported once as yt-01 when the pool is empty.
+    ytdlp_cookie_legacy_file: str = Field(
+        "/etc/yt-dlp/cookies.txt", alias="YTDLP_COOKIE_LEGACY_FILE"
+    )
+    # Video used to verify a freshly uploaded cookie before it is accepted (§10 step 4).
+    ytdlp_cookie_canary_url: str = Field(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ", alias="YTDLP_COOKIE_CANARY_URL"
+    )
 
     # --- Cache TTLs (seconds) ---
     cache_fileid_ttl: int = Field(2_592_000, alias="CACHE_FILEID_TTL")

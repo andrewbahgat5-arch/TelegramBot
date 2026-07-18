@@ -24,6 +24,7 @@ from infrastructure.database.models.reward import Reward
 from infrastructure.database.models.setting import Setting
 from infrastructure.database.models.user import User
 from infrastructure.database.models.user_preference import UserPreference
+from infrastructure.database.models.youtube_cookie import YoutubeCookie, YoutubeCookieEvent
 
 __all__ = [
     "ActiveDownload",
@@ -50,4 +51,6 @@ __all__ = [
     "Setting",
     "User",
     "UserPreference",
+    "YoutubeCookie",
+    "YoutubeCookieEvent",
 ]
