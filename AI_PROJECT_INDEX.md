@@ -162,6 +162,16 @@ engine / multi-placement / shared ad+broadcast wizard (written before code, per 
 Read when: extending audiences, placements, or the ad/broadcast wizard. · Related:
 `services/audience_service.py`, `bot/panel/wizard.py`.
 
+**DESIGN_COOKIE_POOL.md**
+- Purpose: **design draft** for the YouTube cookie pool (multi-cookie identity/health/stats,
+  egress affinity, selection strategies, cooldown + auto-recovery, admin notifications, the
+  in-Telegram replace flow, statistics screen). Written before code per Hard Rule 4; Owner-
+  approved direction. Introduces the `EgressId` model (`warp-1`, `proxy-res-1`) that replaces
+  the bare `Egress` kind for affinity and multi-instance routing.
+- Read when: touching cookies, egress routing/affinity, or the cookie admin panel.
+- Related: `infrastructure/downloader/routing.py`, `deploy/ytdlp-wrapper.sh`,
+  `services/admin_notification_service.py`, `deploy/VPS_DEPLOYMENT_CHANGES.md`.
+
 **I18N_IMPLEMENTATION_REVIEW.md** — Purpose: self-contained review of the i18n system. · Read
 when: adding strings or changing localization. · Related: `core/i18n.py`, `core/locales/`.
 
