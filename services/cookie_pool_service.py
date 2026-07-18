@@ -173,18 +173,27 @@ class CookiePoolService:
     def _order(
         self, candidates: list[CookieSnapshot], *, egress_id: str
     ) -> list[CookieSnapshot]:
-        """Affinity groups first, strategy applied within each group (§8).
+        """Order the candidates for this egress (§8).
 
-        Affine → unpinned → (borrowed, only if explicitly allowed). Borrowing never
-        re-pins: silently moving a session between exit IPs is what invalidates it.
+        **Usable together, then borrowed.** A cookie pinned to this egress and an
+        unpinned one are equally valid choices here — an unpinned cookie pins to *this*
+        egress the moment it succeeds — so they compete in a single group under the
+        configured strategy.
+
+        Ranking unpinned cookies *below* affine ones (as this did originally) looked
+        harmless but silently defeated the pool: with one pinned cookie and three fresh
+        ones, the pinned cookie won every single request and the new cookies were never
+        touched. Measured in production — six consecutive leases all returned yt-01
+        while yt-02..04 sat idle. Load spreading is the entire point, so the tiers merge.
+
+        Cookies pinned to a *different* egress stay a separate, last resort behind
+        ``allow_affinity_break``, and borrowing never re-pins: silently moving a session
+        between exit IPs is what invalidates it.
         """
-        affine = [c for c in candidates if c.egress_id == egress_id]
-        unpinned = [c for c in candidates if c.egress_id is None]
-        ordered = self._by_strategy(affine) + self._by_strategy(unpinned)
+        usable = [c for c in candidates if c.egress_id in (None, egress_id)]
+        ordered = self._by_strategy(usable)
         if self._policy.allow_affinity_break:
-            foreign = [
-                c for c in candidates if c.egress_id not in (None, egress_id)
-            ]
+            foreign = [c for c in candidates if c.egress_id not in (None, egress_id)]
             ordered += self._by_strategy(foreign)
         return ordered
 

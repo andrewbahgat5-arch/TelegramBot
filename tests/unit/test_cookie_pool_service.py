@@ -342,3 +342,34 @@ async def test_release_frees_the_slot_and_is_idempotent() -> None:
     await service.release(lease)
     await service.release(lease)  # second call is a no-op
     assert lock.released == ["cookie:lease:1:0"]
+
+
+async def test_pool_rotates_instead_of_hammering_one_pinned_cookie() -> None:
+    """REGRESSION (found in production): with one pinned cookie and several fresh ones,
+    ranking unpinned below affine made the pinned cookie win every request — six
+    consecutive leases all returned yt-01 while the others sat idle. Load spreading is
+    the entire point of the pool, so all usable cookies compete under the strategy."""
+    older = _NOW - datetime.timedelta(hours=1)
+    repo = _FakeRepo(
+        [
+            _snap(id=1, label="yt-01", egress_id="warp-1", last_used_at=_NOW),
+            _snap(id=2, label="yt-02", egress_id=None, last_used_at=None),
+            _snap(id=3, label="yt-03", egress_id=None, last_used_at=older),
+        ]
+    )
+    service = _service(repo)
+    lease = await service.acquire(platform="youtube", egress_id="warp-1")
+    assert lease is not None
+    # Never-used first, then the hour-old one — the recently-used pinned cookie is last.
+    assert lease.label == "yt-02"
+
+
+async def test_unpinned_cookie_outranks_a_recently_used_affine_one() -> None:
+    repo = _FakeRepo(
+        [
+            _snap(id=1, label="affine-fresh", egress_id="warp-1", last_used_at=_NOW),
+            _snap(id=2, label="unpinned-stale", egress_id=None, last_used_at=None),
+        ]
+    )
+    lease = await _service(repo).acquire(platform="youtube", egress_id="warp-1")
+    assert lease is not None and lease.label == "unpinned-stale"
