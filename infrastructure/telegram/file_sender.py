@@ -30,7 +30,7 @@ from pathlib import Path
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import FSInputFile, InlineKeyboardMarkup, Message
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from core.logging import get_logger
 from domain.enums import MediaFormat, Quality
@@ -145,8 +145,25 @@ class TelegramMessageSender:
     def __init__(self, bot: Bot) -> None:
         self._bot = bot
 
-    async def send_message(self, chat_id: int, text: str, *, parse_mode: str | None = None) -> int:
-        message = await self._bot.send_message(chat_id, text, parse_mode=parse_mode)
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        parse_mode: str | None = None,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> int:
+        markup = None
+        if buttons:
+            markup = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text=label, callback_data=data)]
+                    for label, data in buttons
+                ]
+            )
+        message = await self._bot.send_message(
+            chat_id, text, parse_mode=parse_mode, reply_markup=markup
+        )
         return message.message_id
 
     async def edit_message(self, chat_id: int, message_id: int, text: str) -> None:

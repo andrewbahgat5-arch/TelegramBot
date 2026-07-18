@@ -120,7 +120,8 @@ def test_build_dispatcher_wires_middlewares_and_routers() -> None:
         storage=storage,
     )
     assert isinstance(dp, Dispatcher)
-    # errors + start + membership + help + admin + admin_panel + ads + download + history.
-    assert len(dp.sub_routers) == 9
+    # errors + cookies + start + membership + help + admin + admin_panel + ads +
+    # download + history.
+    assert len(dp.sub_routers) == 10
     assert dp.sub_routers[0].name == "errors"  # the backstop must be installed
     assert dp.fsm.storage is storage

@@ -1,6 +1,11 @@
 {
-  "_meta": { "code": "en", "native_name": "English", "direction": "ltr", "enabled": true, "version": 1 },
-
+  "_meta": {
+    "code": "en",
+    "native_name": "English",
+    "direction": "ltr",
+    "enabled": true,
+    "version": 1
+  },
   "errors.permission_denied": "You are banned from using this bot.",
   "errors.maintenance_mode": "The bot is under maintenance. Please try again later.",
   "errors.daily_limit_exceeded": "Daily download limit reached. Try again tomorrow.",
@@ -12,15 +17,12 @@
   "errors.unexpected": "Something went wrong on our side. Please try again.",
   "errors.video_unavailable": "⚠️ This video isn't available for download right now. Please try another link, or try this one again later.",
   "errors.no_media_found": "⚠️ This post doesn't contain anything downloadable — no video, audio or image.",
-
   "user.banned": "🚫 You are banned from using this bot.",
   "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",
-
   "notification.preparing": "⏳ Preparing your file…",
   "notification.uploading": "⬆️ Uploading to Telegram…",
   "notification.processing": "⚙️ Processing…",
   "notification.failed": "❌ Sorry, that download failed. Please try again.",
-
   "language.change_button": "🌐 Change Language",
   "settings.open_button": "⚙️ Settings",
   "settings.header": "⚙️ <b>Settings</b>",
@@ -31,19 +33,15 @@
   "settings.toggle.hide_title": "Don't send title",
   "language.picker_prompt": "Please choose your language:",
   "language.updated": "Language updated to {native_name} ✅",
-
   "start.welcome_named": "👋 Welcome, {name}!\n\nSend me a link to a video or audio post and I'll fetch it for you.\nUse /help to see what I can do.",
   "start.welcome_anonymous": "👋 Welcome!\n\nSend me a link to a video or audio post and I'll fetch it for you.\nUse /help to see what I can do.",
   "start.home_body": "<b>Features</b>\n• 📹 YouTube, Instagram, TikTok, Twitter, Facebook, and more\n• ⚡ Instant delivery from cache for files fetched before\n• 🎧 Audio extraction & conversion (mp3, m4a, ogg)\n• 🗂 Your download history, one tap away\n\n<b>How to use</b>\n1. Send a link to any supported service\n2. Choose a format and quality\n3. Get your file in seconds",
   "start.button.my_files": "📁 My files",
   "start.button.try_premium": "👑 Try Premium for free",
-
   "referral.notify": "🎉 Someone joined using your referral link!\nYou earned <b>+{reward}</b> bonus downloads.\nTotal referrals: <b>{total}</b>",
   "referral.disabled": "Referrals are currently disabled.",
   "referral.screen": "◆ <b>Your Referral Link</b>\n\n🔗 {link}\n\nShare this link with friends — you both get <b>+{reward}</b> bonus downloads.\n\n👥 Total invited: <b>{invited}</b>\n🎁 Bonus downloads: <b>{bonus}</b>",
-
   "help.body": "<b>How to use</b>\n1. Send a supported link\n2. Choose a format and quality\n3. Get your file in seconds\n\n<b>Commands</b>\n• /history — your past downloads, resend any of them\n• /start — open the home menu\n• /help — show this message",
-
   "download.duplicate": "⏳ This is already being prepared — you'll get it shortly.",
   "download.busy": "⏳ You already have a download in progress. Please wait for it to finish.",
   "download.analyzing": "🔍 Analyzing link…",
@@ -56,11 +54,9 @@
   "download.format.video": "🎬 Video",
   "download.format.audio": "🎵 Audio",
   "download.subscribers": "subscribers",
-
   "common.back": "⬅️ Back",
   "common.prev": "⬅️ Prev",
   "common.next": "Next ➡️",
-
   "history.empty": "🗂 You have no downloads yet. Send me a link to get started!",
   "history.relink": "This file is no longer available — please send the link again.",
   "history.not_found": "That item is no longer in your history.",
@@ -70,12 +66,10 @@
   "history.filter_audio": "Audio only",
   "history.filter_video": "Video only",
   "history.close": "✕ Close",
-
   "common.cancel": "❌ Cancel",
   "common.home": "🏠 Home",
   "common.confirm": "✅ Confirm",
   "common.save": "💾 Save",
-
   "panel.section.users": "👥 Users",
   "panel.section.advertisements": "📢 Advertisements",
   "panel.section.broadcast": "📣 Broadcast",
@@ -86,7 +80,6 @@
   "panel.section.downloads": "📥 Downloads",
   "panel.section.system": "🔧 System",
   "panel.section.language": "🌐 Language",
-
   "panel.action.list": "📋 List",
   "panel.action.ban": "🚫 Ban",
   "panel.action.unban": "✅ Unban",
@@ -96,7 +89,6 @@
   "panel.action.disable": "⏸ Disable",
   "panel.action.delete": "🗑 Delete",
   "panel.action.broadcast": "📢 Broadcast",
-
   "panel.menu.u.userinfo": "🔍 User Info",
   "panel.menu.u.upgrade_premium": "⭐ Upgrade Premium",
   "panel.menu.u.remove_premium": "⬇️ Remove Premium",
@@ -113,7 +105,6 @@
   "panel.menu.d.active_jobs": "⏳ Active Jobs",
   "panel.menu.y.status": "🔧 Status",
   "panel.menu.y.errors": "⚠️ Errors",
-
   "panel.settings.field.worker_count": "Workers",
   "panel.settings.field.free_daily_limit": "Free Daily Limit",
   "panel.settings.field.premium_daily_limit": "Premium Daily Limit",
@@ -133,7 +124,6 @@
   "panel.settings.info.cache": "🗃 Cache",
   "panel.settings.info.languages": "🌐 Languages",
   "panel.settings.enter_value": "✏️ Enter Value",
-
   "panel.audience.mode.all": "All",
   "panel.audience.mode.include": "Include",
   "panel.audience.all": "👥 All Users",
@@ -142,7 +132,6 @@
   "panel.audience.moderators": "🛡️ Moderators",
   "panel.audience.owner": "👑 Owner",
   "panel.audience.user_id": "🆔 User ID…",
-
   "panel.placement.post_download": "💬 Follow-up message",
   "panel.placement.video_delivery": "🎬 Video",
   "panel.placement.audio_delivery": "🎵 Audio",
@@ -152,7 +141,6 @@
   "panel.placement.caption": "📝 In media caption",
   "panel.placement.analysis": "🔍 After URL analysis",
   "panel.placement.caption_warning": "ℹ️ A caption ad is <b>text + buttons only</b> — Telegram captions can't hold photos, videos or other media. It rides inside the media's own caption. Use a Follow-up message for media ads.",
-
   "panel.wizard.done": "✅ Done",
   "panel.wizard.next": "Next ▸",
   "panel.wizard.persistent_ad": "📢 Persistent Ad",
@@ -169,10 +157,8 @@
   "panel.wizard.edit_placement": "✏️ Placement",
   "panel.wizard.edit_settings": "✏️ Settings",
   "panel.wizard.edit_content": "✏️ Content",
-
   "panel.main_title": "🛠 Admin Panel\nChoose a section.",
   "panel.action_unavailable": "This action isn't available yet.",
-
   "panel.settings.save_failed": "Couldn't save: {error}",
   "panel.settings.saved": "Saved · {label} = {value} ✅",
   "panel.settings.stepper_body": "⚙️ <b>{label}</b>\n\nCurrent value: <b>{value}</b>\nAllowed: {min} to {max} (step {step})\n\nAdjust with the buttons, or tap ✏️ Enter Value to type one, then 💾 Save.",
@@ -189,17 +175,14 @@
   "panel.settings.value_number_prompt": "Please send a whole number, or tap ❌ Cancel.",
   "panel.settings.value_range_error": "Value must be between {min} and {max}.",
   "panel.settings.confirm_set": "💾 <b>Confirm</b>\n\nSet <b>{label}</b> to <b>{value}</b>?",
-
   "panel.confirm.body": "⚠️ <b>Confirm</b>\n\nReally {verb} <code>{id}</code>?",
   "panel.confirm.body_ad": "⚠️ <b>Confirm</b>\n\nReally {verb} #{id}?",
-
   "panel.verb.ban": "ban",
   "panel.verb.remove_premium_from": "remove premium from",
   "panel.verb.make_admin": "make an admin",
   "panel.verb.remove_admin_from": "remove admin from",
   "panel.verb.delete_ad": "delete ad",
   "panel.verb.broadcast_all": "broadcast to ALL users ad",
-
   "panel.prompt.ban_user": "Ban a user",
   "panel.prompt.unban_user": "Unban a user",
   "panel.prompt.upgrade_premium": "Upgrade to Premium",
@@ -207,7 +190,6 @@
   "panel.prompt.make_admin": "Make Admin",
   "panel.prompt.remove_admin": "Remove Admin",
   "panel.prompt.manage_user_default": "Manage a user",
-
   "panel.users.tap_list_first": "Open 📋 List and tap a user first.",
   "panel.users.not_found": "User not found.",
   "panel.users.no_id_found": "No user with id <code>{id}</code>.",
@@ -218,14 +200,12 @@
   "panel.users.tap_hint": "Tap a user to manage them.",
   "panel.users.lookup_body": "🔍 <b>User Info</b>\n\nSend the user's Telegram ID in chat.",
   "panel.users.action_prompt_body": "🔧 <b>{title}</b>\n\nSend the user's Telegram ID in chat.",
-
   "panel.users.toast.unbanned": "✅ Unbanned",
   "panel.users.toast.premium_granted": "⭐ Premium granted",
   "panel.users.toast.banned": "🚫 Banned",
   "panel.users.toast.premium_removed": "Premium removed",
   "panel.users.toast.promoted_admin": "🛡 Promoted to admin",
   "panel.users.toast.admin_removed": "Admin removed",
-
   "panel.users.detail.body": "👤 <b>{name}</b>\nUser ID: <code>{id}</code>\nUsername: {username}\nLanguage: {language}\nRole: {role}\nStatus: {status}\nPremium: {premium}\nJoined: {joined}\nLast activity: {last_activity}\nTotal downloads: {total_downloads}\nToday: {today} / limit {limit}\nHistory entries: {history}\nActive job: {active_job}",
   "panel.users.detail.banned_status": "🚫 banned",
   "panel.users.detail.active_status": "✅ active",
@@ -252,7 +232,6 @@
   "panel.users.list_title": "Users",
   "panel.users.none_banned": "No banned users.",
   "panel.users.none_yet": "No users yet.",
-
   "panel.ads.section_body": "📢 <b>Advertisements</b>\nManage campaigns.",
   "panel.ads.create_pick_language": "Pick a language for the new ad:",
   "panel.ads.language_category": "{name} ({count})",
@@ -304,7 +283,6 @@
   "panel.ads.stats.last_shown": "Last Shown",
   "panel.ads.stats.buttons": "Buttons",
   "panel.ads.stats.clicks_note": "Note: direct-link buttons cannot report taps.",
-
   "panel.broadcast.title": "Broadcast",
   "panel.broadcast.subtitle": "Choose a language, then compose your message.",
   "panel.broadcast.list_title": "Saved Broadcasts",
@@ -318,9 +296,7 @@
   "panel.broadcast.not_draft": "Only drafts can be published.",
   "panel.broadcast.cannot_delete_active": "Cannot delete while sending.",
   "panel.broadcast.pick_language": "Pick a language to view broadcasts:",
-
   "panel.stats.body": "📊 <b>Statistics</b>\nUsers: <b>{total}</b> (⭐ {premium} premium · 🛡 {staff} staff · 🚫 {banned} banned)\nJoined today: <b>{today}</b> · last 7 days: {week}\nActive today: <b>{active_today}</b>\nLifetime downloads: <b>{downloads}</b>\nQueue: <b>{depth}</b> waiting · {active} in flight",
-
   "panel.stats.title": "Statistics",
   "panel.stats.label.members": "Members",
   "panel.stats.label.premium": "Premium",
@@ -339,7 +315,6 @@
   "panel.stats.label.blocked": "Blocked bot",
   "panel.stats.label.downloads": "Lifetime downloads",
   "panel.stats.label.queue": "Queue (wait / active)",
-
   "panel.menu.t.platforms": "📊 Platform Stats",
   "panel.platforms.title": "Platform Analytics",
   "panel.platforms.total": "Total",
@@ -361,7 +336,6 @@
   "platform.snapchat": "Snapchat",
   "platform.reddit": "Reddit",
   "platform.generic": "Other",
-
   "panel.menu.u.export": "📤 Export",
   "panel.menu.u.import": "📥 Import",
   "panel.users.export_prompt": "📤 <b>Export Subscribers</b>\nChoose a file format.",
@@ -372,7 +346,6 @@
   "panel.users.import_need_file": "Please send a .csv or .json <b>file</b> (as a document).",
   "panel.users.import_parse_error": "❌ Could not parse that file. Make sure it's a valid .csv or .json export.",
   "panel.users.import_result": "✅ <b>Import Complete</b>\n🆕 Created: <b>{created}</b>\n♻️ Skipped: {skipped}\n❌ Failed: {failed}",
-
   "panel.section.referrals": "🔗 Referrals",
   "panel.menu.r.refresh": "🔄 Refresh",
   "panel.referral.title": "Referral Analytics",
@@ -382,7 +355,6 @@
   "panel.referral.month": "This month",
   "panel.referral.rewards": "Rewards granted",
   "panel.referral.top": "Top Referrers",
-
   "panel.section.templates": "📝 Templates",
   "panel.templates.title": "Message Templates",
   "panel.templates.subtitle": "Tap a message to customize it. Custom ones are marked ✏️.",
@@ -410,7 +382,6 @@
   "panel.templates.buttons_prompt": "Send buttons (one per line: Text | https://url).\nMax 3 buttons. Send a single dash (-) to clear.",
   "panel.templates.buttons_saved": "Buttons updated",
   "panel.templates.buttons_invalid": "Invalid format. Use: Text | https://url (one per line, max 3).",
-
   "panel.menu.m.check_status": "🔍 Check Status",
   "panel.menu.m.blocked_list": "🚫 Blocked",
   "panel.menu.m.deleted_list": "💀 Deleted",
@@ -426,11 +397,9 @@
   "panel.health.purge_blocked_verb": "blocked",
   "panel.health.purge_deleted_verb": "deleted",
   "panel.health.purged": "🗑 Purged {count} users",
-
   "panel.settings.info.cache_body": "🗃 <b>Cache</b>\n\nRecently fetched files and metadata are cached in Redis to skip re-downloads. There is no tunable cache key in the panel — TTLs are configured via the <code>CACHE_*</code> environment settings.",
   "panel.settings.info.languages_body": "🌐 <b>Languages</b>\n\nEnabled: {languages}\nDefault: {default}\n\nEach user picks their own language anytime via 🌐 Change Language (under /start) or the 🌐 Language section here — there's no global language setting to edit.",
   "panel.settings.info.fallback": "📋 <b>Info</b>\n\nNothing to show.",
-
   "panel.jobs.default_title": "Recent Activity",
   "panel.jobs.active_title": "Active Jobs",
   "panel.jobs.empty": "Nothing to show.",
@@ -445,7 +414,6 @@
   "panel.system.maintenance": "Maintenance",
   "panel.system.on": "🟢 On",
   "panel.system.off": "⚪ Off",
-
   "panel.wizard.expired": "This wizard expired — reopen it from the menu.",
   "panel.wizard.compose_title": "🧙 <b>Compose</b>\n\nChoose what to create.",
   "panel.wizard.audience_screen": "🎯 <b>Audience</b> ({kind})\n\nMode: <b>{mode}</b>\n{rules}",
@@ -491,7 +459,6 @@
   "panel.wizard.error_button_format": "Send it as <code>Label | https://url</code>.",
   "panel.wizard.error_numeric_id": "Send a numeric Telegram id.",
   "panel.wizard.input_prompt_wrapper": "✏️ <b>{prompt}</b>",
-
   "admin.stats.body": "📊 <b>System stats</b>\nUsers: <b>{total}</b> (banned: {banned})\nLifetime downloads: <b>{downloads}</b>\nQueue: <b>{depth}</b> waiting, {active} in flight",
   "admin.userinfo.usage": "Usage: <code>/userinfo &lt;telegram_id&gt;</code>",
   "admin.userinfo.not_found": "No user with telegram id <code>{id}</code>.",
@@ -517,7 +484,6 @@
   "admin.users.header": "👥 <b>Users</b> (first {count})",
   "admin.users.status_banned": "🚫 banned",
   "admin.users.status_active": "active",
-
   "ads.create.usage": "Usage: <code>/ad_create title=... type=text text=...</code>\nFields: title, type (text/photo/video/animation/document/audio/album), text, file_id, button_text, button_url, target (user/premium/none), every, priority, placement, delivery (fields/copy), audience (all/include/exclude), parse_mode.\nFor media ads, attach the media or reply to it. For a rich copy-mode ad, set <code>delivery=copy</code> and reply to the stored message.\nMore buttons: <code>/ad_button_add</code>. Targeting: <code>/ad_audience</code>.",
   "ads.create.failed": "Cannot create ad: {error}",
   "ads.create.success": "✅ Created ad #{id} — <b>{title}</b>.",
@@ -590,5 +556,50 @@
   "adminnotify.by": "👮 By: {name}",
   "adminnotify.reason": "📝 Reason: {reason}",
   "start.button.contact_us": "📞 Contact us",
-  "start.contact_hint": "🐞 Found a problem, a bug, or have a suggestion? Just tap <b>Contact us</b>."
+  "start.contact_hint": "🐞 Found a problem, a bug, or have a suggestion? Just tap <b>Contact us</b>.",
+  "adminnotify.cookie.title": "🍪 <b>Cookie {label} needs attention</b>",
+  "adminnotify.cookie.recovered": "✅ <b>Cookie {label} is healthy again</b>",
+  "adminnotify.cookie.status": "Status",
+  "adminnotify.cookie.reason": "Reason",
+  "adminnotify.cookie.last_success": "Last success",
+  "adminnotify.cookie.failures": "Consecutive failures",
+  "adminnotify.cookie.egress": "Egress",
+  "adminnotify.cookie.pool": "Pool: {healthy}/{total} healthy",
+  "adminnotify.cookie.btn_replace": "🔄 Replace cookie",
+  "cookies.title": "🍪 <b>Cookie pool</b> — {healthy}/{total} healthy",
+  "cookies.empty": "No cookies in the pool yet. Send one with the button below.",
+  "cookies.btn_add": "➕ Add cookie",
+  "cookies.btn_refresh": "🔄 Refresh",
+  "cookies.btn_back": "⬅️ Back",
+  "cookies.btn_replace": "🔄 Replace",
+  "cookies.btn_disable": "⏸ Disable",
+  "cookies.btn_enable": "▶️ Enable",
+  "cookies.btn_test": "🧪 Test now",
+  "cookies.detail.requests": "Requests",
+  "cookies.detail.success_rate": "Success rate",
+  "cookies.detail.last_used": "Last used",
+  "cookies.detail.last_success": "Last success",
+  "cookies.detail.last_failure": "Last failure",
+  "cookies.detail.egress": "Egress",
+  "cookies.detail.version": "Version",
+  "cookies.detail.never": "never",
+  "cookies.detail.cooldown": "On cooldown until {until}",
+  "cookies.upload.prompt": "Send the new <b>cookies.txt</b> for <b>{label}</b> as a file.\nIt will be checked and tested before replacing anything. Send /cancel to abort.",
+  "cookies.upload.prompt_new": "Send the new <b>cookies.txt</b> as a file to add it to the pool.\nIt will be checked and tested first. Send /cancel to abort.",
+  "cookies.upload.not_a_file": "Please send the cookies as a <b>file</b> (attach cookies.txt), not as text.",
+  "cookies.upload.too_large": "That file is too large to be a cookie export.",
+  "cookies.upload.invalid": "❌ Rejected: {reason}\nNothing was changed — the current cookie is still in place.",
+  "cookies.upload.testing": "⏳ Checking the cookie and running a test download…",
+  "cookies.upload.canary_failed": "❌ The cookie was readable but the test failed: {reason}\nNothing was changed — the current cookie is still in place.",
+  "cookies.upload.conflict": "⚠️ Someone else replaced this cookie while you were uploading. Nothing was changed — open the pool again to see the current state.",
+  "cookies.upload.replaced": "✅ <b>{label}</b> replaced (v{version}) and verified — {detail}.\nPool: {healthy}/{total} healthy.",
+  "cookies.upload.added": "✅ <b>{label}</b> added and verified — {detail}.\nPool: {healthy}/{total} healthy.",
+  "cookies.upload.cancelled": "Cancelled. Nothing was changed.",
+  "cookies.upload.expired": "That upload request expired. Open the cookie pool and try again.",
+  "cookies.test.running": "⏳ Testing {label}…",
+  "cookies.test.ok": "✅ {label} works — {detail}.",
+  "cookies.test.failed": "❌ {label} failed: {detail}",
+  "cookies.disabled": "⏸ {label} disabled. It will not be used until you enable it again.",
+  "cookies.enabled": "▶️ {label} enabled.",
+  "cookies.not_found": "That cookie no longer exists."
 }

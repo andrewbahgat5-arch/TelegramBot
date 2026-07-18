@@ -1,6 +1,11 @@
 {
-  "_meta": { "code": "ar", "native_name": "العربية", "direction": "rtl", "enabled": true, "version": 1 },
-
+  "_meta": {
+    "code": "ar",
+    "native_name": "العربية",
+    "direction": "rtl",
+    "enabled": true,
+    "version": 1
+  },
   "errors.permission_denied": "أنت محظور من استخدام هذا البوت.",
   "errors.maintenance_mode": "البوت تحت الصيانة حاليًا. يرجى المحاولة مرة أخرى لاحقًا.",
   "errors.daily_limit_exceeded": "لقد وصلت إلى الحد اليومي للتنزيلات. حاول مرة أخرى غدًا.",
@@ -12,15 +17,12 @@
   "errors.unexpected": "حدث خطأ من جانبنا. يرجى المحاولة مرة أخرى.",
   "errors.video_unavailable": "⚠️ هذا الفيديو غير متاح للتنزيل حاليًا. جرّب رابطًا آخر، أو أعد المحاولة لاحقًا.",
   "errors.no_media_found": "⚠️ هذا المنشور لا يحتوي على أي محتوى قابل للتنزيل — لا فيديو ولا صوت ولا صورة.",
-
   "user.banned": "🚫 أنت محظور من استخدام هذا البوت.",
   "system.maintenance": "🔧 البوت تحت الصيانة حاليًا. يرجى المحاولة مرة أخرى لاحقًا.",
-
   "notification.preparing": "⏳ جارٍ تجهيز ملفك…",
   "notification.uploading": "⬆️ جارٍ الرفع إلى تيليجرام…",
   "notification.processing": "⚙️ جارٍ المعالجة…",
   "notification.failed": "❌ عذرًا، فشل التنزيل. يرجى المحاولة مرة أخرى.",
-
   "language.change_button": "🌐 تغيير اللغة",
   "settings.open_button": "⚙️ الإعدادات",
   "settings.header": "⚙️ <b>الإعدادات</b>",
@@ -31,19 +33,15 @@
   "settings.toggle.hide_title": "عدم إرسال العنوان",
   "language.picker_prompt": "يرجى اختيار لغتك:",
   "language.updated": "تم تحديث اللغة إلى {native_name} ✅",
-
   "start.welcome_named": "👋 أهلًا بك يا {name}!\n\nأرسل لي رابط فيديو أو مقطع صوتي وسأقوم بجلبه لك.\nاستخدم /help لمعرفة ما يمكنني فعله.",
   "start.welcome_anonymous": "👋 أهلًا بك!\n\nأرسل لي رابط فيديو أو مقطع صوتي وسأقوم بجلبه لك.\nاستخدم /help لمعرفة ما يمكنني فعله.",
   "start.home_body": "<b>المميزات</b>\n• 📹 يوتيوب، إنستغرام، تيك توك، تويتر، فيسبوك، والمزيد\n• ⚡ تسليم فوري من الذاكرة للملفات التي سبق جلبها\n• 🎧 استخراج الصوت وتحويله (mp3، m4a، ogg)\n• 🗂 سجلّ تنزيلاتك على بُعد ضغطة\n\n<b>طريقة الاستخدام</b>\n1. أرسل رابطًا لأي خدمة مدعومة\n2. اختر الصيغة والجودة\n3. احصل على ملفك خلال ثوانٍ",
   "start.button.my_files": "📁 ملفاتي",
   "start.button.try_premium": "👑 جرّب بريميوم مجانًا",
-
   "referral.notify": "🎉 انضم شخص عبر رابط الإحالة الخاص بك!\nحصلت على <b>+{reward}</b> تنزيلات إضافية.\nإجمالي الإحالات: <b>{total}</b>",
   "referral.disabled": "نظام الإحالة معطّل حاليًا.",
   "referral.screen": "◆ <b>رابط الإحالة الخاص بك</b>\n\n🔗 {link}\n\nشارك هذا الرابط مع أصدقائك — تحصلان معًا على <b>+{reward}</b> تنزيلات إضافية.\n\n👥 إجمالي المدعوين: <b>{invited}</b>\n🎁 تنزيلات إضافية: <b>{bonus}</b>",
-
   "help.body": "<b>طريقة الاستخدام</b>\n1. أرسل رابطًا مدعومًا\n2. اختر الصيغة والجودة\n3. احصل على ملفك خلال ثوانٍ\n\n<b>الأوامر</b>\n• /history — تنزيلاتك السابقة، أعد إرسال أي منها\n• /start — فتح القائمة الرئيسية\n• /help — عرض هذه الرسالة",
-
   "download.duplicate": "⏳ هذا الطلب قيد التجهيز بالفعل — ستحصل عليه قريبًا.",
   "download.busy": "⏳ لديك بالفعل تنزيل قيد التنفيذ. يرجى الانتظار حتى ينتهي.",
   "download.analyzing": "🔍 جارٍ تحليل الرابط…",
@@ -56,11 +54,9 @@
   "download.format.video": "🎬 فيديو",
   "download.format.audio": "🎵 صوت",
   "download.subscribers": "مشترك",
-
   "common.back": "⬅️ رجوع",
   "common.prev": "⬅️ السابق",
   "common.next": "التالي ➡️",
-
   "history.empty": "🗂 لا توجد لديك تنزيلات بعد. أرسل لي رابطًا للبدء!",
   "history.relink": "هذا الملف لم يعد متاحًا — يرجى إرسال الرابط مرة أخرى.",
   "history.not_found": "هذا العنصر لم يعد موجودًا في سجلّك.",
@@ -70,12 +66,10 @@
   "history.filter_audio": "صوت فقط",
   "history.filter_video": "فيديو فقط",
   "history.close": "✕ إغلاق",
-
   "common.cancel": "❌ إلغاء",
   "common.home": "🏠 الرئيسية",
   "common.confirm": "✅ تأكيد",
   "common.save": "💾 حفظ",
-
   "panel.section.users": "👥 المستخدمون",
   "panel.section.advertisements": "📢 الإعلانات",
   "panel.section.broadcast": "📣 البث",
@@ -86,7 +80,6 @@
   "panel.section.downloads": "📥 التنزيلات",
   "panel.section.system": "🔧 النظام",
   "panel.section.language": "🌐 اللغة",
-
   "panel.action.list": "📋 القائمة",
   "panel.action.ban": "🚫 حظر",
   "panel.action.unban": "✅ إلغاء الحظر",
@@ -96,7 +89,6 @@
   "panel.action.disable": "⏸ تعطيل",
   "panel.action.delete": "🗑 حذف",
   "panel.action.broadcast": "📢 بث",
-
   "panel.menu.u.userinfo": "🔍 معلومات المستخدم",
   "panel.menu.u.upgrade_premium": "⭐ ترقية إلى بريميوم",
   "panel.menu.u.remove_premium": "⬇️ إزالة بريميوم",
@@ -113,7 +105,6 @@
   "panel.menu.d.active_jobs": "⏳ المهام النشطة",
   "panel.menu.y.status": "🔧 الحالة",
   "panel.menu.y.errors": "⚠️ الأخطاء",
-
   "panel.settings.field.worker_count": "العمّال",
   "panel.settings.field.free_daily_limit": "الحد اليومي المجاني",
   "panel.settings.field.premium_daily_limit": "الحد اليومي لبريميوم",
@@ -133,7 +124,6 @@
   "panel.settings.info.cache": "🗃 التخزين المؤقت",
   "panel.settings.info.languages": "🌐 اللغات",
   "panel.settings.enter_value": "✏️ إدخال قيمة",
-
   "panel.audience.mode.all": "الكل",
   "panel.audience.mode.include": "تضمين",
   "panel.audience.all": "👥 جميع المستخدمين",
@@ -142,7 +132,6 @@
   "panel.audience.moderators": "🛡️ المشرفون",
   "panel.audience.owner": "👑 المالك",
   "panel.audience.user_id": "🆔 معرّف المستخدم…",
-
   "panel.placement.post_download": "💬 رسالة متابعة",
   "panel.placement.video_delivery": "🎬 الفيديو",
   "panel.placement.audio_delivery": "🎵 الصوت",
@@ -152,7 +141,6 @@
   "panel.placement.caption": "📝 داخل تعليق الميديا",
   "panel.placement.analysis": "🔍 بعد تحليل الرابط",
   "panel.placement.caption_warning": "ℹ️ إعلان التعليق <b>نص + أزرار فقط</b> — تعليقات تيليجرام لا تحتوي صور أو فيديو أو ميديا. بيظهر داخل تعليق الميديا نفسها. للإعلانات بالميديا استخدم رسالة المتابعة.",
-
   "panel.wizard.done": "✅ تم",
   "panel.wizard.next": "التالي ▸",
   "panel.wizard.persistent_ad": "📢 إعلان دائم",
@@ -169,10 +157,8 @@
   "panel.wizard.edit_placement": "✏️ الموضع",
   "panel.wizard.edit_settings": "✏️ الإعدادات",
   "panel.wizard.edit_content": "✏️ المحتوى",
-
   "panel.main_title": "🛠 لوحة الإدارة\nاختر قسمًا.",
   "panel.action_unavailable": "هذا الإجراء غير متاح بعد.",
-
   "panel.settings.save_failed": "تعذّر الحفظ: {error}",
   "panel.settings.saved": "تم الحفظ · {label} = {value} ✅",
   "panel.settings.stepper_body": "⚙️ <b>{label}</b>\\n\\nالقيمة الحالية: <b>{value}</b>\\nالمسموح: من {min} إلى {max} (خطوة {step})\\n\\nاضبط باستخدام الأزرار، أو اضغط ✏️ إدخال قيمة لكتابتها، ثم 💾 حفظ.",
@@ -189,17 +175,14 @@
   "panel.settings.value_number_prompt": "يرجى إرسال رقم صحيح، أو اضغط ❌ إلغاء.",
   "panel.settings.value_range_error": "يجب أن تكون القيمة بين {min} و{max}.",
   "panel.settings.confirm_set": "💾 <b>تأكيد</b>\n\nهل تريد ضبط <b>{label}</b> على <b>{value}</b>؟",
-
   "panel.confirm.body": "⚠️ <b>تأكيد</b>\n\nهل تريد بالفعل {verb} <code>{id}</code>؟",
   "panel.confirm.body_ad": "⚠️ <b>تأكيد</b>\n\nهل تريد بالفعل {verb} #{id}؟",
-
   "panel.verb.ban": "حظر",
   "panel.verb.remove_premium_from": "إزالة بريميوم من",
   "panel.verb.make_admin": "تعيينه مشرفًا",
   "panel.verb.remove_admin_from": "إزالة صلاحية الإشراف من",
   "panel.verb.delete_ad": "حذف الإعلان",
   "panel.verb.broadcast_all": "بث هذا الإعلان لجميع المستخدمين",
-
   "panel.prompt.ban_user": "حظر مستخدم",
   "panel.prompt.unban_user": "إلغاء حظر مستخدم",
   "panel.prompt.upgrade_premium": "ترقية إلى بريميوم",
@@ -207,7 +190,6 @@
   "panel.prompt.make_admin": "تعيين مشرف",
   "panel.prompt.remove_admin": "إزالة مشرف",
   "panel.prompt.manage_user_default": "إدارة مستخدم",
-
   "panel.users.tap_list_first": "افتح 📋 القائمة واضغط على مستخدم أولًا.",
   "panel.users.not_found": "المستخدم غير موجود.",
   "panel.users.no_id_found": "لا يوجد مستخدم بالمعرّف <code>{id}</code>.",
@@ -218,14 +200,12 @@
   "panel.users.tap_hint": "اضغط على مستخدم لإدارته.",
   "panel.users.lookup_body": "🔍 <b>معلومات المستخدم</b>\n\nأرسل معرّف تيليجرام الخاص بالمستخدم في الدردشة.",
   "panel.users.action_prompt_body": "🔧 <b>{title}</b>\n\nأرسل معرّف تيليجرام الخاص بالمستخدم في الدردشة.",
-
   "panel.users.toast.unbanned": "✅ تم إلغاء الحظر",
   "panel.users.toast.premium_granted": "⭐ تم منح بريميوم",
   "panel.users.toast.banned": "🚫 تم الحظر",
   "panel.users.toast.premium_removed": "تمت إزالة بريميوم",
   "panel.users.toast.promoted_admin": "🛡 تمت الترقية إلى مشرف",
   "panel.users.toast.admin_removed": "تمت إزالة صلاحية الإشراف",
-
   "panel.users.detail.body": "👤 <b>{name}</b>\nمعرّف المستخدم: <code>{id}</code>\nاسم المستخدم: {username}\nاللغة: {language}\nالدور: {role}\nالحالة: {status}\nبريميوم: {premium}\nتاريخ الانضمام: {joined}\nآخر نشاط: {last_activity}\nإجمالي التنزيلات: {total_downloads}\nاليوم: {today} / الحد {limit}\nعدد عناصر السجل: {history}\nمهمة نشطة: {active_job}",
   "panel.users.detail.banned_status": "🚫 محظور",
   "panel.users.detail.active_status": "✅ نشط",
@@ -252,7 +232,6 @@
   "panel.users.list_title": "المستخدمون",
   "panel.users.none_banned": "لا يوجد مستخدمون محظورون.",
   "panel.users.none_yet": "لا يوجد مستخدمون بعد.",
-
   "panel.ads.section_body": "📢 <b>الإعلانات</b>\nإدارة الحملات.",
   "panel.ads.create_pick_language": "اختر لغة الإعلان الجديد:",
   "panel.ads.language_category": "{name} ({count})",
@@ -304,7 +283,6 @@
   "panel.ads.stats.last_shown": "آخر عرض",
   "panel.ads.stats.buttons": "الأزرار",
   "panel.ads.stats.clicks_note": "ملاحظة: الأزرار ذات الروابط المباشرة لا يمكنها تتبع النقرات.",
-
   "panel.broadcast.title": "البث",
   "panel.broadcast.subtitle": "اختر اللغة، ثم أنشئ رسالتك.",
   "panel.broadcast.list_title": "البث المحفوظ",
@@ -318,9 +296,7 @@
   "panel.broadcast.not_draft": "يمكن نشر المسودات فقط.",
   "panel.broadcast.cannot_delete_active": "لا يمكن الحذف أثناء الإرسال.",
   "panel.broadcast.pick_language": "اختر لغة لعرض البث:",
-
   "panel.stats.body": "📊 <b>الإحصائيات</b>\nالمستخدمون: <b>{total}</b> (⭐ {premium} بريميوم · 🛡 {staff} طاقم · 🚫 {banned} محظور)\nانضم اليوم: <b>{today}</b> · آخر 7 أيام: {week}\nنشط اليوم: <b>{active_today}</b>\nإجمالي التنزيلات: <b>{downloads}</b>\nقائمة الانتظار: <b>{depth}</b> بالانتظار · {active} قيد التنفيذ",
-
   "panel.stats.title": "الإحصائيات",
   "panel.stats.label.members": "الأعضاء",
   "panel.stats.label.premium": "بريميوم",
@@ -339,7 +315,6 @@
   "panel.stats.label.blocked": "حظر البوت",
   "panel.stats.label.downloads": "إجمالي التنزيلات",
   "panel.stats.label.queue": "الطابور (انتظار / نشط)",
-
   "panel.menu.t.platforms": "📊 إحصائيات المنصات",
   "panel.platforms.title": "تحليلات المنصات",
   "panel.platforms.total": "الإجمالي",
@@ -361,7 +336,6 @@
   "platform.snapchat": "سناب شات",
   "platform.reddit": "ريديت",
   "platform.generic": "أخرى",
-
   "panel.menu.u.export": "📤 تصدير",
   "panel.menu.u.import": "📥 استيراد",
   "panel.users.export_prompt": "📤 <b>تصدير المشتركين</b>\nاختر صيغة الملف.",
@@ -372,7 +346,6 @@
   "panel.users.import_need_file": "الرجاء إرسال ملف ‎.csv أو ‎.json <b>كمستند</b>.",
   "panel.users.import_parse_error": "❌ تعذّر تحليل الملف. تأكد أنه ملف ‎.csv أو ‎.json صالح.",
   "panel.users.import_result": "✅ <b>اكتمل الاستيراد</b>\n🆕 أُنشئ: <b>{created}</b>\n♻️ تم التخطّي: {skipped}\n❌ فشل: {failed}",
-
   "panel.section.referrals": "🔗 الإحالات",
   "panel.menu.r.refresh": "🔄 تحديث",
   "panel.referral.title": "تحليلات الإحالة",
@@ -382,7 +355,6 @@
   "panel.referral.month": "هذا الشهر",
   "panel.referral.rewards": "المكافآت الممنوحة",
   "panel.referral.top": "أفضل المُحيلين",
-
   "panel.section.templates": "📝 القوالب",
   "panel.templates.title": "قوالب الرسائل",
   "panel.templates.subtitle": "اضغط على رسالة لتخصيصها. القوالب المخصّصة معلّمة بـ ✏️.",
@@ -410,7 +382,6 @@
   "panel.templates.buttons_prompt": "أرسل الأزرار (واحد في كل سطر: النص | https://url).\nحد أقصى 3 أزرار. أرسل شرطة (-) للمسح.",
   "panel.templates.buttons_saved": "تم تحديث الأزرار",
   "panel.templates.buttons_invalid": "تنسيق غير صالح. استخدم: النص | https://url (واحد في كل سطر، حد أقصى 3).",
-
   "panel.menu.m.check_status": "🔍 فحص الحالة",
   "panel.menu.m.blocked_list": "🚫 المحظورون",
   "panel.menu.m.deleted_list": "💀 المحذوفون",
@@ -426,11 +397,9 @@
   "panel.health.purge_blocked_verb": "المحظورين",
   "panel.health.purge_deleted_verb": "المحذوفين",
   "panel.health.purged": "🗑 تم حذف {count} مستخدم",
-
   "panel.settings.info.cache_body": "🗃 <b>التخزين المؤقت</b>\n\nيتم تخزين الملفات والبيانات الوصفية المجلوبة حديثًا مؤقتًا في Redis لتجنّب إعادة التنزيل. لا يوجد مفتاح تخزين مؤقت قابل للتعديل في اللوحة — يتم ضبط مدد الصلاحية عبر إعدادات البيئة <code>CACHE_*</code>.",
   "panel.settings.info.languages_body": "🌐 <b>اللغات</b>\n\nالمفعّلة: {languages}\nالافتراضية: {default}\n\nيختار كل مستخدم لغته بنفسه في أي وقت عبر 🌐 تغيير اللغة (ضمن /start) أو قسم 🌐 اللغة هنا — لا يوجد إعداد لغة عام للتعديل.",
   "panel.settings.info.fallback": "📋 <b>معلومات</b>\n\nلا يوجد ما يُعرض.",
-
   "panel.jobs.default_title": "النشاط الأخير",
   "panel.jobs.active_title": "المهام النشطة",
   "panel.jobs.empty": "لا يوجد ما يُعرض.",
@@ -445,7 +414,6 @@
   "panel.system.maintenance": "الصيانة",
   "panel.system.on": "🟢 مُفعّل",
   "panel.system.off": "⚪ مُعطّل",
-
   "panel.wizard.expired": "انتهت صلاحية هذا المعالج — أعد فتحه من القائمة.",
   "panel.wizard.compose_title": "🧙 <b>الإنشاء</b>\n\nاختر ما تريد إنشاءه.",
   "panel.wizard.audience_screen": "🎯 <b>الجمهور</b> ({kind})\n\nالوضع: <b>{mode}</b>\n{rules}",
@@ -491,7 +459,6 @@
   "panel.wizard.error_button_format": "أرسله بصيغة <code>التسمية | https://url</code>.",
   "panel.wizard.error_numeric_id": "أرسل معرّف تيليجرام رقميًا.",
   "panel.wizard.input_prompt_wrapper": "✏️ <b>{prompt}</b>",
-
   "admin.stats.body": "📊 <b>إحصائيات النظام</b>\nالمستخدمون: <b>{total}</b> (المحظورون: {banned})\nإجمالي التنزيلات: <b>{downloads}</b>\nقائمة الانتظار: <b>{depth}</b> بالانتظار، {active} قيد التنفيذ",
   "admin.userinfo.usage": "الاستخدام: <code>/userinfo &lt;telegram_id&gt;</code>",
   "admin.userinfo.not_found": "لا يوجد مستخدم بمعرّف تيليجرام <code>{id}</code>.",
@@ -517,7 +484,6 @@
   "admin.users.header": "👥 <b>المستخدمون</b> (أول {count})",
   "admin.users.status_banned": "🚫 محظور",
   "admin.users.status_active": "نشط",
-
   "ads.create.usage": "الاستخدام: <code>/ad_create title=... type=text text=...</code>\nالحقول: title, type (text/photo/video/animation/document/audio/album), text, file_id, button_text, button_url, target (user/premium/none), every, priority, placement, delivery (fields/copy), audience (all/include/exclude), parse_mode.\nلإعلانات الوسائط، أرفق الوسائط أو أجب عليها. لإعلان بوضع النسخ الغني، اضبط <code>delivery=copy</code> ورُدّ على الرسالة المخزّنة.\nأزرار إضافية: <code>/ad_button_add</code>. الاستهداف: <code>/ad_audience</code>.",
   "ads.create.failed": "تعذّر إنشاء الإعلان: {error}",
   "ads.create.success": "✅ تم إنشاء الإعلان #{id} — <b>{title}</b>.",
@@ -590,5 +556,50 @@
   "adminnotify.by": "👮 بواسطة: {name}",
   "adminnotify.reason": "📝 السبب: {reason}",
   "start.button.contact_us": "📞 تواصل معنا",
-  "start.contact_hint": "🐞 واجهت مشكلة أو خطأ أو لديك اقتراح؟ فقط اضغط على <b>تواصل معنا</b>."
+  "start.contact_hint": "🐞 واجهت مشكلة أو خطأ أو لديك اقتراح؟ فقط اضغط على <b>تواصل معنا</b>.",
+  "adminnotify.cookie.title": "🍪 <b>الكوكي {label} يحتاج انتباهك</b>",
+  "adminnotify.cookie.recovered": "✅ <b>الكوكي {label} عاد للعمل</b>",
+  "adminnotify.cookie.status": "الحالة",
+  "adminnotify.cookie.reason": "السبب",
+  "adminnotify.cookie.last_success": "آخر نجاح",
+  "adminnotify.cookie.failures": "الأعطال المتتالية",
+  "adminnotify.cookie.egress": "المخرج",
+  "adminnotify.cookie.pool": "المجموعة: {healthy}/{total} سليمة",
+  "adminnotify.cookie.btn_replace": "🔄 استبدال الكوكي",
+  "cookies.title": "🍪 <b>مجموعة الكوكيز</b> — {healthy}/{total} سليمة",
+  "cookies.empty": "لا توجد كوكيز بعد. أرسل واحدة عبر الزر بالأسفل.",
+  "cookies.btn_add": "➕ إضافة كوكي",
+  "cookies.btn_refresh": "🔄 تحديث",
+  "cookies.btn_back": "⬅️ رجوع",
+  "cookies.btn_replace": "🔄 استبدال",
+  "cookies.btn_disable": "⏸ تعطيل",
+  "cookies.btn_enable": "▶️ تفعيل",
+  "cookies.btn_test": "🧪 اختبار الآن",
+  "cookies.detail.requests": "الطلبات",
+  "cookies.detail.success_rate": "نسبة النجاح",
+  "cookies.detail.last_used": "آخر استخدام",
+  "cookies.detail.last_success": "آخر نجاح",
+  "cookies.detail.last_failure": "آخر عطل",
+  "cookies.detail.egress": "المخرج",
+  "cookies.detail.version": "الإصدار",
+  "cookies.detail.never": "أبدًا",
+  "cookies.detail.cooldown": "في فترة تهدئة حتى {until}",
+  "cookies.upload.prompt": "أرسل ملف <b>cookies.txt</b> الجديد لـ <b>{label}</b> كملف.\nسيتم فحصه واختباره قبل استبدال أي شيء. أرسل /cancel للإلغاء.",
+  "cookies.upload.prompt_new": "أرسل ملف <b>cookies.txt</b> الجديد كملف لإضافته إلى المجموعة.\nسيتم فحصه واختباره أولًا. أرسل /cancel للإلغاء.",
+  "cookies.upload.not_a_file": "من فضلك أرسل الكوكيز كـ <b>ملف</b> (أرفق cookies.txt) وليس كنص.",
+  "cookies.upload.too_large": "هذا الملف أكبر من أن يكون ملف كوكيز.",
+  "cookies.upload.invalid": "❌ مرفوض: {reason}\nلم يتغيّر شيء — الكوكي الحالي ما زال يعمل.",
+  "cookies.upload.testing": "⏳ جارٍ فحص الكوكي وتشغيل اختبار تنزيل…",
+  "cookies.upload.canary_failed": "❌ تمت قراءة الكوكي لكن الاختبار فشل: {reason}\nلم يتغيّر شيء — الكوكي الحالي ما زال يعمل.",
+  "cookies.upload.conflict": "⚠️ قام شخص آخر باستبدال هذا الكوكي أثناء رفعك. لم يتغيّر شيء — افتح المجموعة لرؤية الحالة الحالية.",
+  "cookies.upload.replaced": "✅ تم استبدال <b>{label}</b> (v{version}) والتحقق منه — {detail}.\nالمجموعة: {healthy}/{total} سليمة.",
+  "cookies.upload.added": "✅ تمت إضافة <b>{label}</b> والتحقق منه — {detail}.\nالمجموعة: {healthy}/{total} سليمة.",
+  "cookies.upload.cancelled": "تم الإلغاء. لم يتغيّر شيء.",
+  "cookies.upload.expired": "انتهت صلاحية طلب الرفع. افتح مجموعة الكوكيز وحاول مرة أخرى.",
+  "cookies.test.running": "⏳ جارٍ اختبار {label}…",
+  "cookies.test.ok": "✅ {label} يعمل — {detail}.",
+  "cookies.test.failed": "❌ {label} فشل: {detail}",
+  "cookies.disabled": "⏸ تم تعطيل {label}. لن يُستخدم حتى تعيد تفعيله.",
+  "cookies.enabled": "▶️ تم تفعيل {label}.",
+  "cookies.not_found": "هذا الكوكي لم يعد موجودًا."
 }

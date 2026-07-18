@@ -31,6 +31,7 @@ from bot.chat_prober import AiogramChatProber
 from bot.handlers import admin as admin_handler
 from bot.handlers import admin_panel as admin_panel_handler
 from bot.handlers import ads as ads_handler
+from bot.handlers import cookies as cookies_handler
 from bot.handlers import download as download_handler
 from bot.handlers import errors as errors_handler
 from bot.handlers import help as help_handler
@@ -93,6 +94,7 @@ from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
 from services.caption_ad_mixer import CaptionAdMixer
+from services.cookie_admin_service import CookieAdminService
 from services.cookie_bootstrap import bootstrap_cookie_pool
 from services.cookie_pool_service import CookiePolicy, CookiePoolService, LeaseBackend
 from services.error_log_service import ErrorLogService
@@ -130,6 +132,7 @@ def build_dispatcher(
     referral_service_factory: Callable[[AsyncSession], ReferralService],
     preference_service_factory: Callable[[AsyncSession], UserPreferenceService],
     error_log_service_factory: Callable[[AsyncSession], ErrorLogService] | None = None,
+    cookie_admin_factory: Callable[[], CookieAdminService] | None = None,
     template_service: TemplateService,
     health_checker_factory: Callable[[Bot], UserHealthChecker],
     queue_service: QueueService,
@@ -160,6 +163,7 @@ def build_dispatcher(
     dp["referral_service_factory"] = referral_service_factory
     dp["preference_service_factory"] = preference_service_factory
     dp["error_log_service_factory"] = error_log_service_factory
+    dp["cookie_admin_factory"] = cookie_admin_factory
     dp["template_service"] = template_service
     dp["health_checker_factory"] = health_checker_factory
     dp["queue_service"] = queue_service
@@ -185,6 +189,7 @@ def build_dispatcher(
         observer.outer_middleware(throttle)
 
     dp.include_router(errors_handler.router)  # global backstop for unhandled exceptions
+    dp.include_router(cookies_handler.router)
     dp.include_router(start_handler.router)
     dp.include_router(membership_handler.router)
     dp.include_router(help_handler.router)
@@ -232,11 +237,37 @@ async def main() -> None:
     # short-lived sessions, so cookie bookkeeping never joins a request transaction.
     cookie_store = LocalCookieStore(settings.ytdlp_cookie_pool_dir)
     cookie_repo = CookieRepositoryAdapter(session_factory)
+    async def on_cookie_health_change(cookie: object, to: object, reason: str) -> None:
+        """Terminal cookie state -> notify Owner + Moderators with a Replace button."""
+        healthy, total = await cookie_admin.pool_summary()
+        last_success = getattr(cookie, "last_success_at", None)
+        # Its own session: the pool runs outside any request transaction.
+        async with session_factory() as session:
+            notifier = AdminNotificationService(
+                admin_message_sender,
+                UserRepository(session),
+                cookie_replace_cb=cookies_handler.replace_callback(callback_signer),
+            )
+            await notifier.notify_cookie_unhealthy(
+                label=getattr(cookie, "label", "?"),
+                status=str(getattr(to, "value", to)),
+                reason=reason,
+                last_success_at=(
+                    last_success.strftime("%Y-%m-%d %H:%M UTC") if last_success else None
+                ),
+                consecutive_failures=getattr(cookie, "auth_failures", 0),
+                healthy=healthy,
+                total=total,
+                egress_id=getattr(cookie, "egress_id", None),
+                cookie_id=getattr(cookie, "id", None),
+            )
+
     cookie_pool = CookiePoolService(
         cookie_repo,
         cookie_store,
         LeaseBackend(RedisLock(redis_clients.cache)),
         CookiePolicy(),
+        on_health_change=on_cookie_health_change,
     )
     # Idempotent: imports the pre-pool cookies.txt as yt-01 when the pool is empty, and
     # flags rows whose file has vanished. Never blocks startup.
@@ -246,15 +277,17 @@ async def main() -> None:
         legacy_master=settings.ytdlp_cookie_legacy_file,
         default_egress_id=DEFAULT_WARP_ID,
     )
-    registry.register(
-        YtdlpProvider(
-            settings.ytdlp_path,
-            proxy=settings.ytdlp_proxy,
-            warp_proxy=settings.ytdlp_warp_proxy,
-            warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
-            cookies=cookie_pool,
-        )
+    ytdlp_provider = YtdlpProvider(
+        settings.ytdlp_path,
+        proxy=settings.ytdlp_proxy,
+        warp_proxy=settings.ytdlp_warp_proxy,
+        warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
+        cookies=cookie_pool,
     )
+    registry.register(ytdlp_provider)
+    # The provider doubles as the canary runner: it already owns yt-dlp, and the
+    # candidate cookie is passed explicitly so it never touches the live pool.
+    cookie_admin = CookieAdminService(cookie_repo, cookie_store, ytdlp_provider)
     callback_signer = CallbackSigner(settings.bot_token.get_secret_value())
 
     bot = build_bot(settings)
@@ -414,6 +447,7 @@ async def main() -> None:
         referral_service_factory=make_referral_service,
         preference_service_factory=make_preference_service,
         error_log_service_factory=make_error_log_service,
+        cookie_admin_factory=lambda: cookie_admin,
         template_service=template_service,
         health_checker_factory=make_health_checker,
         queue_service=queue_service,

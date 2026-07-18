@@ -20,6 +20,10 @@ or write clears pending input, so only one guided input is ever active at a time
   bulk-import subscribers (Sprint 13.6); the next document is parsed and upserted.
 * :attr:`template_edit` — the Owner is typing new content for a message template
   (Sprint 13.8); ``key``/``locale`` ride in the FSM data.
+* :attr:`cookie_upload` — the Owner is uploading a ``cookies.txt`` for the cookie
+  pool (DESIGN_COOKIE_POOL.md §10). ``cookie_id`` (None ⇒ add) and the
+  ``file_version`` being replaced ride in the FSM data, so a concurrent replace is
+  detected at commit time instead of clobbering the newer file.
 """
 
 from __future__ import annotations
@@ -36,3 +40,4 @@ class PanelStates(StatesGroup):
     import_subscribers = State()
     template_edit = State()
     template_button_edit = State()
+    cookie_upload = State()

@@ -49,6 +49,22 @@ class CookieProviderProtocol(Protocol):
 
 
 @runtime_checkable
+class CookieCanaryProtocol(Protocol):
+    """Proves a cookie file actually works before it is allowed into the pool (§10).
+
+    Implemented by the downloader (it owns yt-dlp). Returning ``(False, reason)`` must
+    leave the existing cookie untouched — a failed canary is a rejected upload, not a
+    degraded pool.
+    """
+
+    async def canary_check(
+        self, *, cookie_path: Path, egress_id: str | None = None
+    ) -> tuple[bool, str]:
+        """``(ok, human-readable detail)`` from one real extraction with this cookie."""
+        ...
+
+
+@runtime_checkable
 class CookieStoreProtocol(Protocol):
     """Storage for cookie material, addressed by ``(label, version)``."""
 
@@ -65,6 +81,10 @@ class CookieStoreProtocol(Protocol):
     async def delete(self, label: str, version: int) -> None: ...
 
     async def exists(self, label: str, version: int) -> bool: ...
+
+    async def prune(self, label: str, *, keep_from_version: int, keep: int = 2) -> None:
+        """Drop superseded versions, retaining the newest ``keep`` for rollback."""
+        ...
 
 
 @runtime_checkable

@@ -269,6 +269,45 @@ class YtdlpProvider:
                     )
                     await self._cookies.release(lease)
 
+    async def canary_check(
+        self, *, cookie_path: Path, egress_id: str | None = None, url: str = ""
+    ) -> tuple[bool, str]:
+        """Verify a cookie file with one real extraction (DESIGN_COOKIE_POOL.md §10).
+
+        Used before an uploaded cookie is accepted, and by the "Test now" admin action.
+        Runs outside the pool entirely — the cookie under test is passed explicitly, so
+        a broken upload can never be leased to a real request just to find out.
+        """
+        target = url or "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        endpoint = (
+            self._egress.get(egress_id)
+            if egress_id
+            else next(iter(self._egress.plan("youtube", metadata_only=True)), None)
+        )
+        args = [
+            self._bin,
+            "-J",
+            "--no-playlist",
+            "--ignore-no-formats-error",
+            "--proxy",
+            endpoint.address if endpoint else "",
+            target,
+        ]
+        env = {**os.environ, "YTDLP_COOKIE_FILE": str(cookie_path)}
+        try:
+            stdout, stderr = await self._run(args, timeout_s=self._extract_timeout, env=env)
+        except Exception as exc:
+            return False, str(exc)[:200]
+        try:
+            info: dict[str, Any] = orjson.loads(stdout)
+        except orjson.JSONDecodeError:
+            return False, "yt-dlp returned no parseable metadata"
+        formats = info.get("formats") or []
+        if not formats:
+            detail = _reason(stderr.decode(errors="replace")) or "no playable formats"
+            return False, detail
+        return True, f"{len(formats)} formats via {endpoint.id if endpoint else 'direct'}"
+
     async def _run_egress_plan(
         self,
         platform: str,

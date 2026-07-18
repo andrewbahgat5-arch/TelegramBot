@@ -69,12 +69,23 @@ class FileSenderProtocol(Protocol):
 
 
 class MessageSenderProtocol(Protocol):
-    async def send_message(self, chat_id: int, text: str, *, parse_mode: str | None = None) -> int:
+    async def send_message(
+        self,
+        chat_id: int,
+        text: str,
+        *,
+        parse_mode: str | None = None,
+        buttons: list[tuple[str, str]] | None = None,
+    ) -> int:
         """Send ``text`` to ``chat_id``; return the new message id.
 
         ``parse_mode`` is optional and defaults to plain text (``None``) so existing
         callers (e.g. download-progress notifications) are unchanged; the broadcast
         worker passes ``"HTML"`` to render formatted content.
+
+        ``buttons`` is an optional list of ``(label, callback_data)`` pairs rendered as
+        a one-per-row inline keyboard. Kept as plain tuples so the service layer can
+        offer actions (e.g. "Replace cookie") without importing a bot framework.
         """
         ...
 
