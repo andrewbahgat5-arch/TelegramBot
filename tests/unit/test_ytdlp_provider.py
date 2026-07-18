@@ -15,7 +15,11 @@ import pytest
 
 from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat, Quality
-from domain.exceptions import ExtractionFailedError, URLNotSupportedError
+from domain.exceptions import (
+    ExtractionFailedError,
+    URLNotSupportedError,
+    VideoUnavailableError,
+)
 from domain.protocols.downloader import ProviderHealth, ProviderRetryElsewhere
 from infrastructure.downloader.providers.ytdlp_provider import (
     YtdlpProvider,
@@ -204,6 +208,44 @@ async def test_extract_info_success(monkeypatch: pytest.MonkeyPatch) -> None:
     info = await YtdlpProvider().extract_info(_URL)
     assert info.video_id == "vid123"
     assert len(info.formats) == 3
+
+
+_METADATA_ONLY: dict[str, Any] = {
+    # What --ignore-no-formats-error yields when YouTube serves its bot-check wall:
+    # rc=0, webpage metadata, ZERO formats — the reason exists only in stderr.
+    "id": "2oPfC_Pwfu8",
+    "title": "A documentary",
+    "webpage_url": "https://www.youtube.com/watch?v=2oPfC_Pwfu8",
+}
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        b"WARNING: [youtube] 2oPfC_Pwfu8: Sign in to confirm you're not a bot.",
+        # The apostrophe is a right-single-quote (U+2019) in real output — both must match.
+        "WARNING: [youtube] Sign in to confirm you’re not a bot.".encode(),  # noqa: RUF001
+    ],
+)
+async def test_extract_info_bot_check_wall_is_video_unavailable(
+    monkeypatch: pytest.MonkeyPatch, stderr: bytes
+) -> None:
+    # rc=0 + metadata-only + the bot-check signature in stderr → the distinct
+    # user-facing "this video needs verification" error, NOT "busy, try again"
+    # (a retry cannot fix it — the egress IP is what's being challenged).
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_METADATA_ONLY), stderr, 0))
+    with pytest.raises(VideoUnavailableError):
+        await YtdlpProvider().extract_info(_URL)
+
+
+async def test_extract_info_no_formats_without_bot_check_stays_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Metadata-only with no recognised wall signature keeps the existing transient
+    # classification (the user is asked to try again).
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_METADATA_ONLY), b"", 0))
+    with pytest.raises(ProviderRetryElsewhere):
+        await YtdlpProvider().extract_info(_URL)
 
 
 async def test_extract_info_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:

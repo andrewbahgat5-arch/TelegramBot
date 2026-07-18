@@ -584,7 +584,19 @@ class ReferralRepositoryProtocol(Repository[T], Protocol[T]):
         ...
 
 
-class ErrorLogRepositoryProtocol(Repository[T], Protocol[T]): ...
+class ErrorLogRepositoryProtocol(Repository[T], Protocol[T]):
+    async def record(
+        self,
+        *,
+        error_type: str,
+        message: str,
+        user_id: int | None = None,
+        job_id: uuid.UUID | None = None,
+        correlation_id: uuid.UUID | None = None,
+        traceback_text: str | None = None,
+    ) -> None:
+        """Persist one error occurrence (Section 15.4 hierarchy → ``error_logs``)."""
+        ...
 
 
 class UserPreferenceRepositoryProtocol(Repository[T], Protocol[T]):

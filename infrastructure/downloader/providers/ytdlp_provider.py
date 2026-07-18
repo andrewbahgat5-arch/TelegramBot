@@ -29,6 +29,7 @@ from domain.exceptions import (
     ExtractionFailedError,
     InfrastructureError,
     URLNotSupportedError,
+    VideoUnavailableError,
 )
 from domain.protocols.downloader import (
     Capability,
@@ -54,6 +55,13 @@ _DEFAULT_HEALTH_TIMEOUT = 10.0
 # the job layer already re-queues).
 _EXTRACT_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 0.5
+
+# YouTube's interactive verification wall ("Sign in to confirm you're not a bot" — the
+# apostrophe varies between ASCII and U+2019 across builds, hence the wildcard). Served
+# per-video to flagged egress IPs; with --ignore-no-formats-error it yields rc=0 +
+# metadata-only, so the stderr text is the ONLY place the real reason appears. Retrying
+# does not help → VideoUnavailableError.
+_BOT_CHECK_RE = re.compile(r"confirm you.{0,3}re not a bot", re.IGNORECASE)
 
 # Machine-readable per-chunk progress on stdout (parsed in _run_with_progress). Prefix
 # "DLP" disambiguates it from any other output; fields are downloaded/total/estimate.
@@ -225,23 +233,42 @@ class YtdlpProvider:
         # *video* formats; without this yt-dlp exits non-zero ("No video formats found") and
         # we lose the metadata + image. With it, the info dict (incl. thumbnails) is returned
         # and we emit an IMAGE option below (guarded by platform in _to_media_info).
-        base = [self._bin, "-J", "--no-playlist", "--no-warnings", "--ignore-no-formats-error"]
+        # NO --no-warnings here: with --ignore-no-formats-error a blocked extraction still
+        # exits 0, and the suppressed warning text is the only record of WHY there are no
+        # formats (e.g. YouTube's bot-check wall) — we need it to classify the failure.
+        base = [self._bin, "-J", "--no-playlist", "--ignore-no-formats-error"]
         platform = detect_platform(url)
 
-        async def run(_egress: Egress, proxy: str) -> bytes:
+        async def run(_egress: Egress, proxy: str) -> tuple[bytes, bytes]:
             # ``--proxy ""`` forces DIRECT (overrides any ambient config); a value routes it.
             return await self._run_with_retries(
                 [*base, "--proxy", proxy, url], timeout_s=self._extract_timeout
             )
 
-        stdout = await self._run_egress_plan(platform, None, run)
+        stdout, stderr = await self._run_egress_plan(platform, None, run)
         try:
             info: dict[str, Any] = orjson.loads(stdout)
         except orjson.JSONDecodeError as exc:
             raise ExtractionFailedError("Could not parse media metadata.") from exc
-        return self._to_media_info(url, info)
+        try:
+            return self._to_media_info(url, info)
+        except ProviderRetryElsewhere:
+            # No playable formats on a named platform — the stderr warnings say why.
+            stderr_text = stderr.decode(errors="replace").strip()
+            if _BOT_CHECK_RE.search(stderr_text):
+                _log.warning(
+                    "ytdlp_bot_check_wall", platform=platform, stderr=stderr_text[:300]
+                )
+                raise VideoUnavailableError(
+                    "The site is demanding interactive verification for this video."
+                ) from None
+            if stderr_text:
+                _log.warning(
+                    "ytdlp_no_formats_stderr", platform=platform, stderr=stderr_text[:300]
+                )
+            raise
 
-    async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> bytes:
+    async def _run_with_retries(self, args: list[str], *, timeout_s: float) -> tuple[bytes, bytes]:
         """Run yt-dlp, retrying only *transient* failures a few times (#12)."""
         attempt = 0
         while True:
@@ -350,7 +377,11 @@ class YtdlpProvider:
         return ProviderHealth.OK
 
     # --- subprocess + error mapping ---------------------------------------
-    async def _run(self, args: list[str], *, timeout_s: float) -> bytes:
+    async def _run(self, args: list[str], *, timeout_s: float) -> tuple[bytes, bytes]:
+        """Run yt-dlp to completion → ``(stdout, stderr)``; maps non-zero exits to
+        domain errors. stderr is returned even on success — with
+        ``--ignore-no-formats-error`` the reason an extraction produced no formats
+        exists only there."""
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -379,7 +410,7 @@ class YtdlpProvider:
                 stderr=decoded.strip()[:500],
             )
             raise error
-        return stdout
+        return stdout, stderr
 
     async def _run_with_progress(
         self, args: list[str], *, timeout_s: float, progress_cb: DownloadProgress

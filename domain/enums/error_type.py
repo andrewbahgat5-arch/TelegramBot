@@ -21,6 +21,7 @@ class ErrorType(StrEnum):
     COOLDOWN_ACTIVE = "cooldown_active"
     MAINTENANCE_MODE = "maintenance_mode"
     PERMISSION_DENIED = "permission_denied"
+    VIDEO_UNAVAILABLE = "video_unavailable"
     # Download pipeline
     EXTRACTION_FAILED = "extraction_failed"
     DOWNLOAD_TIMEOUT = "download_timeout"

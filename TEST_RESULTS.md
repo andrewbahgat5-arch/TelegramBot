@@ -67,6 +67,24 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (2) — Unit — Bot-check classification + error_logs write path + burst alerts
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit; worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) |
+| Suite | unit (full) |
+| Triggered by | Production incident: YouTube serves a per-video "Sign in to confirm you're not a bot" wall to the flagged proxy egress; with `--ignore-no-formats-error` it surfaced as a misleading "service busy, try again". Also implements the two agreed observability items: persist failures to `error_logs`, alert on failure bursts. |
+| Total tests | 961 | Passed | 960 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| New tests | `test_error_log_service.py` (4); `test_ytdlp_provider.py` +3 (rc=0 metadata-only + wall signature → `VideoUnavailableError`, both apostrophe variants; no signature → stays transient); `test_alerting.py` +3 (`BurstDetector` fire-at-threshold / isolated-failures / re-arm); `test_download_handler.py` +2 (video-unavailable message; failure persisted with user + platform context) |
+| Notes | Changes: `domain` (+`ErrorType.VIDEO_UNAVAILABLE`, +`VideoUnavailableError`, `ErrorLogRepositoryProtocol.record`), `infrastructure` (`ytdlp_provider`: extract keeps stderr (dropped `--no-warnings` on extract only), `_run` → `(stdout, stderr)`, bot-check classifier; `ErrorLogRepository.record`), `services/error_log_service.py` (new — first writer to the until-now write-orphaned `error_logs` table; best-effort, never raises), `core/alerting.py` (+`BurstDetector`), `bot/handlers/download.py` (UserFacingError branch + `record_failure` on every failure path + one CRITICAL `analyze_failure_burst` per ≥5-failures/10-min burst → existing Telegram alert pipeline), `bot/main.py` (factory wiring), locales (+`errors.video_unavailable`). Gates: ruff/mypy add **zero** new findings vs HEAD (verified by stash-baseline runs). |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+---
+
 ### 2026-07-18 — Unit — Analysis-failure observability + global error backstop
 
 | Field | Value |

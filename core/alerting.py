@@ -37,6 +37,36 @@ class AlertThrottle:
         return True
 
 
+class BurstDetector:
+    """Sliding-window failure counter that fires once per burst.
+
+    ``record()`` returns True exactly when the number of recorded events inside the
+    trailing ``window_seconds`` reaches ``threshold`` — the caller then emits ONE
+    CRITICAL record (which :class:`TelegramAlertProcessor` turns into a Telegram
+    alert). The window is cleared on fire, so a sustained outage re-alerts only
+    after ``threshold`` further failures (and the per-fingerprint
+    :class:`AlertThrottle` additionally caps it to one message per 5 minutes).
+
+    Isolated failures (a user's odd link now and then) never reach the threshold
+    and stay log-only. Not thread-safe; each process/handler module keeps its own.
+    """
+
+    def __init__(self, threshold: int, window_seconds: float) -> None:
+        self._threshold = threshold
+        self._window = window_seconds
+        self._events: list[float] = []
+
+    def record(self, *, now: float | None = None) -> bool:
+        ts = now if now is not None else time.time()
+        cutoff = ts - self._window
+        self._events = [t for t in self._events if t > cutoff]
+        self._events.append(ts)
+        if len(self._events) >= self._threshold:
+            self._events.clear()
+            return True
+        return False
+
+
 def alert_fingerprint(event_dict: EventDict) -> str:
     """Stable fingerprint for an alert: the originating logger + event name."""
     return f"{event_dict.get('logger', '?')}:{event_dict.get('event', '?')}"

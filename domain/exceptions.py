@@ -73,6 +73,17 @@ class PermissionDeniedError(UserFacingError):
     error_type = ErrorType.PERMISSION_DENIED
 
 
+class VideoUnavailableError(UserFacingError):
+    """The source site refuses to serve this specific video to us right now.
+
+    Distinct from a transient failure (retrying will NOT help — e.g. YouTube's
+    per-video "confirm you're not a bot" wall served to a flagged egress IP) and
+    from "private/removed". The user should try a different video or come back
+    later; the catalog text says exactly that."""
+
+    error_type = ErrorType.VIDEO_UNAVAILABLE
+
+
 # --- Download pipeline ----------------------------------------------------
 class DownloadError(AppError):
     """Base for failures in the download/transcode/upload pipeline."""
@@ -176,4 +187,5 @@ __all__ = [
     "TelegramUploadError",
     "URLNotSupportedError",
     "UserFacingError",
+    "VideoUnavailableError",
 ]

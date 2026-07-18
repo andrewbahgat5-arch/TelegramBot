@@ -91,6 +91,7 @@ from services.audience_service import AudienceService
 from services.broadcast_service import BroadcastService
 from services.cache_service import CacheService
 from services.caption_ad_mixer import CaptionAdMixer
+from services.error_log_service import ErrorLogService
 from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
@@ -124,6 +125,7 @@ def build_dispatcher(
     admin_service_factory: Callable[[AsyncSession], AdminService],
     referral_service_factory: Callable[[AsyncSession], ReferralService],
     preference_service_factory: Callable[[AsyncSession], UserPreferenceService],
+    error_log_service_factory: Callable[[AsyncSession], ErrorLogService] | None = None,
     template_service: TemplateService,
     health_checker_factory: Callable[[Bot], UserHealthChecker],
     queue_service: QueueService,
@@ -153,6 +155,7 @@ def build_dispatcher(
     dp["admin_service_factory"] = admin_service_factory
     dp["referral_service_factory"] = referral_service_factory
     dp["preference_service_factory"] = preference_service_factory
+    dp["error_log_service_factory"] = error_log_service_factory
     dp["template_service"] = template_service
     dp["health_checker_factory"] = health_checker_factory
     dp["queue_service"] = queue_service
@@ -260,6 +263,9 @@ async def main() -> None:
 
     def make_preference_service(session: AsyncSession) -> UserPreferenceService:
         return UserPreferenceService(UserPreferenceRepository(session))
+
+    def make_error_log_service(session: AsyncSession) -> ErrorLogService:
+        return ErrorLogService(ErrorLogRepository(session))
 
     def make_rate_limit_service(session: AsyncSession) -> RateLimitService:
         settings_service = SettingsService(
@@ -377,6 +383,7 @@ async def main() -> None:
         admin_service_factory=make_admin_service,
         referral_service_factory=make_referral_service,
         preference_service_factory=make_preference_service,
+        error_log_service_factory=make_error_log_service,
         template_service=template_service,
         health_checker_factory=make_health_checker,
         queue_service=queue_service,

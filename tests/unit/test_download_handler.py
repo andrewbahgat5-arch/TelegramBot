@@ -229,6 +229,66 @@ async def test_url_message_transient_failure_logs_platform_and_host() -> None:
     assert len(failure["url_hash"]) == 12
 
 
+async def test_url_message_video_unavailable_gets_honest_message() -> None:
+    # The per-video bot-check wall is NOT transient — the user gets the dedicated
+    # "this video needs verification, try another" text, not "busy, try again".
+    from core.i18n import translate as _translate
+    from domain.exceptions import VideoUnavailableError
+
+    analyzer = _analyzer(error=VideoUnavailableError("bot-check wall"))
+    message, ack = _message_with_ack()
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.args[0] == _translate("errors.video_unavailable", "en")
+
+
+class _RecordingErrorLogService:
+    """ErrorLogService stand-in capturing record_failure calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def record_failure(self, error: BaseException, **kwargs: object) -> None:
+        self.calls.append({"error": error, **kwargs})
+
+
+async def test_url_message_failure_is_persisted_to_error_log() -> None:
+    # Analysis failures must land in error_logs (queryable after docker logs rotate),
+    # tagged with the user and a greppable platform/host/hash context.
+    from domain.protocols.downloader import ProviderRetryElsewhere
+
+    recorder = _RecordingErrorLogService()
+    analyzer = _analyzer(error=ProviderRetryElsewhere("rate limited"))
+    message, ack = _message_with_ack()
+    message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    snapshot = _user()
+    await handle_url(
+        message,
+        _session(),
+        snapshot,
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+        error_log_service_factory=lambda s: recorder,  # type: ignore[arg-type, return-value]
+    )
+    assert len(recorder.calls) == 1
+    call = recorder.calls[0]
+    assert call["user_id"] == snapshot.id  # the internal users.id, not the telegram id
+    assert "youtube" in str(call["context"])
+    assert "www.youtube.com" in str(call["context"])
+
+
 async def test_url_message_unexpected_error_replies_and_swallows() -> None:
     # A genuine bug in analysis must not strand the user on "Analyzing…" or crash the
     # update: the ack is edited to the generic apology and nothing propagates.

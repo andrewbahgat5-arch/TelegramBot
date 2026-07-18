@@ -5,10 +5,37 @@ from __future__ import annotations
 from core.alerting import (
     ALERT_WINDOW_SECONDS,
     AlertThrottle,
+    BurstDetector,
     TelegramAlertProcessor,
     alert_fingerprint,
     format_alert,
 )
+
+
+def test_burst_detector_fires_at_threshold_within_window() -> None:
+    burst = BurstDetector(3, window_seconds=600)
+    assert burst.record(now=0.0) is False
+    assert burst.record(now=10.0) is False
+    assert burst.record(now=20.0) is True  # threshold reached → fire once
+
+
+def test_burst_detector_ignores_slow_isolated_failures() -> None:
+    # Failures spaced wider than the window never accumulate to the threshold.
+    burst = BurstDetector(3, window_seconds=600)
+    assert burst.record(now=0.0) is False
+    assert burst.record(now=700.0) is False
+    assert burst.record(now=1400.0) is False
+    assert burst.record(now=2100.0) is False
+
+
+def test_burst_detector_rearms_after_firing() -> None:
+    # After a fire the window is cleared: a sustained outage re-alerts only after
+    # `threshold` further failures, not on every subsequent one.
+    burst = BurstDetector(2, window_seconds=600)
+    assert burst.record(now=0.0) is False
+    assert burst.record(now=1.0) is True
+    assert burst.record(now=2.0) is False
+    assert burst.record(now=3.0) is True
 
 
 def test_throttle_allows_first_then_blocks_within_window() -> None:

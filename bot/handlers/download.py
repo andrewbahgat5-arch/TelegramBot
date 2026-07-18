@@ -29,6 +29,7 @@ from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
 from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
+from core.alerting import BurstDetector
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from core.urls import detect_platform
@@ -44,6 +45,7 @@ from domain.exceptions import (
 from domain.protocols.downloader import ProviderRetryElsewhere
 from services.ad_service import AdService
 from services.caption_ad_mixer import CaptionAdMixer
+from services.error_log_service import ErrorLogService
 from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
@@ -58,6 +60,14 @@ JobServiceFactory = Callable[[AsyncSession], JobService]
 RateLimitServiceFactory = Callable[[AsyncSession], RateLimitService]
 AdServiceFactory = Callable[[AsyncSession], AdService]
 PreferenceServiceFactory = Callable[[AsyncSession], UserPreferenceService]
+ErrorLogServiceFactory = Callable[[AsyncSession], ErrorLogService]
+
+# One CRITICAL "analysis failures are bursting" alert (→ the Telegram alerts chat via
+# TelegramAlertProcessor) when this many analyses fail within the window. Isolated
+# failures stay log-only; a burst means the pipeline (proxy, yt-dlp, a platform) broke.
+_BURST_THRESHOLD = 5
+_BURST_WINDOW_SECONDS = 600.0
+_analyze_failure_burst = BurstDetector(_BURST_THRESHOLD, _BURST_WINDOW_SECONDS)
 
 # "Small file" ceiling for the auto-download preference (item #10): a single-format
 # link at or under this size is fetched without the picker; larger files still ask.
@@ -102,33 +112,68 @@ async def handle_url(
     job_service_factory: JobServiceFactory | None = None,
     rate_limit_service_factory: RateLimitServiceFactory | None = None,
     notification_service: NotificationService | None = None,
+    error_log_service_factory: ErrorLogServiceFactory | None = None,
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
     url = message.text or ""
     ack = await message.answer(translate("download.analyzing", locale))
     _log.info("download_requested", user_id=user.telegram_id, **_url_log_fields(url))
     analyzer = analyzer_factory(session)
+
+    async def record_failure(exc: BaseException, *, with_traceback: bool = False) -> None:
+        # Persist into error_logs (queryable long after docker logs rotate) + fire ONE
+        # CRITICAL burst alert when analyses are failing in bulk (pipeline-level outage).
+        fields = _url_log_fields(url)
+        if error_log_service_factory is not None:
+            context = f"analyze {fields['platform']} {fields['url_host']} {fields['url_hash']}"
+            await error_log_service_factory(session).record_failure(
+                exc,
+                context=context,
+                user_id=user.id,
+                correlation_id=get_correlation_id(),
+                with_traceback=with_traceback,
+            )
+        if _analyze_failure_burst.record():
+            _log.critical(
+                "analyze_failure_burst",
+                failures=_BURST_THRESHOLD,
+                window_seconds=int(_BURST_WINDOW_SECONDS),
+                error=str(exc),
+                **fields,
+            )
+
     try:
         analyzed = await analyzer.analyze(url)
     except URLNotSupportedError:
         _log.info("analyze_unsupported_url", **_url_log_fields(url))
         await ack.edit_text(translate("errors.url_not_supported", locale))
         return
+    except UserFacingError as exc:
+        # The site refuses this specific item (e.g. YouTube's per-video bot-check wall) —
+        # an honest, actionable message beats "busy, try again" for something a retry
+        # cannot fix. The catalog key comes from the domain error type.
+        _log.warning("analyze_rejected", error=str(exc), **_url_log_fields(url))
+        await record_failure(exc)
+        await ack.edit_text(translate(exc.translation_key, locale))
+        return
     except (ProviderRetryElsewhere, InfrastructureError) as exc:
         # A transient failure that survived the provider's own retries (rate-limit, anti-bot
         # throttle, a flaky fetch, the binary momentarily unavailable). Tell the user it's
         # temporary and to try again — never the misleading "private or removed" (#12).
         _log.warning("analyze_transient_failure", error=str(exc), **_url_log_fields(url))
+        await record_failure(exc)
         await ack.edit_text(translate("download.temporary_error", locale))
         return
     except ExtractionFailedError as exc:
         _log.warning("analyze_extraction_failed", error=str(exc), **_url_log_fields(url))
+        await record_failure(exc)
         await ack.edit_text(translate("download.extraction_failed", locale))
         return
-    except Exception:
+    except Exception as exc:
         # Last-resort guard: an unexpected bug must never strand the user on a frozen
         # "Analyzing…" message. Log the traceback, tell the user it's on our side.
         _log.exception("analyze_unexpected_error", **_url_log_fields(url))
+        await record_failure(exc, with_traceback=True)
         try:
             await ack.edit_text(translate("errors.unexpected", locale))
         except Exception:  # noqa: S110 - the ack may have been deleted; nothing to do
