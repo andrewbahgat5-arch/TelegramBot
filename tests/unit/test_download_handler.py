@@ -202,6 +202,54 @@ async def test_url_message_transient_failure_shows_try_again() -> None:
     assert ack.edit_text.await_args.kwargs.get("reply_markup") is None
 
 
+async def test_url_message_transient_failure_logs_platform_and_host() -> None:
+    # The failure log must carry platform + host + url hash so production logs can
+    # tell WHICH site is failing without ever recording the full user URL.
+    from structlog.testing import capture_logs
+
+    from domain.protocols.downloader import ProviderRetryElsewhere
+
+    analyzer = _analyzer(error=ProviderRetryElsewhere("rate limited"))
+    message, ack = _message_with_ack()
+    message.text = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    with capture_logs() as logs:
+        await handle_url(
+            message,
+            _session(),
+            _user(),
+            lambda s: analyzer,
+            _no_ads,
+            CallbackSigner("k"),
+            translate,
+            "en",
+        )
+    failure = next(e for e in logs if e["event"] == "analyze_transient_failure")
+    assert failure["platform"] == "youtube"
+    assert failure["url_host"] == "www.youtube.com"
+    assert len(failure["url_hash"]) == 12
+
+
+async def test_url_message_unexpected_error_replies_and_swallows() -> None:
+    # A genuine bug in analysis must not strand the user on "Analyzing…" or crash the
+    # update: the ack is edited to the generic apology and nothing propagates.
+    from core.i18n import translate as _translate
+
+    analyzer = _analyzer(error=RuntimeError("boom"))
+    message, ack = _message_with_ack()
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
+    ack.edit_text.assert_awaited_once()
+    assert ack.edit_text.await_args.args[0] == _translate("errors.unexpected", "en")
+
+
 async def test_url_message_no_formats_replies() -> None:
     downloader = FakeProvider(
         "ytdlp",

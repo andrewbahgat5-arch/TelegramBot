@@ -67,6 +67,27 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 — Unit — Analysis-failure observability + global error backstop
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit; worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) |
+| Suite | unit (full) |
+| Triggered by | Production log review: `analyze_transient_failure` events carried no platform/host, `platform.generic` i18n key missing, no global aiogram error handler |
+| Total tests | 949 | Passed | 948 | Failed | 1 (pre-existing, see below) | Skipped | 0 |
+| New tests | `test_error_handler.py` (4: message/callback apology + locale pick, apology-failure swallowed, bare update logs only); `test_download_handler.py` +2 (transient-failure log carries `platform`/`url_host`/`url_hash`; unexpected analyzer exception edits the ack to `errors.unexpected` and never propagates); `test_bot_composition.py` updated (9 routers, errors backstop first) |
+| Notes | Changes: `bot/handlers/download.py` (`_url_log_fields` — platform + host + 12-char URL hash on `download_requested` / `analyze_unsupported_url` / `analyze_transient_failure` / `analyze_extraction_failed`; catch-all `analyze_unexpected_error` guard), new `bot/handlers/errors.py` (global `update_handling_failed` backstop, localized `errors.unexpected` reply), `bot/main.py` (router wired first), `core/locales/{en,ar}.json` (+`errors.unexpected`, +`platform.generic`). ruff clean on changed files; mypy: no new errors in changed files. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure (IMAGE member vs stale expected set); not touched by this change.
+
+**Skips (if non-trivial)**
+- None.
+
+---
+
 ### 2026-07-01 — Unit + full regression — Sprint 11.5 (Internationalization / i18n, 11.5.1–11.5.12)
 
 | Field | Value |

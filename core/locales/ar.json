@@ -9,6 +9,7 @@
   "errors.format_not_available": "هذا التنسيق لم يعد متاحًا لهذا المحتوى.",
   "errors.file_too_large": "الملف كبير جدًا بحيث لا يمكن إرساله.",
   "errors.rate_limit_exceeded": "طلبات كثيرة جدًا. يرجى الإبطاء.",
+  "errors.unexpected": "حدث خطأ من جانبنا. يرجى المحاولة مرة أخرى.",
 
   "user.banned": "🚫 أنت محظور من استخدام هذا البوت.",
   "system.maintenance": "🔧 البوت تحت الصيانة حاليًا. يرجى المحاولة مرة أخرى لاحقًا.",
@@ -357,6 +358,7 @@
   "platform.pinterest": "بنترست",
   "platform.snapchat": "سناب شات",
   "platform.reddit": "ريديت",
+  "platform.generic": "أخرى",
 
   "panel.menu.u.export": "📤 تصدير",
   "panel.menu.u.import": "📥 استيراد",

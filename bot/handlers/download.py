@@ -14,10 +14,12 @@ aiogram workflow data (``analyzer_factory``, ``job_service_factory``,
 from __future__ import annotations
 
 import datetime
+import hashlib
 import uuid
 from collections.abc import Callable
 from html import escape
 from typing import Any
+from urllib.parse import urlparse
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
@@ -29,6 +31,7 @@ from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
 from bot.keyboards.quality_select import build_quality_keyboard
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
+from core.urls import detect_platform
 from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaFormatOption, MediaInfo
 from domain.entities.user import UserSnapshot
 from domain.enums import UNLIMITED_ROLES, AdPlacement, MediaFormat, Quality
@@ -61,6 +64,16 @@ PreferenceServiceFactory = Callable[[AsyncSession], UserPreferenceService]
 _AUTO_DOWNLOAD_MAX_BYTES = 20 * 1024 * 1024  # 20 MiB
 
 
+def _url_log_fields(url: str) -> dict[str, str]:
+    """Diagnostic fields for analysis-failure logs: platform + host + a short stable
+    hash of the URL (never the URL itself — hosts are diagnostic, full URLs are
+    user content and stay out of the logs). The hash lets repeated failures for the
+    same link be correlated across users and time."""
+    host = urlparse(url.strip()).netloc.lower()
+    digest = hashlib.sha256(url.strip().encode()).hexdigest()[:12]
+    return {"platform": detect_platform(url), "url_host": host, "url_hash": digest}
+
+
 def _is_free(user: UserSnapshot) -> bool:
     """A user is on the free plan unless an unexpired premium grant is active (16.5)."""
     expires = user.premium_expires_at
@@ -91,23 +104,35 @@ async def handle_url(
     notification_service: NotificationService | None = None,
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
+    url = message.text or ""
     ack = await message.answer(translate("download.analyzing", locale))
-    _log.info("download_requested", user_id=user.telegram_id)
+    _log.info("download_requested", user_id=user.telegram_id, **_url_log_fields(url))
     analyzer = analyzer_factory(session)
     try:
-        analyzed = await analyzer.analyze(message.text or "")
+        analyzed = await analyzer.analyze(url)
     except URLNotSupportedError:
+        _log.info("analyze_unsupported_url", **_url_log_fields(url))
         await ack.edit_text(translate("errors.url_not_supported", locale))
         return
     except (ProviderRetryElsewhere, InfrastructureError) as exc:
         # A transient failure that survived the provider's own retries (rate-limit, anti-bot
         # throttle, a flaky fetch, the binary momentarily unavailable). Tell the user it's
         # temporary and to try again — never the misleading "private or removed" (#12).
-        _log.warning("analyze_transient_failure", error=str(exc))
+        _log.warning("analyze_transient_failure", error=str(exc), **_url_log_fields(url))
         await ack.edit_text(translate("download.temporary_error", locale))
         return
-    except ExtractionFailedError:
+    except ExtractionFailedError as exc:
+        _log.warning("analyze_extraction_failed", error=str(exc), **_url_log_fields(url))
         await ack.edit_text(translate("download.extraction_failed", locale))
+        return
+    except Exception:
+        # Last-resort guard: an unexpected bug must never strand the user on a frozen
+        # "Analyzing…" message. Log the traceback, tell the user it's on our side.
+        _log.exception("analyze_unexpected_error", **_url_log_fields(url))
+        try:
+            await ack.edit_text(translate("errors.unexpected", locale))
+        except Exception:  # noqa: S110 - the ack may have been deleted; nothing to do
+            pass
         return
 
     if not analyzed.info.formats:

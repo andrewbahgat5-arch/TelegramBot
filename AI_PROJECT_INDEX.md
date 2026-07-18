@@ -238,7 +238,7 @@ not a project-content doc. · Read when: understanding the intended engineering 
 
 | Component | Location |
 |---|---|
-| **Bot process** | `bot/main.py`; handlers `bot/handlers/`, keyboards `bot/keyboards/`, callbacks `bot/callbacks/`, filters `bot/filters/`, middlewares `bot/middlewares/` |
+| **Bot process** | `bot/main.py`; handlers `bot/handlers/`, keyboards `bot/keyboards/`, callbacks `bot/callbacks/`, filters `bot/filters/`, middlewares `bot/middlewares/`. Global error backstop: `bot/handlers/errors.py` — any unhandled handler exception logs `update_handling_failed` (traceback + update context) and sends the user a localized `errors.unexpected` apology |
 | **API process** | `api/main.py`, `api/app.py`, `api/readiness.py`, routes `api/routes/` |
 | **Workers** | `workers/main.py`; `workers/download_worker.py`, `broadcast_worker.py`, `cleanup_worker.py` |
 | **Business logic (services)** | `services/` (e.g. `download_service.py`, `job_service.py`, `queue_service.py`, `url_analyzer.py`, `notification_service.py`, `history_service.py`, `ad_service.py`, `broadcast_service.py`) |
@@ -254,7 +254,7 @@ not a project-content doc. · Read when: understanding the intended engineering 
 | **Configuration** | `core/config.py` (env-driven `Settings`), `core/constants.py`, `core/environment.py` |
 | **Admin notifications** | `services/admin_notification_service.py` — fans out important events (new user, block/return, ban/unban, broadcast published) to the Owner + all Moderators in each recipient's locale. Hooked from `services/user_service.py` (new user, ban/unban, block/return) and `bot/handlers/membership.py` (real-time `my_chat_member` block/unblock); broadcast hook in `bot/handlers/admin_panel.py`. Recipients via `UserRepository.list_staff()`. i18n keys `adminnotify.*` in `core/locales/{en,ar}.json` |
 | **Monitoring** | `api/readiness.py` (`/v1/ready`), `core/metrics.py`, `core/alerting.py`, `core/sentry.py`; uptime-kuma container in the compose stack |
-| **Logging** | `core/logging.py` (structured JSON logs to stdout; correlation ids; secret scrubbing). Every meaningful event logs a consistent entry (`admin_event kind=…`, `download_requested`, `job_queued`, download/queue/worker failures, `bot/worker_starting`/`_stopped`, …). Prod compose caps the json-file log (20 MB × 10). Review via `docker logs` (grep/jq-searchable) |
+| **Logging** | `core/logging.py` (structured JSON logs to stdout; correlation ids; secret scrubbing). Every meaningful event logs a consistent entry (`admin_event kind=…`, `download_requested`, `job_queued`, download/queue/worker failures, `bot/worker_starting`/`_stopped`, …). URL-analysis events (`download_requested`, `analyze_*` failures) carry `platform` + `url_host` + a short `url_hash` — never the full URL — so per-site failures are diagnosable from logs. Prod compose caps the json-file log (20 MB × 10). Review via `docker logs` (grep/jq-searchable) |
 
 ---
 

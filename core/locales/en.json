@@ -9,6 +9,7 @@
   "errors.format_not_available": "That format is no longer available for this media.",
   "errors.file_too_large": "The file is too large to send.",
   "errors.rate_limit_exceeded": "Too many requests. Please slow down.",
+  "errors.unexpected": "Something went wrong on our side. Please try again.",
 
   "user.banned": "🚫 You are banned from using this bot.",
   "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",
@@ -357,6 +358,7 @@
   "platform.pinterest": "Pinterest",
   "platform.snapchat": "Snapchat",
   "platform.reddit": "Reddit",
+  "platform.generic": "Other",
 
   "panel.menu.u.export": "📤 Export",
   "panel.menu.u.import": "📥 Import",

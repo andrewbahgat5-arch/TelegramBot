@@ -32,6 +32,7 @@ from bot.handlers import admin as admin_handler
 from bot.handlers import admin_panel as admin_panel_handler
 from bot.handlers import ads as ads_handler
 from bot.handlers import download as download_handler
+from bot.handlers import errors as errors_handler
 from bot.handlers import help as help_handler
 from bot.handlers import history as history_handler
 from bot.handlers import membership as membership_handler
@@ -176,6 +177,7 @@ def build_dispatcher(
         observer.outer_middleware(locale)
         observer.outer_middleware(throttle)
 
+    dp.include_router(errors_handler.router)  # global backstop for unhandled exceptions
     dp.include_router(start_handler.router)
     dp.include_router(membership_handler.router)
     dp.include_router(help_handler.router)
