@@ -803,6 +803,23 @@ Open Questions are the canonical issue board until a real one is set up. Update 
 
 The newest handoff is at the top. Every session ends with a new entry. Never delete old entries.
 
+### Session Handoff — 2026-07-18 — YouTube cookie pool Phase 1 (design → deploy → live)
+
+| Field | Value |
+|---|---|
+| **Session type** | Implementation |
+| **Active sprint** | post-14 (cookie pool) |
+| **Tasks moved** | Cookie pool Phase 1 — all six workstreams DONE and deployed |
+| **Files modified** | `DESIGN_COOKIE_POOL.md` (new), `domain/{entities/cookie,enums/cookie_health,protocols/cookies}.py`, `services/cookie_{classifier,pool_service,admin_service,validator,bootstrap}.py`, `infrastructure/cookies/*`, `infrastructure/database/{models,repositories}/youtube_cookie.py`, `infrastructure/downloader/routing.py` (EgressId), `infrastructure/telegram/client.py`, `bot/handlers/cookies.py`, migrations `2026071801`/`2026071802`, both locales, both composition roots, compose |
+| **Decisions added** | none (design doc is Owner-approved; no MASTER_PLAN D-number claimed) |
+| **Validation** | 1074 unit pass (1 pre-existing `test_enums` failure). Verified in production: bootstrap import, lease/report/release, concurrency cap, canary, route-failure-does-not-touch-health, notification rendering (en+ar, signed button), LRU rotation across 4 cookies |
+| **Current state** | Live with **4 cookies** (yt-01 imported, yt-02..04 added by the Owner through Telegram), all pinned to `warp-1`, all healthy. Policy is admin-editable via nine `cookie_*` settings rows. |
+| **Completed work** | Pool with identity/health/stats; allowlist classifier (only auth signals reduce health); affinity; Redis lease slots; cooldown ladder; terminal-state notifications with a signed Replace button; in-Telegram add/replace with validate → canary → CAS; stats screens; egress identity model (`warp-1`, `proxy-res-1`) |
+| **Remaining work** | Phase 2: recovery prober for EXPIRED cookies, per-cookie history view in the panel, exposing the `cookie_*` settings in the settings panel UI, Phase 3 multi-host `SharedCookieStore` |
+| **Known issues** | Cookie stats carry verification traffic (yt-01 `uses=14`), not real user load. `_candidate` scratch label is reserved — do not use it for a real cookie. |
+| **Recommended next task** | Phase 2 recovery prober, or leave the pool to soak and revisit after real traffic |
+| **Notes for the next agent** | Four production bugs were found only by exercising the live flow, not by tests: (1) local Bot API 404s file downloads, (2) it returns *relative* paths, (3) `created_by` needs the internal `users.id` not the Telegram id, (4) ranking unpinned cookies below affine ones made ONE cookie serve every request. The last is the cautionary one — the pool looked healthy and was silently not spreading load. Verify rotation after any change to `_order()`. |
+
 ### Session Handoff — 2026-07-07 — Two-layer advertisements: Caption ad + Follow-up message (+ local-test fixes)
 
 | Field | Value |

@@ -485,3 +485,30 @@ Migration `2026071802` seeds nine `cookie_*` settings; `CookiePolicyProvider` re
 take the pool down: unknown strategy → `lru`, non-numeric → ignored, `0` lease cap →
 clamped to 1, settings outage → last good policy. Verified in production: all nine rows
 seeded and the provider returns them.
+
+### Cookie pool — live and rotating (2026-07-18, final)
+
+Four cookies in the pool: **yt-01** (imported from the legacy master) plus **yt-02..04**
+added by the Owner through Telegram, all pinned to `warp-1`, all healthy. The add flow
+now works end to end: validate → canary ("37 formats via warp-1") → insert → confirm.
+
+**Four bugs surfaced only by driving the live flow**, none caught by 1074 unit tests:
+
+1. `bot.download()` 404 — the self-hosted Bot API runs `--local` and never serves files
+   over HTTP. Needed `is_local=True`.
+2. `FileNotFoundError` — it returns `file_path` **relative** to the per-bot directory,
+   which aiogram's local branch does not resolve → `LocalBotApiPathWrapper`. Also needed
+   `group_add: ["101"]`, because the files are `0750` owned by uid 101 while the app runs
+   as 10001, so mounting the volume alone still gave READ-DENIED.
+3. `ForeignKeyViolation` — the handler sent the **Telegram** id where `users.id` was
+   required. Also left an orphan version file, now rolled back on failure.
+4. **No rotation.** `_order()` ranked unpinned cookies below affine ones, so a single
+   pinned cookie served *six of six* leases while three fresh cookies idled. Everything
+   reported healthy; the pool was simply not spreading load — its entire purpose.
+
+Verified after the fix: `yt-01 → yt-02 → yt-03 → yt-04 → yt-01 → yt-02` (4 distinct),
+each auto-pinned on first success, concurrent leases granting exactly one slot per cookie.
+
+**Operational note:** bugs 1–2 also fixed the pre-existing subscriber-CSV import, which
+called `bot.download()` the same way and would have failed identically. **Check rotation
+after any change to `_order()`** — it is the failure mode that looks like success.

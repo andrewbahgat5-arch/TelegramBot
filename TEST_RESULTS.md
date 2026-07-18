@@ -67,6 +67,26 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (7) — Production — Cookie pool: four live-flow bugs found and fixed
+
+| Field | Value |
+|---|---|
+| Git SHA | `48a62cc` … `6c974c7`; worktree `happy-bose-71ed46` |
+| Environment | live production (`tgbot_bot` / `tgbot_worker`) |
+| Suite | unit (full) + live verification of the admin add-cookie flow and pool rotation |
+| Triggered by | Owner exercising `/cookies` → Add cookie, which failed three times |
+| Total tests | 1075 | Passed | 1074 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| Bugs found ONLY by driving the live flow | 1. **404 on `bot.download()`** — the self-hosted Bot API runs `--local` and never serves files over HTTP. 2. **`FileNotFoundError`** — it returns `file_path` *relative* to the per-bot dir; `is_local=True` alone does not resolve that (new `LocalBotApiPathWrapper`). Also needed `group_add: 101`, since the files are `0750` owned by uid 101 while the app runs as 10001. 3. **`ForeignKeyViolation`** — the handler passed the Telegram id where `users.id` was required. 4. **No rotation** — `_order()` ranked unpinned cookies below affine ones, so one pinned cookie served six of six leases while three fresh cookies idled. |
+| New tests | +9: local-Bot-API path resolution (6, incl. a POSIX-vs-host-OS guard), orphan-file rollback (1), pool rotation (2) |
+| Production verification | Pool rotates `yt-01 → yt-02 → yt-03 → yt-04 → yt-01 → yt-02` (4 distinct); all four auto-pinned to `warp-1` on first success; concurrent leases grant exactly one slot per cookie; both Owner-added cookies carry `actor_user_id=1` and canary detail "37 formats via warp-1" |
+| Notes | Bug 4 is the instructive one: every unit test passed and the pool reported healthy while silently not spreading load — the feature's entire purpose. It was visible only by leasing repeatedly against the real pool. Cookie counters include this verification traffic. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+---
+
 ### 2026-07-18 (6) — Unit + production — Cookie pool Phase 1 (DESIGN_COOKIE_POOL.md)
 
 | Field | Value |
