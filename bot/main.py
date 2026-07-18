@@ -49,6 +49,7 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
 from infrastructure.cookies import CookieRepositoryAdapter, LocalCookieStore
+from infrastructure.cookies.policy_settings import CookiePolicyProvider
 from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.message_template_store import MessageTemplateStore
@@ -267,6 +268,9 @@ async def main() -> None:
         cookie_store,
         LeaseBackend(RedisLock(redis_clients.cache)),
         CookiePolicy(),
+        # The six policy knobs are admin-editable at runtime (settings table), so the
+        # pool refreshes them per acquire through this briefly-cached provider.
+        policy_provider=CookiePolicyProvider(session_factory).get,
         on_health_change=on_cookie_health_change,
     )
     # Idempotent: imports the pre-pool cookies.txt as yt-01 when the pool is empty, and

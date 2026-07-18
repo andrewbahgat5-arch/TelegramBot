@@ -27,6 +27,7 @@ from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
 from infrastructure.cookies import CookieRepositoryAdapter, LocalCookieStore
+from infrastructure.cookies.policy_settings import CookiePolicyProvider
 from infrastructure.database.ad_event_recorder import AdEventRecorder
 from infrastructure.database.engine import create_engine
 from infrastructure.database.maintenance import DbMaintenance
@@ -117,6 +118,7 @@ def build_cookie_pool(
         store,
         LeaseBackend(RedisLock(redis_client)),  # type: ignore[arg-type]
         CookiePolicy(),
+        policy_provider=CookiePolicyProvider(session_factory).get,
     )
     return pool, repo, store
 

@@ -34,6 +34,11 @@ _log = get_logger("services.cookie_pool")
 #: Called when a cookie enters a state the Owner/Moderators must hear about.
 HealthChangeHook = Callable[[CookieSnapshot, CookieHealth, str], Awaitable[None]]
 
+#: Supplies the current policy. Injected so the six knobs can be admin-edited at
+#: runtime (DESIGN_COOKIE_POOL.md §13) without a redeploy; omitted in tests, which
+#: pass a fixed CookiePolicy instead.
+PolicyProvider = Callable[[], Awaitable["CookiePolicy"]]
+
 
 @dataclass(frozen=True, slots=True)
 class CookiePolicy:
@@ -93,6 +98,7 @@ class CookiePoolService:
         leases: LeaseBackend,
         policy: CookiePolicy,
         *,
+        policy_provider: PolicyProvider | None = None,
         on_health_change: HealthChangeHook | None = None,
         now: Callable[[], datetime.datetime] | None = None,
     ) -> None:
@@ -100,6 +106,7 @@ class CookiePoolService:
         self._store = store
         self._leases = leases
         self._policy = policy
+        self._policy_provider = policy_provider
         self._on_health_change = on_health_change
         self._now = now or (lambda: datetime.datetime.now(datetime.UTC))
         self._lease_keys: dict[int, tuple[str, str]] = {}
@@ -115,6 +122,7 @@ class CookiePoolService:
         """
         if platform != "youtube":  # only YouTube uses cookies today
             return None
+        await self._refresh_policy()
         try:
             candidates = await self._repo.list_candidates(
                 egress_id=egress_id, now=self._now()
@@ -201,7 +209,17 @@ class CookiePoolService:
         self, lease: CookieLease, *, returncode: int, stderr: str
     ) -> None:
         """Classify one yt-dlp run and apply it (the provider-facing entry point)."""
+        await self._refresh_policy()
         await self.report(lease, classify(returncode, stderr))
+
+    async def _refresh_policy(self) -> None:
+        """Pick up admin edits to the policy. The provider caches, so this is cheap."""
+        if self._policy_provider is None:
+            return
+        try:
+            self._policy = await self._policy_provider()
+        except Exception as exc:  # keep the last good policy
+            _log.warning("cookie_policy_refresh_failed", error=str(exc))
 
     async def report(self, lease: CookieLease, verdict: CookieVerdict) -> None:
         """Apply an outcome. Only ``verdict.affects_health`` may change health."""

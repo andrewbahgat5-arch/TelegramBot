@@ -25,8 +25,18 @@ from core.config import Settings
 def build_bot(settings: Settings) -> Bot:
     timeout = float(settings.worker_job_timeout)
     if settings.use_local_bot_api:
+        # ``is_local=True`` is required with a self-hosted server running in --local mode:
+        # ``getFile`` there returns an absolute path on the SERVER's filesystem and the
+        # file is never served over HTTP, so aiogram must read it from disk instead of
+        # fetching a URL (which 404s). The bot container mounts the same
+        # ``/var/lib/telegram-bot-api`` volume read-only so that path resolves.
+        #
+        # This only affects downloads — aiogram consults ``is_local`` in exactly one
+        # place, ``Bot.download_file``. Uploads (send_video and friends) are unchanged,
+        # so the worker's delivery path is unaffected.
         session = AiohttpSession(
-            api=TelegramAPIServer.from_base(settings.bot_api_base_url), timeout=timeout
+            api=TelegramAPIServer.from_base(settings.bot_api_base_url, is_local=True),
+            timeout=timeout,
         )
     else:
         session = AiohttpSession(timeout=timeout)

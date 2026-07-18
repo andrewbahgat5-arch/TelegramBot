@@ -145,6 +145,10 @@ services:
       # the wrapper persists rotated session cookies and the admin replace flow
       # writes new versions here. Never committed (deploy/secrets is git-ignored).
       - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
+      # Self-hosted Bot API in --local mode returns an absolute server-side path from
+      # getFile and does not serve files over HTTP, so the bot must read them from the
+      # same volume (read-only) to download admin uploads (cookie files, CSV imports).
+      - botapi:/var/lib/telegram-bot-api:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,6 +171,10 @@ services:
       # the wrapper persists rotated session cookies and the admin replace flow
       # writes new versions here. Never committed (deploy/secrets is git-ignored).
       - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
+      # Self-hosted Bot API in --local mode returns an absolute server-side path from
+      # getFile and does not serve files over HTTP, so the bot must read them from the
+      # same volume (read-only) to download admin uploads (cookie files, CSV imports).
+      - botapi:/var/lib/telegram-bot-api:ro
     depends_on:
       postgres:
         condition: service_healthy
