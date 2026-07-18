@@ -38,7 +38,13 @@ from domain.protocols.downloader import (
     ProviderHealth,
     ProviderRetryElsewhere,
 )
-from infrastructure.downloader.routing import WARP_MAX_DOWNLOAD_BYTES, Egress, plan_egress
+from infrastructure.downloader.routing import (
+    DIRECT_ID,
+    WARP_MAX_DOWNLOAD_BYTES,
+    Egress,
+    EgressEndpoint,
+    EgressRegistry,
+)
 
 _T = TypeVar("_T")
 
@@ -183,6 +189,7 @@ class YtdlpProvider:
         proxy: str = "",
         warp_proxy: str = "",
         warp_max_download_bytes: int = WARP_MAX_DOWNLOAD_BYTES,
+        egress_registry: EgressRegistry | None = None,
     ) -> None:
         self.name = "ytdlp"
         self.supported_platforms = {"*"}
@@ -194,59 +201,56 @@ class YtdlpProvider:
         # Per-egress proxies (see infrastructure.downloader.routing). WARP SOCKS carries
         # metadata + downloads up to the size split; the residential HTTP proxy carries
         # the large ones (WARP is bandwidth-capped and cannot use aria2c).
-        self._proxy = proxy
-        self._warp_proxy = warp_proxy
         self._warp_max_download_bytes = warp_max_download_bytes
-
-    def _proxy_for(self, egress: Egress) -> str:
-        """The ``--proxy`` value for an egress ("" ⇒ DIRECT, i.e. the server's own IP)."""
-        if egress is Egress.PROXY:
-            return self._proxy
-        if egress is Egress.WARP:
-            return self._warp_proxy
-        return ""
+        # Concrete endpoints (ids + addresses). A caller may inject a registry with extra
+        # instances (warp-2, proxy-res-2); by default one endpoint per kind is built from
+        # the configured addresses, which is behaviour-identical to before.
+        self._egress = egress_registry or EgressRegistry.from_addresses(
+            proxy=proxy, warp_proxy=warp_proxy
+        )
 
     async def _run_egress_plan(
         self,
         platform: str,
         size_bytes: int | None,
-        run: Callable[[Egress, str], Awaitable[_T]],
+        run: Callable[[EgressEndpoint], Awaitable[_T]],
         *,
         metadata_only: bool = False,
     ) -> _T:
-        """Try each egress in the platform's policy order until one succeeds (Section: routing).
+        """Try each endpoint in the platform's policy order until one succeeds.
 
-        A configured-but-transiently-failing egress falls over to the next; an egress with
-        no proxy configured (e.g. WARP address empty) is skipped. The last transient error
-        is surfaced if every egress fails.
+        A configured-but-transiently-failing endpoint falls over to the next; kinds with
+        no configured endpoint are never planned. The last transient error is surfaced if
+        every endpoint fails.
 
-        ``metadata_only`` narrows the plan for protected platforms to the residential
-        proxy alone (see :func:`plan_egress`). The DIRECT last resort below still applies
-        when *nothing* is configured — that is the dev/test path, never production.
+        ``run`` receives the whole :class:`EgressEndpoint` rather than a bare address, so
+        callers can branch on its ``kind`` (aria2c cannot use SOCKS) and record its ``id``
+        (cookie affinity is pinned per endpoint).
         """
         last_exc: Exception | None = None
         attempted = False
-        for egress in plan_egress(
+        for endpoint in self._egress.plan(
             platform,
             size_bytes=size_bytes,
             metadata_only=metadata_only,
             warp_max_bytes=self._warp_max_download_bytes,
         ):
-            proxy = self._proxy_for(egress)
-            if egress is not Egress.DIRECT and not proxy:
-                continue  # this upstream isn't configured — try the next
             attempted = True
             try:
-                return await run(egress, proxy)
+                return await run(endpoint)
             except (ProviderRetryElsewhere, InfrastructureError) as exc:
                 last_exc = exc
                 _log.warning(
-                    "egress_attempt_failed", platform=platform, egress=str(egress), error=str(exc)
+                    "egress_attempt_failed",
+                    platform=platform,
+                    egress_id=endpoint.id,
+                    egress_kind=str(endpoint.kind),
+                    error=str(exc),
                 )
         if not attempted:
-            # A protected platform whose proxy/WARP are both unconfigured — attempt DIRECT
-            # rather than failing outright (also the default in tests / dev).
-            return await run(Egress.DIRECT, "")
+            # Nothing configured for this platform's kinds — attempt DIRECT rather than
+            # failing outright (the dev/test path, never production).
+            return await run(EgressEndpoint(DIRECT_ID, Egress.DIRECT, ""))
         if last_exc is not None:
             raise last_exc
         raise ExtractionFailedError("No usable egress for this request.")
@@ -262,10 +266,10 @@ class YtdlpProvider:
         base = [self._bin, "-J", "--no-playlist", "--ignore-no-formats-error"]
         platform = detect_platform(url)
 
-        async def run(_egress: Egress, proxy: str) -> tuple[bytes, bytes]:
+        async def run(endpoint: EgressEndpoint) -> tuple[bytes, bytes]:
             # ``--proxy ""`` forces DIRECT (overrides any ambient config); a value routes it.
             return await self._run_with_retries(
-                [*base, "--proxy", proxy, url], timeout_s=self._extract_timeout
+                [*base, "--proxy", endpoint.address, url], timeout_s=self._extract_timeout
             )
 
         stdout, stderr = await self._run_egress_plan(platform, None, run, metadata_only=True)
@@ -369,14 +373,14 @@ class YtdlpProvider:
 
         first = True
 
-        async def run(egress: Egress, proxy: str) -> None:
+        async def run(endpoint: EgressEndpoint) -> None:
             nonlocal first
             if not first:  # wipe the previous egress's partial before re-downloading
                 for leftover in dest.glob(f"{video_id}.*"):
                     leftover.unlink(missing_ok=True)
             first = False
-            args = [*base, "--proxy", proxy]
-            if egress is not Egress.WARP:  # aria2c speaks HTTP, not SOCKS (WARP)
+            args = [*base, "--proxy", endpoint.address]
+            if endpoint.kind is not Egress.WARP:  # aria2c speaks HTTP, not SOCKS (WARP)
                 args += _ARIA2C_DOWNLOAD_ARGS
             await self._invoke_download([*args, *tail], progress_cb)
 

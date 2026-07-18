@@ -3,13 +3,75 @@
 from __future__ import annotations
 
 from infrastructure.downloader.routing import (
+    DEFAULT_PROXY_ID,
+    DEFAULT_WARP_ID,
+    DIRECT_ID,
     PROTECTED_PLATFORMS,
     WARP_MAX_DOWNLOAD_BYTES,
     Egress,
+    EgressEndpoint,
+    EgressRegistry,
     plan_egress,
 )
 
 _MB = 1024 * 1024
+
+
+def _registry() -> EgressRegistry:
+    return EgressRegistry.from_addresses(
+        proxy="http://u:p@res.example:7577", warp_proxy="socks5://warp-lb:1080"
+    )
+
+
+def test_registry_resolves_plan_to_identified_endpoints() -> None:
+    # Cookie affinity pins to a concrete endpoint id, so a plan must yield ids, not kinds.
+    reg = _registry()
+    assert [e.id for e in reg.plan("youtube", metadata_only=True)] == [DEFAULT_WARP_ID]
+    assert [e.id for e in reg.plan("youtube", size_bytes=20 * _MB)] == [
+        DEFAULT_WARP_ID,
+        DEFAULT_PROXY_ID,
+    ]
+    assert [e.id for e in reg.plan("youtube", size_bytes=900 * _MB)] == [
+        DEFAULT_PROXY_ID,
+        DEFAULT_WARP_ID,
+    ]
+    assert [e.id for e in reg.plan("tiktok")] == [DIRECT_ID]
+
+
+def test_registry_carries_the_address_and_kind_for_each_endpoint() -> None:
+    warp = _registry().get(DEFAULT_WARP_ID)
+    assert warp is not None
+    assert warp.kind is Egress.WARP
+    assert warp.address == "socks5://warp-lb:1080"
+
+
+def test_unconfigured_endpoints_are_dropped_not_planned() -> None:
+    # Dev/test has no proxy or WARP: the plan is empty and the provider falls back to DIRECT.
+    bare = EgressRegistry.from_addresses()
+    assert bare.plan("youtube", metadata_only=True) == ()
+    assert [e.id for e in bare.plan("tiktok")] == [DIRECT_ID]
+
+
+def test_multiple_instances_of_a_kind_are_all_offered() -> None:
+    # The point of the refactor: adding warp-2 is a registry entry, nothing else.
+    reg = EgressRegistry(
+        [
+            EgressEndpoint(DIRECT_ID, Egress.DIRECT, ""),
+            EgressEndpoint("warp-1", Egress.WARP, "socks5://warp-1:1080"),
+            EgressEndpoint("warp-2", Egress.WARP, "socks5://warp-2:1080"),
+        ]
+    )
+    assert [e.id for e in reg.plan("youtube", metadata_only=True)] == ["warp-1", "warp-2"]
+
+
+def test_disabled_endpoint_is_never_planned() -> None:
+    reg = EgressRegistry(
+        [
+            EgressEndpoint(DIRECT_ID, Egress.DIRECT, ""),
+            EgressEndpoint("warp-1", Egress.WARP, "socks5://warp-1:1080", enabled=False),
+        ]
+    )
+    assert reg.plan("youtube", metadata_only=True) == ()
 
 
 def test_unprotected_platforms_go_direct() -> None:
