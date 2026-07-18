@@ -31,7 +31,8 @@ COPY --from=builder /install /usr/local
 COPY . .
 # JS runtime for yt-dlp YouTube signature/n-challenge solving (EJS).
 COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
-# Install the yt-dlp cookie wrapper (private writable cookie copy per run).
+# Install the yt-dlp cookie wrapper (persistent, flock-protected cookie jar:
+# refreshed session cookies are written back to the master — see deploy/ytdlp-wrapper.sh).
 RUN mv /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp.real && install -m 0755 /app/deploy/ytdlp-wrapper.sh /usr/local/bin/yt-dlp
 RUN pip install --no-cache-dir bgutil-ytdlp-pot-provider
 USER appuser

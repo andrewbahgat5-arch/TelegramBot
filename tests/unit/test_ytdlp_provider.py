@@ -238,12 +238,9 @@ async def test_extract_info_bot_check_wall_is_video_unavailable(
         await YtdlpProvider().extract_info(_URL)
 
 
-async def test_youtube_extraction_never_falls_back_off_the_proxy(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Metadata for a protected platform must be attempted through the residential
-    # proxy ONLY — a failure must not retry over WARP or DIRECT (the account cookies
-    # ride along, and the session must stay pinned to one egress IP).
+async def test_youtube_extraction_uses_warp_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Metadata for a protected platform goes over WARP and nothing else — a failure
+    # must not retry over the residential proxy (which YouTube walls) or DIRECT.
     seen: list[str] = []
 
     async def fake_exec(*args: Any, **_kw: Any) -> _FakeProc:
@@ -260,15 +257,7 @@ async def test_youtube_extraction_never_falls_back_off_the_proxy(
     provider = YtdlpProvider(proxy="http://residential:1", warp_proxy="socks5://warp:1080")
     with pytest.raises(ProviderRetryElsewhere):
         await provider.extract_info(_URL)
-    assert set(seen) == {"http://residential:1"}  # never the WARP proxy, never ""
-
-
-async def test_youtube_download_still_falls_back_to_warp(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The narrowing above is metadata-only: downloads keep the WARP fallback, since a
-    # stalled media transfer genuinely benefits from a second route.
-    from infrastructure.downloader.routing import Egress, plan_egress
-
-    assert plan_egress("youtube") == (Egress.PROXY, Egress.WARP)
+    assert set(seen) == {"socks5://warp:1080"}  # never the residential proxy, never ""
 
 
 async def test_extract_info_no_formats_without_bot_check_stays_transient(
@@ -403,9 +392,23 @@ def _proxied_provider() -> YtdlpProvider:
     return YtdlpProvider(proxy="http://u:p@res.example:7577", warp_proxy="socks5://warp-lb:1080")
 
 
-async def test_protected_platform_uses_residential_proxy_and_aria2c(
+def _sized_media(size_bytes: int) -> MediaInfo:
+    """Protected-platform media whose selected 720p option has a known size, so the
+    size-based download split in routing.plan_egress is exercised end-to-end."""
+    return MediaInfo(
+        platform="youtube",
+        video_id="vid",
+        title="T",
+        source_url=_URL,
+        formats=(MediaFormatOption(MediaFormat.VIDEO, Quality.P720, size_bytes, "137"),),
+    )
+
+
+async def test_large_download_uses_residential_proxy_and_aria2c(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # Over the 500 MB split → residential proxy first, on the fast aria2c path (WARP is
+    # bandwidth-capped and cannot use aria2c).
     captured: dict[str, tuple[Any, ...]] = {}
 
     async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
@@ -414,14 +417,33 @@ async def test_protected_platform_uses_residential_proxy_and_aria2c(
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
-    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)  # protected
+    media = _sized_media(900 * 1024 * 1024)
     await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
     args = captured["args"]
     assert "aria2c" in args and "--downloader" in args  # fast aria2c path
     assert "--proxy" in args and "http://u:p@res.example:7577" in args  # residential proxy
 
 
-async def test_protected_platform_falls_back_to_warp_native(
+async def test_small_download_uses_warp_natively(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # At or under the split → WARP first, natively (SOCKS, so no aria2c).
+    captured: dict[str, tuple[Any, ...]] = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        captured["args"] = args
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
+    media = _sized_media(20 * 1024 * 1024)
+    await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    args = captured["args"]
+    assert "socks5://warp-lb:1080" in args
+    assert "aria2c" not in args  # aria2c has no SOCKS support
+
+
+async def test_large_download_falls_back_to_warp_native(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[tuple[Any, ...]] = []
@@ -434,12 +456,57 @@ async def test_protected_platform_falls_back_to_warp_native(
         return _FakeProc(b"", b"", 0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    media = MediaInfo(platform="youtube", video_id="vid", title="T", source_url=_URL)
+    media = _sized_media(900 * 1024 * 1024)
     result = await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
     assert result.size_bytes == 30 and len(calls) == 2
     assert "aria2c" in calls[0] and "http://u:p@res.example:7577" in calls[0]  # residential first
     # WARP fallback: native (no aria2c) via the WARP SOCKS proxy
     assert "aria2c" not in calls[1] and "socks5://warp-lb:1080" in calls[1]
+
+
+async def test_small_download_falls_back_to_the_proxy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The small-file branch keeps the other egress as its fallback too, so a failing
+    # WARP pool never takes small downloads down entirely.
+    calls: list[tuple[Any, ...]] = []
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        calls.append(args)
+        if len(calls) == 1:  # WARP fails transiently
+            return _FakeProc(b"", b"ERROR: HTTP Error 503", 1)
+        (tmp_path / "vid.mp4").write_bytes(b"x" * 30)
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    media = _sized_media(20 * 1024 * 1024)
+    result = await _proxied_provider().download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    assert result.size_bytes == 30 and len(calls) == 2
+    assert "socks5://warp-lb:1080" in calls[0]  # WARP first
+    assert "http://u:p@res.example:7577" in calls[1]  # residential proxy fallback
+
+
+async def test_download_threshold_is_configurable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A deployment that lowers YTDLP_WARP_MAX_DOWNLOAD_MB sends the same file over the
+    # proxy instead — no code change needed.
+    captured: dict[str, tuple[Any, ...]] = {}
+
+    async def fake_exec(*args: Any, **kwargs: Any) -> _FakeProc:
+        captured["args"] = args
+        return _FakeProc(b"", b"", 0)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    (tmp_path / "vid.mp4").write_bytes(b"x" * 10)
+    provider = YtdlpProvider(
+        proxy="http://u:p@res.example:7577",
+        warp_proxy="socks5://warp-lb:1080",
+        warp_max_download_bytes=10 * 1024 * 1024,  # 10 MB split
+    )
+    media = _sized_media(20 * 1024 * 1024)
+    await provider.download(media, MediaFormat.VIDEO, Quality.P720, tmp_path)
+    assert "http://u:p@res.example:7577" in captured["args"]
 
 
 async def test_unprotected_platform_uses_direct_aria2c(

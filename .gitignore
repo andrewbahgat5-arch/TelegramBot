@@ -66,3 +66,9 @@ redisdata/
 
 # --- graphify (generated code-graph artifacts; not source) ---
 graphify-out/
+
+# Local secrets — cookie jars, proxy creds. NEVER commit (server-only).
+deploy/secrets/
+
+# Ad-hoc diagnostic scripts kept in the worktree (may embed live credentials).
+scratch_*.py

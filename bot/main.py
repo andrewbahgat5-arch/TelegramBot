@@ -224,7 +224,14 @@ async def main() -> None:
     registry = DownloaderRegistry(
         ProviderSettingsAdapter(session_factory), redis=redis_clients.cache
     )
-    registry.register(YtdlpProvider(settings.ytdlp_path, proxy=settings.ytdlp_proxy, warp_proxy=settings.ytdlp_warp_proxy))
+    registry.register(
+        YtdlpProvider(
+            settings.ytdlp_path,
+            proxy=settings.ytdlp_proxy,
+            warp_proxy=settings.ytdlp_warp_proxy,
+            warp_max_download_bytes=settings.ytdlp_warp_max_download_mb * 1024 * 1024,
+        )
+    )
     callback_signer = CallbackSigner(settings.bot_token.get_secret_value())
 
     bot = build_bot(settings)

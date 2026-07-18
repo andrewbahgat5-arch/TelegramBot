@@ -91,9 +91,14 @@ class Settings(BaseSettings):
     # as the primary egress for extraction + the fast aria2c download path (clean IP + many
     # parallel connections). Empty ⇒ that egress is skipped and WARP is used instead.
     ytdlp_proxy: str = Field("", alias="YTDLP_PROXY")
-    # WARP (Cloudflare) SOCKS proxy — the resilient fallback egress for protected platforms.
+    # WARP (Cloudflare) SOCKS proxy — the primary egress for protected platforms since
+    # 2026-07-18 (metadata always, downloads up to the size split below).
     # Internal address, not a secret. Empty ⇒ WARP egress is skipped.
     ytdlp_warp_proxy: str = Field("socks5://warp-lb:1080", alias="YTDLP_WARP_PROXY")
+    # Download size split for protected platforms (routing.plan_egress): downloads at or
+    # under this go over WARP, larger ones over the residential proxy (WARP is bandwidth-
+    # capped and cannot use aria2c). Retune per deployment without a code change.
+    ytdlp_warp_max_download_mb: int = Field(500, alias="YTDLP_WARP_MAX_DOWNLOAD_MB")
 
     # --- Cache TTLs (seconds) ---
     cache_fileid_ttl: int = Field(2_592_000, alias="CACHE_FILEID_TTL")

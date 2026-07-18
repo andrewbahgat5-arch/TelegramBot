@@ -18,9 +18,17 @@ Verified 2026-07-16 from the production datacenter IP (direct vs. proxied extrac
     instagram  direct → needs login (cookies); a proxy does NOT change that ⇒ direct
     twitter    not IP-blocked (content/login-gated)   ⇒ direct
 
-The policy is deliberately tiny and pure so future rules slot in here without touching
-the provider — e.g. a size-based split (WARP under 500 MB, PROXY at/over 500 MB) is a
-change to :func:`plan_egress` alone, using the ``size_bytes`` it already receives.
+Re-measured 2026-07-18, after the residential proxy's reputation degraded — YouTube now
+serves it a per-video "confirm you're not a bot" wall (deterministic, 3/3 identical runs),
+while WARP extracts and downloads those same videos cleanly:
+
+    youtube metadata   proxy → walled on many videos, WARP → OK on all tested
+    youtube media      WARP → OK (fmt 18/160/bestaudio all complete)
+
+Hence the current split: **metadata always goes over WARP**, and downloads choose by size
+— WARP for anything at or under :data:`WARP_MAX_DOWNLOAD_BYTES`, the residential proxy
+above it (WARP is bandwidth-capped, the proxy is fast and works with aria2c's 16 parallel
+connections). The policy stays tiny and pure so thresholds are a one-line change here.
 """
 
 from __future__ import annotations
@@ -40,37 +48,40 @@ class Egress(StrEnum):
 # Add a platform here (one line) if it starts blocking us; remove one that stops.
 PROTECTED_PLATFORMS: frozenset[str] = frozenset({"youtube"})
 
+# Download size split for protected platforms: at or under this, prefer WARP; above it,
+# prefer the residential proxy. The default is overridable per deployment via the
+# ``YTDLP_WARP_MAX_DOWNLOAD_MB`` env var (core.config → YtdlpProvider → plan_egress), so
+# retuning the threshold needs no code change.
+WARP_MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
+
 
 def plan_egress(
-    platform: str, *, size_bytes: int | None = None, metadata_only: bool = False
+    platform: str,
+    *,
+    size_bytes: int | None = None,
+    metadata_only: bool = False,
+    warp_max_bytes: int = WARP_MAX_DOWNLOAD_BYTES,
 ) -> tuple[Egress, ...]:
     """Ordered egresses to try for ``platform`` — primary first, then fallbacks.
 
-    ``metadata_only`` marks the extraction (metadata) step. A protected platform's
-    metadata goes through the residential proxy **and nothing else** — no WARP, no
-    DIRECT. Two reasons:
+    Unprotected platforms always go DIRECT. For a protected platform:
 
-    * WARP exits from shared Cloudflare ranges that YouTube challenges far more often
-      than a residential IP, so a WARP retry after a proxy failure mostly just burns
-      seconds and returns the same block.
-    * Account cookies are attached to extraction. Presenting one account's session
-      from a second, different-looking IP is exactly the pattern that gets a Google
-      session invalidated — so the session must stay pinned to one egress.
+    * ``metadata_only`` (the extraction step) → **WARP only**. WARP is currently the
+      only egress that reliably gets past YouTube's per-video bot-check wall, and
+      metadata is cheap, so there is nothing to gain from a slower second attempt
+      over an egress that is known to be walled.
+    * a download at or under ``warp_max_bytes`` → WARP first, proxy as fallback.
+    * a larger download → the residential proxy first (WARP is bandwidth-capped and
+      cannot use aria2c's 16 parallel connections), WARP as fallback.
 
-    Downloads keep the WARP fallback: media fetches are the expensive, resumable part
-    and benefit from a second route when the proxy stalls mid-transfer.
-
-    ``size_bytes`` (the download's expected size, or ``None`` at extraction time) is
-    accepted now and currently ignored, so a future size-based split lives here only:
-
-        if platform in PROTECTED_PLATFORMS:
-            if size_bytes is not None and size_bytes < 500 * 1024 * 1024:
-                return (Egress.WARP, Egress.PROXY)   # small ⇒ WARP first
-            return (Egress.PROXY, Egress.WARP)       # large ⇒ proxy first
+    An unknown size (``None``) is treated as small: most downloads are, and WARP is
+    the more reliable route. Each branch keeps the other egress as a fallback so a
+    single failing upstream never takes downloads down entirely.
     """
-    if platform in PROTECTED_PLATFORMS:
-        if metadata_only:
-            return (Egress.PROXY,)
-        # Residential proxy first (fast + clean); WARP as the resilient fallback.
+    if platform not in PROTECTED_PLATFORMS:
+        return (Egress.DIRECT,)
+    if metadata_only:
+        return (Egress.WARP,)
+    if size_bytes is not None and size_bytes > warp_max_bytes:
         return (Egress.PROXY, Egress.WARP)
-    return (Egress.DIRECT,)
+    return (Egress.WARP, Egress.PROXY)

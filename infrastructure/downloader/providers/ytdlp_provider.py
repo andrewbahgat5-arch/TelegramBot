@@ -37,7 +37,7 @@ from domain.protocols.downloader import (
     ProviderHealth,
     ProviderRetryElsewhere,
 )
-from infrastructure.downloader.routing import Egress, plan_egress
+from infrastructure.downloader.routing import WARP_MAX_DOWNLOAD_BYTES, Egress, plan_egress
 
 _T = TypeVar("_T")
 
@@ -173,6 +173,7 @@ class YtdlpProvider:
         download_timeout: float = _DEFAULT_DOWNLOAD_TIMEOUT,
         proxy: str = "",
         warp_proxy: str = "",
+        warp_max_download_bytes: int = WARP_MAX_DOWNLOAD_BYTES,
     ) -> None:
         self.name = "ytdlp"
         self.supported_platforms = {"*"}
@@ -181,10 +182,12 @@ class YtdlpProvider:
         self._bin = ytdlp_path
         self._extract_timeout = extract_timeout
         self._download_timeout = download_timeout
-        # Per-egress proxies (see infrastructure.downloader.routing). Residential HTTP proxy
-        # is the fast/clean primary for protected platforms; WARP SOCKS is the fallback.
+        # Per-egress proxies (see infrastructure.downloader.routing). WARP SOCKS carries
+        # metadata + downloads up to the size split; the residential HTTP proxy carries
+        # the large ones (WARP is bandwidth-capped and cannot use aria2c).
         self._proxy = proxy
         self._warp_proxy = warp_proxy
+        self._warp_max_download_bytes = warp_max_download_bytes
 
     def _proxy_for(self, egress: Egress) -> str:
         """The ``--proxy`` value for an egress ("" ⇒ DIRECT, i.e. the server's own IP)."""
@@ -214,7 +217,12 @@ class YtdlpProvider:
         """
         last_exc: Exception | None = None
         attempted = False
-        for egress in plan_egress(platform, size_bytes=size_bytes, metadata_only=metadata_only):
+        for egress in plan_egress(
+            platform,
+            size_bytes=size_bytes,
+            metadata_only=metadata_only,
+            warp_max_bytes=self._warp_max_download_bytes,
+        ):
             proxy = self._proxy_for(egress)
             if egress is not Egress.DIRECT and not proxy:
                 continue  # this upstream isn't configured — try the next
