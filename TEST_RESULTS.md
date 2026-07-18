@@ -67,6 +67,26 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (5) — Unit + production — X/Twitter format bug, honest permanent errors, log persistence
+
+| Field | Value |
+|---|---|
+| Git SHA | this commit; worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) + live production (`tgbot_bot` / `tgbot_worker`) |
+| Suite | unit (full) + end-to-end extraction **and download** against the Owner's real failing X link |
+| Triggered by | Owner: investigate the `error_logs` entries; then implement fixes 1–4 |
+| Total tests | 976 | Passed | 975 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| New tests | `test_ytdlp_provider.py` +5: X format shape captured verbatim from the real failing post (progressive `http-*` with no codec fields → 3 video + 1 audio option, muxed sizes not inflated); storyboard guard still excludes explicit `vcodec="none"`; video-less social post → permanent `NoDownloadableMediaError`; photo post → IMAGE option; `_map_error` carries the provider reason |
+| Root cause found | **Every X/Twitter link had failed since launch (0 successful downloads, ever).** X reports no `vcodec`/`acodec` on its progressive mp4s; `_present()` treated *unreported* the same as the literal `"none"`, so all 9 formats were discarded and users got "no playable formats — often a temporary block, please try again" for posts that could never work. The YouTube-era HLS filter removed the rest. |
+| Production verification | Owner's link `x.com/Sakersport999/status/2078407010023055851/video/1`: **4 options (240p/360p/720p + audio)** in both containers; real download delivered **1276×718 h264 + aac, 4.0 MB** — correct tier, correct codecs, audio present. YouTube regression check unchanged (27 formats). `capture-logs.sh` archived bot/worker/api logs before the deploy. |
+| Known cosmetic issue | X reports an inflated `filesize_approx` (≈10.3 MB for a file that is really 4.0 MB), so the chooser over-states X sizes. Harmless (delivered file is smaller than advertised) and not worth a risky heuristic; recorded here rather than silently patched. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+---
+
 ### 2026-07-18 (4) — Unit + in-container — Persistent cookie jar, WARP metadata, size-split downloads
 
 | Field | Value |

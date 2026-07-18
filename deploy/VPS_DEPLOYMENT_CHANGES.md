@@ -370,3 +370,43 @@ Lower `YTDLP_WARP_MAX_DOWNLOAD_MB` if that becomes noticeable.
 **Repo hygiene:** `.gitignore` now covers `deploy/secrets/` and `scratch_*.py`. A
 `git add -A` had swept the live cookie file and a scratch script containing a plaintext
 proxy password into a local commit; both were removed before any push.
+
+### Session (2026-07-18, evening) — X/Twitter was broken since launch; error-reporting fixes
+
+**Investigation of the `error_logs` batch the Owner surfaced:**
+- **17 of 20 were YouTube and all predated the WARP-metadata deploy** (newest 12:18 UTC,
+  deploy 12:29 UTC). Since that deploy: YouTube downloads succeeding, zero new errors.
+- **4 were Twitter/X — and X had never worked at all**: 0 successful downloads in the
+  entire history of the table vs 133 YouTube / 15 Instagram / 9 Facebook / 8 TikTok.
+- **1 TikTok** — platform is healthy (8 successes); a live control download worked.
+
+**Root cause (X):** X reports **no `vcodec`/`acodec`** on its progressive mp4 formats
+(`http-256`/`http-832`/`http-2176`, which carry a real height and filesize). `_present()`
+treated an *unreported* codec identically to the literal `"none"`, so every one of those
+formats was discarded; the remaining formats are HLS, which we drop by design for size
+accuracy. Result: zero options → the transient "no playable formats … please try again"
+message → users retried forever. Fixed with a tri-state `_codec_state()`; the literal
+`"none"` stays authoritative so YouTube storyboards remain excluded (regression-tested).
+
+**Also shipped:**
+- No-format posts on image-capable platforms (twitter/tiktok/instagram/facebook/generic)
+  are delivered as a photo when one exists, else raise the new **permanent**
+  `NoDownloadableMediaError` ("this post doesn't contain anything downloadable") instead
+  of a misleading transient retry. YouTube is deliberately excluded — a wall-blocked
+  extraction emits a storyboard that must never be delivered as a photo.
+- `_map_error()` embeds yt-dlp's own reason (first ERROR line, else WARNING) in the
+  exception message, so `error_logs.message` records *why* instead of "Extraction failed."
+- `ProviderRetryElsewhere` gained `ErrorType.PROVIDER_TRANSIENT` — those rows were showing
+  in the admin panel as the catch-all `unknown`.
+- **`deploy/capture-logs.sh`** — archives container logs to `/opt/telegram-bot/logs`
+  (gzip, 14-day retention) **before** a deploy. Recreating a container destroys its logs;
+  that is exactly how the yt-dlp stderr for these Twitter/TikTok failures was lost, making
+  their root cause unrecoverable. **Run it first in every deploy** (now in the index's
+  workflow section).
+
+**Verified in production:** the Owner's link yields 4 options (240p/360p/720p + audio) in
+both containers, and a real download produced 1276×718 h264 + aac. YouTube unchanged.
+
+**Known cosmetic issue (not fixed):** X reports an inflated `filesize_approx` — the chooser
+shows ~10.3 MB for a file that is really 4.0 MB. Delivered file is smaller than advertised,
+so it is harmless; fixing it would need a risky heuristic about which sizes to trust.

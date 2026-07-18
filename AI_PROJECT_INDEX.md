@@ -61,6 +61,7 @@ a residential proxy used **only for YouTube** (per-platform egress routing).
    `tests/integration` / `tests/e2e` where relevant; type-check with `mypy`, lint with `ruff`.
    Record outcomes in `TEST_RESULTS.md`. Never deploy an untested change.
 3. **Deploy to production.** Push the change, then roll it out to the production server(s):
+   **run `sh deploy/capture-logs.sh` first** (recreating a container destroys its logs),
    upload the changed files to the same paths under `/opt/telegram-bot`, rebuild the affected
    image(s), and recreate. See `deploy/VPS_DEPLOYMENT_CHANGES.md` (host + Windows/paramiko
    procedure) and `deploy/README.md` (runbook). Bring-up:
@@ -274,7 +275,7 @@ not a project-content doc. · Read when: understanding the intended engineering 
 | `deploy/yt-dlp.conf` | yt-dlp runtime config (POT provider, EJS, retries). **Egress proxy is chosen per platform in code** (`routing.py`), not here. |
 | `deploy/ytdlp-wrapper.sh` | Wraps yt-dlp to give each run a private cookie copy. |
 | `deploy/haproxy-warp.cfg` | HAProxy SOCKS load-balancer for the WARP pool. |
-| `deploy/migrate.sh` · `smoke-test.sh` · `monitor-resources.sh` | Operational helper scripts. |
+| `deploy/migrate.sh` · `smoke-test.sh` · `monitor-resources.sh` · `capture-logs.sh` | Operational helper scripts. **Run `capture-logs.sh` first in every deploy** — it archives container logs to `/opt/telegram-bot/logs` (gzipped, 14-day retention); recreating a container destroys its logs, which has already cost one root-cause investigation. |
 
 ---
 
