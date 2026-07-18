@@ -22,12 +22,14 @@ class ErrorType(StrEnum):
     MAINTENANCE_MODE = "maintenance_mode"
     PERMISSION_DENIED = "permission_denied"
     VIDEO_UNAVAILABLE = "video_unavailable"
+    NO_MEDIA_FOUND = "no_media_found"
     # Download pipeline
     EXTRACTION_FAILED = "extraction_failed"
     DOWNLOAD_TIMEOUT = "download_timeout"
     FFMPEG_PROCESSING = "ffmpeg_processing"
     TELEGRAM_UPLOAD = "telegram_upload"
     # Internal / control flow
+    PROVIDER_TRANSIENT = "provider_transient"
     DUPLICATE_DOWNLOAD = "duplicate_download"
     JOB_NOT_FOUND = "job_not_found"
     CACHED_FILE_EXPIRED = "cached_file_expired"

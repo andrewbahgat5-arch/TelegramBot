@@ -17,6 +17,7 @@ from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import (
     ExtractionFailedError,
+    NoDownloadableMediaError,
     URLNotSupportedError,
     VideoUnavailableError,
 )
@@ -109,6 +110,47 @@ def test_to_media_info_emits_image_when_no_video_formats() -> None:
     assert option.provider_format_id == "https://i.pinimg.com/originals/x.jpg"
 
 
+# The exact shape X/Twitter returns (captured from a real failing post, 2026-07-18):
+# progressive http-* formats with a real height and filesize but NO codec fields, plus
+# HLS duplicates we drop. Every X link produced zero options before the codec-state fix.
+_X_FORMATS: list[dict[str, Any]] = [
+    {"format_id": "hls-audio-128000-Audio", "protocol": "m3u8_native", "vcodec": "none",
+     "acodec": None, "tbr": 128},
+    {"format_id": "http-256", "protocol": "https", "vcodec": None, "acodec": None,
+     "height": 270, "tbr": 256, "filesize": 1_272_768},
+    {"format_id": "hls-105", "protocol": "m3u8_native", "vcodec": "avc1.4D4015",
+     "acodec": "none", "height": 270, "tbr": 105.4},
+    {"format_id": "http-832", "protocol": "https", "vcodec": None, "acodec": None,
+     "height": 360, "tbr": 832, "filesize": 4_136_496},
+    {"format_id": "http-2176", "protocol": "https", "vcodec": None, "acodec": None,
+     "height": 718, "tbr": 2176, "filesize": 10_818_528},
+]
+
+
+def test_twitter_progressive_formats_without_codec_fields_are_kept() -> None:
+    """REGRESSION: X reports no vcodec/acodec on its progressive mp4s. Treating an
+    unreported codec as "absent" discarded all of them, so every X link failed with
+    "no playable formats". A frame size means it is video, whatever the codec says."""
+    options = _parse_formats(_X_FORMATS, duration=30)
+    videos = [o for o in options if o.format is MediaFormat.VIDEO]
+    assert [o.provider_format_id for o in videos] == ["http-256", "http-832", "http-2176"]
+    # Real filesizes are used as-is: these are muxed, so audio must NOT be added on top.
+    by_id = {o.provider_format_id: o for o in videos}
+    assert by_id["http-2176"].approx_size_bytes == 10_818_528
+    # Muxed-only source → an audio option is still offered (same rule as TikTok).
+    assert any(o.format is MediaFormat.AUDIO for o in options)
+
+
+def test_explicit_codec_none_still_excludes_storyboards() -> None:
+    """The fix must not weaken the storyboard guard: yt-dlp's literal "none" is
+    authoritative and keeps YouTube storyboards out."""
+    storyboards = [
+        {"format_id": "sb0", "protocol": "mhtml", "vcodec": "none", "acodec": "none",
+         "height": 180},
+    ]
+    assert _parse_formats(storyboards, duration=100) == []
+
+
 def test_youtube_no_formats_raises_instead_of_delivering_a_photo() -> None:
     """A named video platform (YouTube) that extracts no playable formats — e.g. a
     transient bot-block returning only metadata + a storyboard/thumbnail under
@@ -153,6 +195,42 @@ def test_quality_for_format_handles_non_16x9(
     width: int | None, height: int | None, note: str | None, expected: Quality
 ) -> None:
     assert _quality_for_format(width, height, note) is expected
+
+
+def test_video_less_post_on_a_social_platform_is_permanent_not_transient() -> None:
+    """A text-only tweet reads fine but has nothing to download. Reporting that as
+    "temporary, try again" sent users into retry loops on posts that can never work."""
+    provider = YtdlpProvider()
+    empty_tweet: dict[str, Any] = {
+        "id": "1",
+        "title": "just some text",
+        "webpage_url": "https://x.com/u/status/1",
+        "formats": [],
+    }
+    with pytest.raises(NoDownloadableMediaError):
+        provider._to_media_info("https://x.com/u/status/1", empty_tweet)
+
+
+def test_photo_post_on_a_social_platform_is_delivered_as_an_image() -> None:
+    provider = YtdlpProvider()
+    photo_tweet: dict[str, Any] = {
+        "id": "2",
+        "title": "a photo",
+        "webpage_url": "https://x.com/u/status/2",
+        "formats": [],
+        "thumbnails": [{"url": "https://pbs.twimg.com/media/x.jpg", "width": 1200,
+                        "height": 900}],
+    }
+    info = provider._to_media_info("https://x.com/u/status/2", photo_tweet)
+    assert len(info.formats) == 1
+    assert info.formats[0].format is MediaFormat.IMAGE
+
+
+def test_map_error_carries_the_provider_reason_into_the_message() -> None:
+    """error_logs stores the exception message; without the yt-dlp reason every row
+    read "Extraction failed." and the cause was lost once container logs rotated."""
+    err = _map_error("WARNING: something\nERROR: Requested content is not available\n")
+    assert "Requested content is not available" in str(err)
 
 
 @pytest.mark.parametrize(

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from domain.entities.media import DownloadedFile, MediaInfo
-from domain.enums import MediaFormat, Quality
+from domain.enums import ErrorType, MediaFormat, Quality
 from domain.exceptions import AppError
 
 # Reports live download progress: (downloaded_bytes, total_bytes | None). ``total`` is
@@ -60,6 +60,11 @@ class ProviderRetryElsewhere(AppError):  # noqa: N818 - name fixed by MASTER_PLA
     The registry marks the provider DEGRADED and advances (Section 12.6.8). If
     failover is disabled, it propagates.
     """
+
+    # Without this these rows landed in ``error_logs`` as the useless catch-all
+    # "unknown", so the admin panel could not tell a transient extractor blip from a
+    # genuine unclassified bug.
+    error_type = ErrorType.PROVIDER_TRANSIENT
 
 
 class ProviderSettingsProtocol(Protocol):

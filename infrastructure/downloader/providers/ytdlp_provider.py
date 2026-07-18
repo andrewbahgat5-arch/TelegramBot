@@ -28,6 +28,7 @@ from domain.enums import MediaFormat, Quality
 from domain.exceptions import (
     ExtractionFailedError,
     InfrastructureError,
+    NoDownloadableMediaError,
     URLNotSupportedError,
     VideoUnavailableError,
 )
@@ -62,6 +63,14 @@ _RETRY_BACKOFF_SECONDS = 0.5
 # metadata-only, so the stderr text is the ONLY place the real reason appears. Retrying
 # does not help → VideoUnavailableError.
 _BOT_CHECK_RE = re.compile(r"confirm you.{0,3}re not a bot", re.IGNORECASE)
+
+# Platforms where a post legitimately carries images instead of video, so a
+# no-formats result may still be deliverable as a photo. YouTube is absent by design:
+# there are no image posts there, and a blocked extraction emits a storyboard that must
+# never be delivered as a photo (see _to_media_info).
+_IMAGE_CAPABLE_PLATFORMS = frozenset(
+    {"generic", "twitter", "tiktok", "instagram", "facebook"}
+)
 
 # Machine-readable per-chunk progress on stdout (parsed in _run_with_progress). Prefix
 # "DLP" disambiguates it from any other output; fields are downloaded/total/estimate.
@@ -486,14 +495,17 @@ class YtdlpProvider:
         formats = tuple(_parse_formats(info.get("formats") or [], duration))
         title = str(info.get("title") or "Untitled")
         if not formats:
-            # The image fallback exists for genuine image-only sources (Pinterest pins,
-            # direct image links) — those classify as "generic". A NAMED video platform
-            # (youtube, tiktok, …) that returns no playable formats has FAILED extraction,
-            # usually a transient bot-block: yt-dlp still emits metadata + a storyboard/
-            # thumbnail under ``--ignore-no-formats-error``. We must NEVER deliver that as a
-            # photo — users were getting a storyboard grid instead of the video. Raise a
-            # transient error so the request is retried / the user is asked to try again.
-            image_url = _best_image_url(info) if platform == "generic" else None
+            # Image posts are a real content type on the social platforms (a photo tweet,
+            # a TikTok photo carousel, an Instagram photo, a Pinterest pin), so those get
+            # the image fallback and are delivered as a photo.
+            #
+            # YouTube is deliberately excluded: it has no image posts, and an extraction
+            # blocked by the bot-check wall still emits metadata + a storyboard under
+            # ``--ignore-no-formats-error``. Delivering that would hand the user a
+            # storyboard grid instead of their video (the original bug). YouTube walls are
+            # classified upstream in :meth:`extract_info`; anything reaching here with no
+            # formats genuinely has no downloadable media.
+            image_url = _best_image_url(info) if platform in _IMAGE_CAPABLE_PLATFORMS else None
             if image_url:
                 # yt-dlp labels image pins "Pinterest video #<id>"; the human text lives
                 # in description — prefer it for a clean caption.
@@ -511,7 +523,16 @@ class YtdlpProvider:
                         codec="image",
                     ),
                 )
+            elif platform in _IMAGE_CAPABLE_PLATFORMS:
+                # Read the post fine; it simply carries nothing downloadable (a text-only
+                # tweet, a poll, a link preview). Permanent — telling the user to "try
+                # again" sent people into retry loops on posts that can never work.
+                raise NoDownloadableMediaError(
+                    "The post contains no downloadable video, audio or image."
+                )
             else:
+                # YouTube with no formats and no wall signature: extraction really did
+                # fail. Keep this transient so the retry/failover path still applies.
                 raise ProviderRetryElsewhere(
                     "No playable formats were found — the site returned only metadata "
                     "(often a temporary block). Please try again."
@@ -610,17 +631,37 @@ def _selected_image_url(media: MediaInfo) -> str | None:
     return None
 
 
+def _reason(stderr: str) -> str:
+    """The first ERROR/WARNING line of yt-dlp's stderr, condensed for diagnostics.
+
+    Exception messages are internal only (user-facing text comes from the catalog via
+    ``translation_key``), and they are what ``error_logs.message`` records — so the
+    real provider reason is carried here. Without it every row read "Extraction
+    failed." and the cause was unrecoverable once container logs rotated.
+    """
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    # An ERROR line states the actual failure; warnings are usually incidental noise
+    # ("No title found in player responses…") that precedes it.
+    for prefix in ("ERROR:", "WARNING:"):
+        for line in lines:
+            if line.upper().startswith(prefix):
+                return line[:200]
+    return lines[0][:200] if lines else ""
+
+
 def _map_error(stderr: str) -> Exception:
     lowered = stderr.lower()
+    reason = _reason(stderr)
+    suffix = f" [{reason}]" if reason else ""
     if any(m in lowered for m in _UNSUPPORTED_MARKERS):
-        return URLNotSupportedError("This URL is not supported.")
+        return URLNotSupportedError(f"This URL is not supported.{suffix}")
     if any(m in lowered for m in _CONTENT_MARKERS):
-        return ExtractionFailedError("This content is unavailable.")
+        return ExtractionFailedError(f"This content is unavailable.{suffix}")
     if any(m in lowered for m in _TRANSIENT_MARKERS):
-        return ProviderRetryElsewhere("Transient extractor error.")
+        return ProviderRetryElsewhere(f"Transient extractor error.{suffix}")
     # Unknown non-zero exit: treat as a content/extraction failure (do not fail over
     # blindly — the registry stops on ExtractionFailedError, Section 12.6.8).
-    return ExtractionFailedError("Extraction failed.")
+    return ExtractionFailedError(f"Extraction failed.{suffix}")
 
 
 def _is_hls(fmt: dict[str, Any]) -> bool:
@@ -661,12 +702,22 @@ def _parse_formats(
             # vs. the real 198 MB) — and, being "larger", it won the per-tier tie-break and
             # was both displayed and selected. Skip them; the DASH formats carry real sizes.
             continue
-        has_v = _present(fmt.get("vcodec"))
-        has_a = _present(fmt.get("acodec"))
-        has_audio = has_audio or has_a
         size = _opt_int(fmt.get("filesize") or fmt.get("filesize_approx"))
         height, width = _opt_int(fmt.get("height")), _opt_int(fmt.get("width"))
         tbr, abr = _opt_float(fmt.get("tbr")), _opt_float(fmt.get("abr"))
+
+        # Codec fields are advisory: some extractors (X/Twitter) report none at all.
+        # An explicit "none" is authoritative and still excludes the stream — that is
+        # what keeps YouTube storyboards (vcodec=acodec="none") out.
+        v_state, a_state = _codec_state(fmt.get("vcodec")), _codec_state(fmt.get("acodec"))
+        # A frame size means it carries video, whatever the codec field says.
+        has_v = v_state == "present" or (v_state == "unknown" and bool(height))
+        # Unreported audio: a progressive stream is muxed (X's http-* formats are), and
+        # a stream with a bitrate but no frame size is audio-only.
+        has_a = a_state == "present" or (
+            a_state == "unknown" and (has_v or bool(abr and not height))
+        )
+        has_audio = has_audio or has_a
 
         if has_v and height:
             est = size or _bitrate_size(tbr, duration)
@@ -754,6 +805,25 @@ def _best_muxed_audio_size(raw_formats: list[dict[str, Any]], duration: int | No
 
 def _present(codec: object) -> bool:
     return bool(codec) and codec != "none"
+
+
+def _codec_state(value: object) -> str:
+    """Tri-state reading of a yt-dlp ``vcodec``/``acodec`` field.
+
+    yt-dlp distinguishes two things that :func:`_present` used to collapse into one:
+
+    * the literal string ``"none"`` — the extractor is telling us this stream
+      definitely has no such track (a YouTube storyboard is ``vcodec="none"``);
+    * a missing / ``None`` value — the extractor simply did not report a codec.
+
+    Treating "unreported" as "absent" silently discarded every X/Twitter progressive
+    format (``http-256``/``http-832``/``http-2176`` carry a real height and filesize
+    but no codec strings), so X links produced zero options and surfaced to users as
+    "no playable formats". Returns ``"present" | "absent" | "unknown"``.
+    """
+    if value is None or value == "":
+        return "unknown"
+    return "absent" if value == "none" else "present"
 
 
 def _bitrate_size(kbps: float | None, duration: int | None) -> int | None:

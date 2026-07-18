@@ -84,6 +84,15 @@ class VideoUnavailableError(UserFacingError):
     error_type = ErrorType.VIDEO_UNAVAILABLE
 
 
+class NoDownloadableMediaError(UserFacingError):
+    """The post was read successfully but carries nothing we can download.
+
+    A text-only tweet, a poll, or a link preview. This is PERMANENT — retrying
+    changes nothing — so it must never be reported as a transient "try again"."""
+
+    error_type = ErrorType.NO_MEDIA_FOUND
+
+
 # --- Download pipeline ----------------------------------------------------
 class DownloadError(AppError):
     """Base for failures in the download/transcode/upload pipeline."""
@@ -181,6 +190,7 @@ __all__ = [
     "InfrastructureError",
     "JobNotFoundError",
     "MaintenanceModeError",
+    "NoDownloadableMediaError",
     "PermissionDeniedError",
     "RateLimitExceededError",
     "RedisConnectionError",

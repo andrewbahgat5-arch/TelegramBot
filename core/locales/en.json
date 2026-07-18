@@ -11,6 +11,7 @@
   "errors.rate_limit_exceeded": "Too many requests. Please slow down.",
   "errors.unexpected": "Something went wrong on our side. Please try again.",
   "errors.video_unavailable": "⚠️ This video isn't available for download right now. Please try another link, or try this one again later.",
+  "errors.no_media_found": "⚠️ This post doesn't contain anything downloadable — no video, audio or image.",
 
   "user.banned": "🚫 You are banned from using this bot.",
   "system.maintenance": "🔧 The bot is currently under maintenance. Please try again later.",
