@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     # Telegram Bot API server base URL (e.g. http://bot-api:8081) to raise the cap
     # to 2 GB (D-040). Used by the bot + worker Telegram clients.
     bot_api_base_url: str = Field("", alias="BOT_API_BASE_URL")
+    # Where the self-hosted Bot API stores files. In --local mode getFile returns a
+    # path relative to <root>/<token>/, which the app resolves against this (the
+    # botapi volume is mounted read-only into bot + worker).
+    bot_api_local_root: str = Field(
+        "/var/lib/telegram-bot-api", alias="BOT_API_LOCAL_ROOT"
+    )
     # Support contact the Start-home "Contact us" button opens (bugs / problems /
     # suggestions). A t.me deep link to the support account/bot.
     support_contact_url: str = Field("https://t.me/i_wbot", alias="SUPPORT_CONTACT_URL")
