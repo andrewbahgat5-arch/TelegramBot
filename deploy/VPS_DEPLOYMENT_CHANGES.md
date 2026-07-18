@@ -512,3 +512,21 @@ each auto-pinned on first success, concurrent leases granting exactly one slot p
 **Operational note:** bugs 1–2 also fixed the pre-existing subscriber-CSV import, which
 called `bot.download()` the same way and would have failed identically. **Check rotation
 after any change to `_order()`** — it is the failure mode that looks like success.
+
+### Cookie pool Phase 2 deployed (2026-07-18) — recovery prober, history, panel policy
+
+Migration `2026071803` applied (production now at `2026071803`). Deployed with the usual
+capture-logs → upload → build → migrate → recreate sequence.
+
+- **Recovery prober** runs in the worker process (its own loop, hourly by default via
+  `cookie_recovery_probe_interval`). Re-tests **only EXPIRED** cookies on their own
+  egress; `INVALID` and `DISABLED` are never auto-probed. One probe per cycle, oldest
+  failure first.
+- **History view**: per-cookie audit trail from the detail screen.
+- **Policy labels**: the ten `cookie_*` settings now render properly in the admin
+  settings panel, so strategy/thresholds/cooldowns are tunable from Telegram.
+
+**Verified live:** forced `yt-04` to EXPIRED, ran one probe cycle → recovered to HEALTHY
+(`37 formats via warp-1`); the verification restored the original status in a `finally`
+so production could not be left worse than found. History rendered the whole trail
+(added → affinity pinned → forced expiry → recovered). Pool 4/4 healthy, zero errors.

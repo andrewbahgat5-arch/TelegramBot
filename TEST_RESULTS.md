@@ -67,6 +67,26 @@ Copy and adapt for every run.
 
 ## Standing Entries
 
+### 2026-07-18 (8) — Unit + production — Cookie pool Phase 2 (prober, history, panel policy)
+
+| Field | Value |
+|---|---|
+| Git SHA | `b3920ea`; worktree `happy-bose-71ed46` |
+| Environment | local (Windows 11, Python 3.13) + live production |
+| Suite | unit (full) + live verification inside `tgbot_worker` |
+| Triggered by | Phase 2 of DESIGN_COOKIE_POOL.md |
+| Total tests | 1084 | Passed | 1083 | Failed | 1 (pre-existing `test_enums`) | Skipped | 0 |
+| New tests | `test_cookie_prober.py` (9): recovery, still-broken, INVALID/DISABLED never probed, own-egress probing, vanished file → INVALID, one-per-cycle, oldest-failure-first, empty pool, hook failure does not undo recovery |
+| Migration | `2026071803` (new revision, NOT an edit to the already-applied `2026071802`) seeds `cookie_recovery_probe_interval`; production now at `2026071803` |
+| Production verification | Prober no-ops with nothing to recover; a cookie forced to EXPIRED was probed and restored to HEALTHY (`37 formats via warp-1`) with the original status guaranteed-restored in a `finally`; history view renders the full audit trail (added → affinity pinned → forced expiry → recovered); pool 4/4 healthy, uses 17/7/7/7 |
+| Notes | The prober only touches EXPIRED. INVALID cannot be fixed by probing and DISABLED is a human decision. One probe per cycle, oldest failure first — bursting authenticated requests is the opposite of what a cooled-off session needs. |
+| Linked PR | — |
+
+**Failures (if any)**
+- `test_enums.py::test_media_format_values` — pre-existing known failure; untouched.
+
+---
+
 ### 2026-07-18 (7) — Production — Cookie pool: four live-flow bugs found and fixed
 
 | Field | Value |
