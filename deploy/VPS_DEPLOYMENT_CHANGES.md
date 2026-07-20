@@ -530,3 +530,76 @@ capture-logs → upload → build → migrate → recreate sequence.
 (`37 formats via warp-1`); the verification restored the original status in a `finally`
 so production could not be left worse than found. History rendered the whole trail
 (added → affinity pinned → forced expiry → recovered). Pool 4/4 healthy, zero errors.
+
+### The cookie wrapper silently swallowed every yt-dlp error (2026-07-19)
+
+**Symptom.** Two Owner alerts read `extraction_failed: analyze generic t.me …` and
+`analyze instagram www.instagram.com …`, both with the message "Extraction failed." and
+nothing else. The bot log showed `ytdlp_nonzero_exit` with **`stderr: ""`**.
+
+**Root cause** — one line in `deploy/ytdlp-wrapper.sh`, introduced by `51566b4`:
+
+```sh
+if command -v flock >/dev/null 2>&1 && exec 9>>"$LOCK" 2>/dev/null; then
+```
+
+`exec` **without a command** applies its redirections to the shell itself, permanently.
+So `2>/dev/null` did not just silence the `exec` — it silenced fd 2 for the rest of the
+script, **yt-dlp's stderr included**. Measured on the live container: the same Instagram
+URL produced 658 bytes of stderr through `yt-dlp.real` and **0 bytes** through the
+wrapper.
+
+**Why it mattered far beyond the two alerts.** `_map_error` classifies purely from
+stderr text, so empty stderr collapsed the whole error taxonomy:
+
+- No `_TRANSIENT_MARKERS` matched → every non-zero exit became a permanent
+  `ExtractionFailedError` → `_run_with_retries` never retried and `_run_egress_plan`
+  never failed over. **The YouTube WARP↔residential-proxy fallback was dead** for hard
+  failures for a full day.
+- `_BOT_CHECK_RE` never matched → bot-check wall detection dead.
+- The cookie pool classified from an empty string on every run (health was safe — the
+  allowlist means no signal = no penalty — but credit/blame was noise).
+- Every `error_logs` row read "Extraction failed." with no reason.
+
+**Fix.** Scope the redirect to a brace group so it does not touch the script's own
+stderr, and guard it with a static test (`test_wrapper_never_permanently_redirects_stderr`):
+
+```sh
+if command -v flock >/dev/null 2>&1 && { exec 9>>"$LOCK"; } 2>/dev/null; then
+```
+
+**The two links themselves, once stderr was restored:**
+
+- **t.me** — `Extractor telegram:embed returned nothing`. yt-dlp prints a bare `null` and
+  exits **0**. `null` is valid JSON, so it passed the `JSONDecodeError` guard and reached
+  `_to_media_info(url, None)` → `AttributeError` on `None.get`, escaping the provider as
+  an untyped crash. Now a `URLNotSupportedError` carrying the yt-dlp reason.
+- **instagram** — `Instagram sent an empty media response … use --cookies for the
+  authentication`. Anonymous Instagram extraction is login-gated. Not a bug; now
+  classified (below) instead of reported as a generic failure.
+
+### Login-walled content is now its own error type (2026-07-19)
+
+New `ErrorType.AUTH_REQUIRED` / `AuthRequiredError` (`UserFacingError`), classified from
+`_AUTH_REQUIRED_MARKERS` in the provider, on **both** failure shapes: a non-zero exit
+(via `_map_error`) and the rc=0 case where `--ignore-no-formats-error` masks the wall as
+an empty-formats info dict (read from stderr in `extract_info`). The user gets
+`errors.auth_required` — "requires a logged-in account", plus what IS supported (public
+IG posts/Reels, public FB posts/videos, other public content) — in `en` and `ar`.
+
+Two ordering decisions worth keeping:
+
+- Auth is checked **before** `_TRANSIENT_MARKERS`, because Instagram's wording is
+  "rate-limit reached **or** login required" — calling it transient would promise "try
+  again later" on a post that can never work anonymously.
+- `"sign in to confirm your age"` is listed in full, never as a `"sign in to confirm"`
+  prefix, so it cannot swallow YouTube's `"sign in to confirm you're not a bot"` — that
+  is the anti-bot wall (a route problem) and must stay transient/retryable. Guarded by
+  `test_bot_check_wall_is_not_misread_as_auth_required`.
+
+**Alerting.** `AuthRequiredError`, `NoDownloadableMediaError` and `URLNotSupportedError`
+are excluded from the analyze burst detector (still persisted to `error_logs`). The burst
+alert signals a pipeline outage; without the exclusion, five users pasting private
+Instagram links inside ten minutes would page the Owner on a perfectly healthy bot.
+
+No migration: `error_logs.error_type` is `VARCHAR(30)` and `auth_required` is 13 chars.

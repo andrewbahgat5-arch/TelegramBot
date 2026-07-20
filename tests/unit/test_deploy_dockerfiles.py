@@ -52,3 +52,25 @@ def test_builder_copies_source_before_installing() -> None:
         assert copy_idx != -1, f"{name}: builder must COPY the full source"
         assert install_idx != -1, f"{name}: builder must install into /install"
         assert copy_idx < install_idx, f"{name}: COPY source must precede the install"
+
+
+def test_wrapper_never_permanently_redirects_stderr() -> None:
+    """The cookie wrapper must not silence yt-dlp's stderr.
+
+    `exec` WITHOUT a command applies its redirections to the shell itself, permanently.
+    A bare `exec 9>>"$LOCK" 2>/dev/null` therefore silenced fd 2 for the whole script —
+    yt-dlp's stderr included — so every failure reached Python empty. That defeated the
+    whole classification chain: `_map_error` matched no markers, so every non-zero exit
+    became a permanent ExtractionFailedError (no transient retry, no egress failover),
+    the bot-check regex never fired, and the cookie pool classified blind. Live for a
+    day in production; the only symptom was `ytdlp_nonzero_exit stderr=""`.
+
+    Scoping the redirect to a brace group (`{ exec 9>>"$LOCK"; } 2>/dev/null`) keeps it
+    off the script's own stderr.
+    """
+    wrapper = _read("ytdlp-wrapper.sh")
+    bare_exec_redirect = re.compile(r"^\s*(?:if\s+.*&&\s+)?exec\s+\d+>[^|;&]*2>", re.MULTILINE)
+    assert not bare_exec_redirect.search(wrapper), (
+        "bare `exec N>... 2>/dev/null` makes the stderr redirect permanent for the whole "
+        "script — wrap it in braces: `{ exec N>...; } 2>/dev/null`"
+    )

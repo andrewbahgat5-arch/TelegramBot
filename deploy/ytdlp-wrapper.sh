@@ -53,7 +53,15 @@ JAR=$(mktemp /tmp/ytc.XXXXXX) || exec "$REAL" "$@"
 trap 'rm -f "$JAR" "${JAR}.merged"' EXIT INT TERM
 
 HAVE_LOCK=0
-if command -v flock >/dev/null 2>&1 && exec 9>>"$LOCK" 2>/dev/null; then
+# The braces matter. `exec` WITHOUT a command applies its redirections to the shell
+# itself, permanently — so the bare `exec 9>>"$LOCK" 2>/dev/null` this replaces did not
+# just silence the exec, it silenced fd 2 for the whole script, yt-dlp's stderr
+# included. Every failure then reached Python with empty stderr, which defeated the
+# entire error-classification chain: _map_error saw no markers so every non-zero exit
+# became a permanent ExtractionFailedError (no transient retry, no egress failover),
+# the bot-check wall regex never matched, and the cookie pool classified blind.
+# Wrapping in braces scopes 2>/dev/null to the group, leaving the script's stderr alone.
+if command -v flock >/dev/null 2>&1 && { exec 9>>"$LOCK"; } 2>/dev/null; then
     HAVE_LOCK=1
 fi
 
