@@ -22,14 +22,23 @@ from typing import Any
 from urllib.parse import urlparse
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, Message
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import CallbackQuery, InputMediaPhoto, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.callbacks.factory import CallbackSigner
 from bot.handlers.ads import show_placement_ad
 from bot.keyboards.format_select import append_ad_buttons, build_format_keyboard
+from bot.keyboards.gallery import (
+    browse_caption,
+    build_browse_keyboard,
+    build_item_keyboard,
+    item_back_callback,
+    item_caption,
+)
 from bot.keyboards.quality_select import build_quality_keyboard
 from core.alerting import BurstDetector
+from core.error_report import ErrorReport, RequestContext, Severity, UserContext
 from core.i18n import Translator
 from core.logging import get_correlation_id, get_logger
 from core.urls import detect_platform
@@ -37,8 +46,10 @@ from domain.entities.media import AUDIO_TARGET_BY_QUALITY, MediaFormatOption, Me
 from domain.entities.user import UserSnapshot
 from domain.enums import UNLIMITED_ROLES, AdPlacement, MediaFormat, Quality
 from domain.exceptions import (
+    AuthRequiredError,
     ExtractionFailedError,
     InfrastructureError,
+    NoDownloadableMediaError,
     URLNotSupportedError,
     UserFacingError,
 )
@@ -46,6 +57,7 @@ from domain.protocols.downloader import ProviderRetryElsewhere
 from services.ad_service import AdService
 from services.caption_ad_mixer import CaptionAdMixer
 from services.error_log_service import ErrorLogService
+from services.error_report_service import ErrorReportService
 from services.job_service import JobService, RequestKind
 from services.notification_service import NotificationService
 from services.rate_limit_service import RateLimitService
@@ -62,12 +74,85 @@ AdServiceFactory = Callable[[AsyncSession], AdService]
 PreferenceServiceFactory = Callable[[AsyncSession], UserPreferenceService]
 ErrorLogServiceFactory = Callable[[AsyncSession], ErrorLogService]
 
+
+async def _record_report(
+    reporter: ErrorReportService | None,
+    error_log_factory: ErrorLogServiceFactory | None,
+    session: AsyncSession,
+    *,
+    severity: Severity,
+    kind: str,
+    message_text: str,
+    user: UserSnapshot,
+    tg_message: Message,
+    url: str,
+    exc: BaseException,
+) -> None:
+    """Classify once, then let the routing policy decide the destination.
+
+    The report is built here and handed to BOTH sinks: the reporter (which pushes only
+    CRITICAL) and error_logs (which stores every field the dashboard filters on). One
+    classification, two destinations — no per-call decision about where things go.
+    """
+    if reporter is None:
+        return
+    report = ErrorReport(
+        severity=severity,
+        kind=kind,
+        exc_type=type(exc).__name__,
+        message=message_text,
+        correlation_id=get_correlation_id(),
+        user=_report_user(user, tg_message, "send_url"),
+        request=RequestContext(url=url, platform=detect_platform(url), stage="analyze"),
+    )
+    persist = None
+    if error_log_factory is not None:
+        service = error_log_factory(session)
+        fields = _url_log_fields(url)
+        ctx = f"analyze {fields['platform']} {fields['url_host']} {fields['url_hash']}"
+
+        async def persist(e: BaseException, _kind: str) -> None:
+            await service.record_failure(
+                e,
+                context=ctx,
+                user_id=user.id,
+                correlation_id=get_correlation_id(),
+                report=report,
+            )
+
+    await reporter.deliver(report, persist=persist, exc=exc)
+
+
+def _report_user(user: UserSnapshot, message: Message, action: str) -> UserContext:
+    """Owner-report identity for the user who triggered a failure."""
+    tg = message.from_user
+    return UserContext(
+        telegram_id=user.telegram_id,
+        username=tg.username if tg else None,
+        first_name=tg.first_name if tg else None,
+        last_name=tg.last_name if tg else None,
+        chat_id=message.chat.id if message.chat else None,
+        chat_type=message.chat.type if message.chat else None,
+        language=tg.language_code if tg else None,
+        is_premium=user.is_premium,
+        plan='premium' if user.is_premium else 'free',
+        action=action,
+    )
+
 # One CRITICAL "analysis failures are bursting" alert (→ the Telegram alerts chat via
 # TelegramAlertProcessor) when this many analyses fail within the window. Isolated
 # failures stay log-only; a burst means the pipeline (proxy, yt-dlp, a platform) broke.
 _BURST_THRESHOLD = 5
 _BURST_WINDOW_SECONDS = 600.0
 _analyze_failure_burst = BurstDetector(_BURST_THRESHOLD, _BURST_WINDOW_SECONDS)
+# Outcomes attributable to the LINK, not to us: a login wall, a post with nothing in it,
+# an unsupported site. They are recorded in error_logs but never count toward the burst
+# alert, which is a signal that the pipeline itself is broken.
+_EXPECTED_USER_ERRORS = (
+    AuthRequiredError,
+    NoDownloadableMediaError,
+    URLNotSupportedError,
+)
 
 # "Small file" ceiling for the auto-download preference (item #10): a single-format
 # link at or under this size is fetched without the picker; larger files still ask.
@@ -113,6 +198,7 @@ async def handle_url(
     rate_limit_service_factory: RateLimitServiceFactory | None = None,
     notification_service: NotificationService | None = None,
     error_log_service_factory: ErrorLogServiceFactory | None = None,
+    error_report_service: ErrorReportService | None = None,
 ) -> None:
     # Acknowledge instantly so the user never sees the bot as idle while yt-dlp runs.
     url = message.text or ""
@@ -133,6 +219,14 @@ async def handle_url(
                 correlation_id=get_correlation_id(),
                 with_traceback=with_traceback,
             )
+        # The burst alert exists to catch a pipeline-level OUTAGE, so it must only count
+        # failures that implicate us. A login-walled or empty post is the link doing
+        # exactly what it should — and now that auth walls are classified (rather than
+        # buried in generic extraction failures), a handful of users pasting private
+        # Instagram links in one window would otherwise page the Owner with a CRITICAL
+        # for a perfectly healthy bot. Still persisted to error_logs either way.
+        if isinstance(exc, _EXPECTED_USER_ERRORS):
+            return
         if _analyze_failure_burst.record():
             _log.critical(
                 "analyze_failure_burst",
@@ -144,8 +238,24 @@ async def handle_url(
 
     try:
         analyzed = await analyzer.analyze(url)
-    except URLNotSupportedError:
+    except URLNotSupportedError as exc:
         _log.info("analyze_unsupported_url", **_url_log_fields(url))
+        # INFO: the bot behaved correctly, so this is a Logs row, not a Telegram push
+        # (DESIGN_MONITORING.md). It is recorded with the FULL url because an
+        # unsupported site today is a candidate for support tomorrow, and that call
+        # cannot be made from a hash.
+        await _record_report(
+            error_report_service,
+            error_log_service_factory,
+            session,
+            severity=Severity.INFO,
+            kind="unsupported_url",
+            message_text=str(exc) or "This link is not supported.",
+            user=user,
+            tg_message=message,
+            url=url,
+            exc=exc,
+        )
         await ack.edit_text(translate("errors.url_not_supported", locale))
         return
     except UserFacingError as exc:
@@ -167,6 +277,18 @@ async def handle_url(
     except ExtractionFailedError as exc:
         _log.warning("analyze_extraction_failed", error=str(exc), **_url_log_fields(url))
         await record_failure(exc)
+        await _record_report(
+            error_report_service,
+            error_log_service_factory,
+            session,
+            severity=Severity.ERROR,
+            kind="extraction_failed",
+            message_text=str(exc),
+            user=user,
+            tg_message=message,
+            url=url,
+            exc=exc,
+        )
         await ack.edit_text(translate("download.extraction_failed", locale))
         return
     except Exception as exc:
@@ -178,6 +300,18 @@ async def handle_url(
             await ack.edit_text(translate("errors.unexpected", locale))
         except Exception:  # noqa: S110 - the ack may have been deleted; nothing to do
             pass
+        return
+
+    # A multi-item post (Instagram carousel) resolves to an item list rather than
+    # formats — the media lives in the slides. Offer the slides first; picking one
+    # re-analyzes it and continues into the normal format/quality flow. This branch
+    # must come BEFORE the no-formats check: a carousel legitimately has none of its
+    # own, and falling through told users a post full of video had "no formats".
+    if analyzed.info.carousel_items:
+        await _open_gallery(
+            message, ack, analyzed.media_id, analyzed.info, 1, callback_signer, locale
+        )
+        await show_placement_ad(ad_service_factory(session), user, AdPlacement.ANALYSIS.value)
         return
 
     if not analyzed.info.formats:
@@ -499,6 +633,149 @@ async def handle_format_choice(
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("g|"))
+async def handle_gallery(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    user: UserSnapshot,
+    analyzer_factory: AnalyzerFactory,
+    ad_service_factory: AdServiceFactory,
+    callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+    job_service_factory: JobServiceFactory | None = None,
+    rate_limit_service_factory: RateLimitServiceFactory | None = None,
+    notification_service: NotificationService | None = None,
+) -> None:
+    """Every gallery step: navigate, or act on the current item.
+
+    Navigation is served entirely from the cached item list — no extraction — so paging
+    is instant. Extraction happens only when the user commits to an item, which is also
+    when that item earns its own metadata row.
+    """
+    parsed = callback_signer.unpack(callback.data or "")
+    if parsed is None or parsed.action != "g" or parsed.arg is None:
+        await callback.answer()
+        return
+    op = parsed.language or "n"
+    index = parsed.arg
+
+    analyzer = analyzer_factory(session)
+    post = await analyzer.analyze_by_media_id(parsed.media_id)
+    if post is None or not post.info.carousel_items:
+        await callback.answer(translate("gallery.expired", locale), show_alert=True)
+        return
+    items = post.info.carousel_items
+    if not 1 <= index <= len(items):
+        await callback.answer(translate("gallery.item_gone", locale), show_alert=True)
+        return
+
+    if op in ("n", "s"):
+        # Browsing and selecting are both served from the cached item list — no
+        # extraction — so moving between items and screens is instant. yt-dlp only
+        # runs once the user commits to a media type below.
+        await _render_gallery(
+            callback.message,
+            parsed.media_id,
+            post.info,
+            index,
+            callback_signer,
+            locale,
+            selected=(op == "s"),
+        )
+        await callback.answer()
+        return
+
+    # Any other op needs the item's real formats, so extract it now.
+    try:
+        analyzed = await analyzer.analyze(post.info.source_url, item_index=index)
+    except UserFacingError as exc:
+        await callback.answer(translate(exc.translation_key, locale), show_alert=True)
+        return
+    except Exception:
+        _log.exception("gallery_item_failed", item=index, media_id=parsed.media_id)
+        await callback.answer(translate("errors.unexpected", locale), show_alert=True)
+        return
+
+    if not analyzed.info.formats:
+        await callback.answer(translate("gallery.item_gone", locale), show_alert=True)
+        return
+
+    if op == "i":
+        # An image has nothing to choose, so tapping it downloads. Any intermediate
+        # screen here would be a screen with exactly one button on it.
+        if not (
+            job_service_factory
+            and rate_limit_service_factory
+            and notification_service
+        ):
+            await callback.answer(translate("errors.unexpected", locale), show_alert=True)
+            return
+        try:
+            await rate_limit_service_factory(session).authorize_download(user.telegram_id)
+        except UserFacingError as exc:
+            await callback.answer(translate(exc.translation_key, locale), show_alert=True)
+            return
+        await callback.answer()
+        await _auto_download(
+            session, user, analyzed, MediaFormat.IMAGE, Quality.IMAGE,
+            job_service_factory, ad_service_factory, notification_service,
+            translate, locale,
+        )
+        return
+
+    fmt = MediaFormat.VIDEO if op == "v" else MediaFormat.AUDIO
+    if not any(o.format is fmt for o in analyzed.info.formats):
+        await callback.answer(translate("download.no_formats", locale), show_alert=True)
+        return
+    await _start_quality_step(
+        callback, session, user, analyzed, fmt,
+        ad_service_factory, callback_signer, translate, locale,
+        post_media_id=parsed.media_id, index=index,
+    )
+
+
+async def _start_quality_step(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    user: UserSnapshot,
+    analyzed: Any,
+    fmt: MediaFormat,
+    ad_service_factory: AdServiceFactory,
+    callback_signer: CallbackSigner,
+    translate: Translator,
+    locale: str,
+    post_media_id: int,
+    index: int,
+) -> None:
+    """Hand a chosen gallery item into the existing quality-selection flow.
+
+    ``post_media_id``/``index`` are carried purely so Back can rebuild the gallery.
+    """
+    # THE back fix: this quality screen was opened from the gallery, so Back must
+    # return to the gallery at the very item it was opened from. Previously it used
+    # the default pack_back(item media_id), which walked to that ITEM's own format
+    # screen — the browser (position, preview, Previous/Next) disappeared entirely
+    # and the user had no way back except resending the link.
+    keyboard = build_quality_keyboard(
+        analyzed.media_id,
+        fmt,
+        analyzed.info,
+        callback_signer,
+        locale,
+        # One step back up the chain: quality → the selected-item screen (not the
+        # browser), so trying the other media type does not mean re-selecting the item.
+        back_callback=item_back_callback(post_media_id, index, callback_signer),
+    )
+    caption = _quality_caption(analyzed.info, fmt, translate, locale)
+    mixer = CaptionAdMixer(ad_service_factory(session))
+    decorated, ad_buttons = await mixer.decorate_for_user(user, caption, user.total_downloads)
+    caption = decorated or caption
+    keyboard = append_ad_buttons(keyboard, ad_buttons)
+    await _edit_chooser(callback.message, caption, keyboard)
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("b|"))
 async def handle_back(
     callback: CallbackQuery,
@@ -589,6 +866,89 @@ async def handle_quality_choice(
     await show_placement_ad(
         ad_service_factory(session), user, AdPlacement.QUALITY_SELECT.value
     )
+
+
+async def _open_gallery(
+    message: Message,
+    ack: Message,
+    media_id: int,
+    info: MediaInfo,
+    index: int,
+    signer: CallbackSigner,
+    locale: str,
+) -> None:
+    """First render of the gallery: replace the "Analyzing…" ack with a photo message.
+
+    It MUST be sent as a photo, not edited into one: Telegram cannot convert a text
+    message into a media message, so a gallery that started as text could never show a
+    preview for any item. When no item has a usable preview at all we fall back to a
+    text gallery — navigation still works, it simply stays text for that session.
+    """
+    items = info.carousel_items
+    item = items[index - 1]
+    caption = browse_caption(
+        item, len(items), locale, info.title, source_total=info.raw.get("playlist_total")
+    )
+    keyboard = build_browse_keyboard(media_id, items, index, signer, locale)
+    if item.thumbnail_url:
+        try:
+            await message.answer_photo(
+                item.thumbnail_url, caption=caption, reply_markup=keyboard
+            )
+            await ack.delete()
+            return
+        except Exception as exc:  # unreachable/blocked preview → text gallery
+            _log.debug("gallery_photo_failed", error=str(exc), index=index)
+    await ack.edit_text(caption, reply_markup=keyboard)
+
+
+async def _render_gallery(
+    message: object,
+    media_id: int,
+    info: MediaInfo,
+    index: int,
+    signer: CallbackSigner,
+    locale: str,
+    selected: bool = False,
+) -> None:
+    """Re-render the gallery IN PLACE for ``index`` — never a new message.
+
+    ``selected`` picks the screen: the browser (navigation + Select) or the chosen
+    item's actions. Both keep the same preview, so stepping between them is a caption
+    and keyboard swap the user reads as one continuous screen.
+
+    Swapping the picture needs editMessageMedia; editing the caption alone would leave
+    the previous item's image above the new item's buttons. A text-only gallery (no
+    preview was available at open time) can only ever have its text edited.
+    """
+    if not isinstance(message, Message):
+        return
+    items = info.carousel_items
+    item = items[index - 1]
+    if selected:
+        caption = item_caption(item, len(items), locale, info.title)
+        keyboard = build_item_keyboard(media_id, item, signer, locale)
+    else:
+        caption = browse_caption(
+            item, len(items), locale, info.title,
+            source_total=info.raw.get("playlist_total"),
+        )
+        keyboard = build_browse_keyboard(media_id, items, index, signer, locale)
+    if message.photo and item.thumbnail_url:
+        try:
+            await message.edit_media(
+                InputMediaPhoto(media=item.thumbnail_url, caption=caption),
+                reply_markup=keyboard,
+            )
+            return
+        except TelegramBadRequest as exc:
+            # "message is not modified" = the same item was re-selected (the counter
+            # button); anything else means the preview URL was rejected, and the
+            # caption still has to move on to the new item.
+            if "not modified" in str(exc).lower():
+                return
+            _log.debug("gallery_edit_media_failed", error=str(exc), index=index)
+    await _edit_chooser(message, caption, keyboard)
 
 
 async def _edit_chooser(message: object, text: str, keyboard: object) -> None:

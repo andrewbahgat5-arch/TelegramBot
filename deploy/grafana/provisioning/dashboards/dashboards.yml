@@ -1,0 +1,15 @@
+# Dashboards are PROVISIONED FROM FILES, not created by clicking. They are then
+# version-controlled with the code they observe, survive a container rebuild, and are
+# identical on staging and production.
+apiVersion: 1
+
+providers:
+  - name: telegram-bot
+    orgId: 1
+    folder: Telegram Bot
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true      # experiments are fine; the file remains the source of truth
+    options:
+      path: /var/lib/grafana/dashboards

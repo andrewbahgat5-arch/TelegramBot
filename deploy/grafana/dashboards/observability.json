@@ -1,0 +1,377 @@
+{
+  "uid": "tgbot-observability",
+  "title": "Telegram Bot \u2014 Errors & Logs",
+  "tags": [
+    "telegram-bot"
+  ],
+  "timezone": "utc",
+  "editable": true,
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "severity",
+        "label": "Severity",
+        "type": "custom",
+        "query": "__all,critical,error,warning,info",
+        "current": {
+          "text": "__all",
+          "value": "__all"
+        },
+        "options": [],
+        "includeAll": false
+      },
+      {
+        "name": "platform",
+        "label": "Platform",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "tgbot_pg"
+        },
+        "query": "SELECT '__all' UNION SELECT DISTINCT platform FROM error_logs WHERE platform IS NOT NULL",
+        "current": {
+          "text": "__all",
+          "value": "__all"
+        },
+        "refresh": 1,
+        "includeAll": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Critical (24h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "tgbot_pg"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FROM error_logs WHERE severity='critical' AND created_at > now() - interval '24 hours'"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Errors (24h)",
+      "datasource": {
+        "type": "postgres",
+        "uid": "tgbot_pg"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) FROM error_logs WHERE severity='error' AND created_at > now() - interval '24 hours'"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Events over time by severity",
+      "datasource": {
+        "type": "postgres",
+        "uid": "tgbot_pg"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '5m'), coalesce(severity,'unknown') AS metric, count(*) AS value FROM error_logs WHERE $__timeFilter(created_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "\ud83d\udea8 Errors \u2014 application faults",
+      "type": "table",
+      "datasource": {
+        "type": "postgres",
+        "uid": "tgbot_pg"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at AS \"Time\", severity AS \"Sev\", category AS \"Category\", platform AS \"Platform\", url AS \"URL\", username AS \"User\", user_id AS \"UserID\", chat_id AS \"Chat\", message AS \"Message\", context AS \"Context\" FROM error_logs WHERE $__timeFilter(created_at) AND (severity IN ('critical','error')) AND ('$severity' = '__all' OR severity = '$severity') AND ('$platform' = '__all' OR platform = '$platform') ORDER BY created_at DESC LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "URL"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open the original URL",
+                    "url": "${__value.text}",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".+",
+                      "result": {
+                        "text": "Link",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sev"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "\ud83d\udd34 critical",
+                        "index": 0
+                      },
+                      "error": {
+                        "text": "\ud83d\udfe0 error",
+                        "index": 1
+                      },
+                      "warning": {
+                        "text": "\ud83d\udfe1 warning",
+                        "index": 2
+                      },
+                      "info": {
+                        "text": "\ud83d\udd35 info",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Message"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "title": "\ud83d\udccb Logs \u2014 operational events",
+      "type": "table",
+      "datasource": {
+        "type": "postgres",
+        "uid": "tgbot_pg"
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT created_at AS \"Time\", severity AS \"Sev\", category AS \"Category\", platform AS \"Platform\", url AS \"URL\", username AS \"User\", user_id AS \"UserID\", chat_id AS \"Chat\", message AS \"Message\", context AS \"Context\" FROM error_logs WHERE $__timeFilter(created_at) AND (severity IS NULL OR severity IN ('warning','info')) AND ('$severity' = '__all' OR severity = '$severity') AND ('$platform' = '__all' OR platform = '$platform') ORDER BY created_at DESC LIMIT 500"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "URL"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 70
+              },
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open the original URL",
+                    "url": "${__value.text}",
+                    "targetBlank": true
+                  }
+                ]
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".+",
+                      "result": {
+                        "text": "Link",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Sev"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "critical": {
+                        "text": "\ud83d\udd34 critical",
+                        "index": 0
+                      },
+                      "error": {
+                        "text": "\ud83d\udfe0 error",
+                        "index": 1
+                      },
+                      "warning": {
+                        "text": "\ud83d\udfe1 warning",
+                        "index": 2
+                      },
+                      "info": {
+                        "text": "\ud83d\udd35 info",
+                        "index": 3
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Message"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 420
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

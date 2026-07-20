@@ -108,6 +108,13 @@ def _prefer_video(candidate: MediaFormatOption, incumbent: MediaFormatOption) ->
     larger-wins tie-break and displayed/downloaded far bigger than the real thing).
     A known size always beats an unknown one so we never trade a sized format for a
     sizeless placeholder.
+
+    BEFORE the size comparison, an identical codec at the same tier is settled by
+    BITRATE, highest wins. Sources publish several rungs at one resolution — Instagram
+    ships six 720x960 VP9 streams from 220k to 815k and reports no filesize for any of
+    them — so "smaller file" picked the worst-looking one available and the user got a
+    visibly degraded video. Bitrate only decides when the resolution and codec already
+    match, so the format-18 case below is untouched.
     """
     if bool(candidate.provider_format_id) != bool(incumbent.provider_format_id):
         return bool(candidate.provider_format_id)
@@ -115,6 +122,9 @@ def _prefer_video(candidate: MediaFormatOption, incumbent: MediaFormatOption) ->
     inc_codec = _CODEC_PREFERENCE.get(incumbent.codec or "", 99)
     if cand_codec != inc_codec:
         return cand_codec < inc_codec
+    cand_br, inc_br = candidate.bitrate_kbps, incumbent.bitrate_kbps
+    if cand_br and inc_br and cand_br != inc_br:
+        return cand_br > inc_br
     cand_size, inc_size = candidate.approx_size_bytes, incumbent.approx_size_bytes
     if (cand_size is None) != (inc_size is None):
         return inc_size is None  # keep the option whose size we actually know

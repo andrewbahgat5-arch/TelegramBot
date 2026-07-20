@@ -91,8 +91,12 @@ class DownloaderProtocol(Protocol):
     capabilities: set[Capability]
     priority: int
 
-    async def extract_info(self, url: str) -> MediaInfo:
-        """Discover metadata + available formats for ``url``."""
+    async def extract_info(self, url: str, *, item_index: int | None = None) -> MediaInfo:
+        """Discover metadata + available formats for ``url``.
+
+        ``item_index`` selects one item (1-based) of a multi-item post. Omitted, a
+        multi-item post returns an index result: no formats, but ``carousel_items``
+        for the caller to offer. A single-item URL ignores it."""
         ...
 
     async def download(

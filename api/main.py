@@ -10,6 +10,7 @@ paths 404. health/ready/metrics are always public.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import Mapping
 
@@ -169,6 +170,32 @@ async def main() -> None:  # pragma: no cover - process entry; logic covered by 
             redis_connected_value=redis_ok,
         )
 
+    # --- dependency watchdog (DESIGN_MONITORING.md, Decision 1) ----------------
+    # It lives HERE, not in the worker. A real staging outage proved why: when redis
+    # stopped, the worker crash-looped (8 restarts) because its download loops raise on
+    # a lost connection, and every restart wiped the watchdog's in-memory state — so it
+    # never accumulated the consecutive failures needed to declare an outage. The api
+    # rode the same outage out untouched (0 restarts, healthy), because it only touches
+    # redis per-request and treats a failure as a readiness signal. A watchdog must
+    # outlive the outage it reports.
+    report_chat_id = settings.telegram_alerts_chat_id or settings.bot_owner_telegram_id
+    watchdog_task: asyncio.Task[None] | None = None
+    if report_chat_id is not None:
+        from aiogram import Bot
+
+        from infrastructure.telegram.file_sender import TelegramMessageSender
+        from services.error_report_service import ErrorReportService
+        from services.health_watchdog import HealthWatchdog
+
+        watchdog_bot = Bot(token=settings.bot_token.get_secret_value())
+        watchdog_sender = TelegramMessageSender(watchdog_bot)
+
+        async def send_error_report(text: str) -> None:
+            await watchdog_sender.send_message(report_chat_id, text, parse_mode="HTML")
+
+        watchdog = HealthWatchdog(checker, ErrorReportService(send_error_report))
+        watchdog_task = asyncio.create_task(watchdog.run())
+
     app = create_app(checker=checker, refresh_metrics=refresh_metrics, admin_router=admin_router)
 
     bind_port = resolve_bind_port(settings)
@@ -184,6 +211,8 @@ async def main() -> None:  # pragma: no cover - process entry; logic covered by 
     try:
         await server.serve()
     finally:
+        if watchdog_task is not None:
+            watchdog_task.cancel()
         await redis_clients.aclose()
         await engine.dispose()
 

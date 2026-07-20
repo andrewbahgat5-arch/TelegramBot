@@ -16,6 +16,7 @@ import pytest
 from domain.entities.media import MediaFormatOption, MediaInfo
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import (
+    AuthRequiredError,
     ExtractionFailedError,
     NoDownloadableMediaError,
     URLNotSupportedError,
@@ -354,6 +355,22 @@ async def test_extract_info_unsupported(monkeypatch: pytest.MonkeyPatch) -> None
         await YtdlpProvider().extract_info(_URL)
 
 
+async def test_extract_info_null_json_is_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An extractor that matches but returns nothing prints a bare ``null`` and exits 0.
+
+    Seen live on t.me links ("Extractor telegram:embed returned nothing"). ``null`` is
+    valid JSON, so this used to reach ``_to_media_info`` as ``None`` and crash on
+    ``None.get`` instead of surfacing a domain error.
+    """
+    _patch_proc(
+        monkeypatch,
+        _FakeProc(b"null", b"WARNING: Extractor telegram:embed returned nothing", 0),
+    )
+    with pytest.raises(URLNotSupportedError) as excinfo:
+        await YtdlpProvider().extract_info("https://t.me/somechannel/1")
+    assert "telegram:embed" in str(excinfo.value)
+
+
 async def test_extract_info_timeout_is_retryable(monkeypatch: pytest.MonkeyPatch) -> None:
     proc = _FakeProc(b"", b"", 0, timeout=True)
     _patch_proc(monkeypatch, proc)
@@ -683,3 +700,328 @@ def test_muxed_only_source_still_offers_audio() -> None:
     audio = [o for o in info.formats if o.format is MediaFormat.AUDIO]
     assert len(audio) == 1  # a generic audio source the catalog expands from
     assert audio[0].provider_format_id is None  # downloaded via bestaudio/best
+
+
+# --- auth-required classification ----------------------------------------
+# Real yt-dlp stderr, captured from production (2026-07-19) and the extractors' source.
+_INSTAGRAM_EMPTY_RESPONSE = (
+    "WARNING: [Instagram] C8QltIDSLNc: No CSRF token set by Instagram API\n"
+    "ERROR: [Instagram] C8QltIDSLNc: Instagram sent an empty media response. Check if "
+    "this post is accessible in your browser without being logged-in. If it is not, "
+    "then use --cookies-from-browser or --cookies for the authentication."
+)
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        _INSTAGRAM_EMPTY_RESPONSE,
+        "ERROR: [Instagram] x: Requested content is not available, rate-limit reached "
+        "or login required",
+        "ERROR: [facebook] 123: This video is only available for registered users",
+        "ERROR: [youtube] x: Sign in to confirm your age. This video may be "
+        "age-restricted",
+        "ERROR: [instagram] x: This post is private",
+    ],
+)
+def test_login_walled_content_maps_to_auth_required(stderr: str) -> None:
+    """A login wall must reach the user as "you need an account", not a generic
+    extraction failure — retrying, failing over or swapping cookies cannot help,
+    because we hold no session for these platforms by design."""
+    assert isinstance(_map_error(stderr), AuthRequiredError)
+
+
+def test_auth_required_takes_priority_over_the_rate_limit_marker() -> None:
+    """Instagram's wording mentions BOTH ("rate-limit reached or login required").
+    Classifying it transient would promise "try again later" on a post that can never
+    work anonymously, so auth wins."""
+    err = _map_error("ERROR: Requested content is not available, rate-limit reached or "
+                     "login required")
+    assert isinstance(err, AuthRequiredError)
+    assert not isinstance(err, ProviderRetryElsewhere)
+
+
+def test_bot_check_wall_is_not_misread_as_auth_required() -> None:
+    """YouTube's "sign in to confirm you're not a bot" is the anti-bot wall — a route
+    problem that a retry/egress failover fixes. Only "sign in to confirm your AGE" is
+    an auth wall. The markers list spells both out so the prefix cannot collide."""
+    err = _map_error("ERROR: Sign in to confirm you're not a bot")
+    assert isinstance(err, ProviderRetryElsewhere)
+    assert not isinstance(err, AuthRequiredError)
+
+
+def test_auth_required_message_keeps_the_provider_reason() -> None:
+    err = _map_error(_INSTAGRAM_EMPTY_RESPONSE)
+    assert "empty media response" in str(err)
+
+
+async def test_extract_info_auth_wall_with_zero_exit_is_auth_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--ignore-no-formats-error makes a login-walled post exit 0 with empty formats —
+    the same shape as a text-only tweet, so _map_error never sees it. Without reading
+    stderr here the user got "nothing downloadable" on a post that is merely private."""
+    walled: dict[str, Any] = {
+        "id": "C8QltIDSLNc",
+        "title": "Instagram post",
+        "webpage_url": "https://www.instagram.com/reel/C8QltIDSLNc/",
+        "formats": [],
+    }
+    _patch_proc(
+        monkeypatch,
+        _FakeProc(orjson.dumps(walled), _INSTAGRAM_EMPTY_RESPONSE.encode(), 0),
+    )
+    with pytest.raises(AuthRequiredError):
+        await YtdlpProvider().extract_info("https://www.instagram.com/reel/C8QltIDSLNc/")
+
+
+async def test_extract_info_empty_post_without_auth_signal_stays_no_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The counterpart: a genuinely empty post must NOT be relabelled auth-required."""
+    empty: dict[str, Any] = {
+        "id": "1",
+        "title": "just text",
+        "webpage_url": "https://x.com/u/status/1",
+        "formats": [],
+    }
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(empty), b"", 0))
+    with pytest.raises(NoDownloadableMediaError):
+        await YtdlpProvider().extract_info("https://x.com/u/status/1")
+
+
+# --- multi-item posts (Instagram carousels) --------------------------------
+# Shape captured from the live post instagram.com/p/DavxiQsHKB0/ (2026-07-19): the
+# post is a PLAYLIST with no formats of its own; the media is in `entries`.
+def _carousel(n: int = 3) -> dict[str, Any]:
+    return {
+        "_type": "playlist",
+        "id": "DavxiQsHKB0",
+        "title": "Post by fifaworldcup",
+        "formats": [],
+        "entries": [
+            {
+                "id": f"item{i}",
+                "title": f"Video {i} by fifaworldcup",
+                "webpage_url": "https://www.instagram.com/p/DavxiQsHKB0/",
+                # Real Instagram entries carry a per-slide thumbnail; the gallery is a
+                # photo message, so a missing preview is a visible defect.
+                "thumbnail": f"https://cdn.example/thumb{i}.jpg",
+                "formats": [
+                    {"format_id": f"v{i}", "ext": "mp4", "height": 720,
+                     "vcodec": "avc1", "acodec": "mp4a", "filesize": 1_000_000},
+                ],
+            }
+            for i in range(1, n + 1)
+        ],
+    }
+
+
+_CAROUSEL_URL = "https://www.instagram.com/p/DavxiQsHKB0/"
+
+
+async def test_carousel_without_an_index_returns_the_item_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REGRESSION: a carousel's media lives in `entries` and the post itself has NO
+    formats. Reading only the top level made a public post holding five 1440p videos
+    surface to the user as "no downloadable media"."""
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_carousel(5)), b"", 0))
+    info = await YtdlpProvider().extract_info(_CAROUSEL_URL)
+    assert len(info.carousel_items) == 5
+    assert info.formats == ()  # nothing chosen yet
+    assert [i.index for i in info.carousel_items] == [1, 2, 3, 4, 5]
+    assert all(i.kind is MediaFormat.VIDEO for i in info.carousel_items)
+    # Every item must carry a preview or the gallery renders an empty photo.
+    assert all(i.thumbnail_url for i in info.carousel_items)
+
+
+async def test_carousel_item_index_selects_that_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_carousel(3)), b"", 0))
+    info = await YtdlpProvider().extract_info(_CAROUSEL_URL, item_index=2)
+    assert info.carousel_index == 2
+    assert info.carousel_items == ()  # this IS an item, not the index
+    assert info.formats  # the entry's formats came through
+    # Its identity must differ from its siblings or they collide in the cache/DB.
+    assert info.video_id.endswith("#2")
+
+
+async def test_carousel_item_ids_are_distinct_per_slide(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two slides must never share a video_id — that key is the metadata row AND the
+    file_id cache, so a collision would serve slide 1's file for slide 3."""
+    ids = set()
+    for n in (1, 2, 3):
+        _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_carousel(3)), b"", 0))
+        info = await YtdlpProvider().extract_info(_CAROUSEL_URL, item_index=n)
+        ids.add(info.video_id)
+    assert len(ids) == 3
+
+
+async def test_single_entry_post_skips_the_picker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One entry is not a choice — flatten straight to it rather than asking."""
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_carousel(1)), b"", 0))
+    info = await YtdlpProvider().extract_info(_CAROUSEL_URL)
+    assert info.carousel_items == ()
+    assert info.formats
+
+
+async def test_carousel_out_of_range_index_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(_carousel(3)), b"", 0))
+    with pytest.raises(URLNotSupportedError):
+        await YtdlpProvider().extract_info(_CAROUSEL_URL, item_index=9)
+
+
+def test_carousel_label_height_matches_what_is_actually_offered() -> None:
+    """The picker label must come from the SAME parser that builds the options.
+
+    Reading raw entry heights advertised 1440p on a post whose real best option was
+    480p — the button promised a quality that was not on the next screen.
+    """
+    from infrastructure.downloader.providers.ytdlp_provider import (
+        _best_entry_height,
+        _entry_options,
+    )
+
+    entry = {
+        "formats": [
+            # An HLS duplicate claiming 1440p, which _parse_formats drops.
+            {"format_id": "hls-1", "protocol": "m3u8_native", "height": 1440,
+             "vcodec": "avc1", "acodec": "none"},
+            {"format_id": "v1", "ext": "mp4", "height": 480, "vcodec": "avc1",
+             "acodec": "mp4a", "filesize": 500_000},
+        ]
+    }
+    offered = {o.quality.value for o in _entry_options(entry) if o.format is MediaFormat.VIDEO}
+    assert _best_entry_height(entry) == 480
+    assert "1440p" not in offered
+
+
+# --- portrait tiers + bitrate selection (Instagram quality regression) ------
+@pytest.mark.parametrize(
+    ("width", "height", "expected"),
+    [
+        # Instagram portrait, measured live 2026-07-19. The long-edge ladder demoted
+        # every one of these by a tier or two, so the offered quality was far below
+        # what the source actually had.
+        (1080, 1440, Quality.P1080),
+        (720, 960, Quality.P720),
+        (540, 720, Quality.P480),
+        (1080, 1920, Quality.P1080),  # Shorts/Reels
+        # Landscape must be unchanged, including the wide-4K case the nearest-tier
+        # snapping was originally introduced for.
+        (1920, 1080, Quality.P1080),
+        (1280, 720, Quality.P720),
+        (3840, 2160, Quality.P2160),
+        (3840, 2026, Quality.P2160),
+    ],
+)
+def test_quality_tier_is_named_by_the_short_edge(
+    width: int, height: int, expected: Quality
+) -> None:
+    """A video is named by its short edge in every orientation: 1920x1080 and
+    1080x1920 are both 1080p."""
+    assert _quality_for_format(width, height, None) is expected
+
+
+def test_highest_bitrate_wins_at_an_identical_tier() -> None:
+    """REGRESSION: Instagram ships six 720x960 VP9 rungs (220k…815k) and reports no
+    filesize for any. The "prefer smaller" tie-break therefore kept the 220k stream and
+    the delivered video looked visibly bad. At an equal tier and codec, bitrate decides.
+    """
+    from services.format_extraction import normalize_formats
+
+    rungs = [
+        MediaFormatOption(MediaFormat.VIDEO, Quality.P720, None, f"dash-{br}", "vp09",
+                          bitrate_kbps=br)
+        for br in (220.8, 232.1, 299.9, 421.7, 557.4, 815.0)
+    ]
+    out = [o for o in normalize_formats(rungs) if o.format is MediaFormat.VIDEO]
+    assert len(out) == 1  # one option per tier
+    assert out[0].provider_format_id == "dash-815.0"
+
+
+def test_bitrate_tiebreak_does_not_disturb_the_format_18_case() -> None:
+    """The oversized legacy muxed 360p must still lose to the clean DASH one when no
+    bitrate is reported — that rule is what keeps displayed sizes honest."""
+    from services.format_extraction import normalize_formats
+
+    muxed = MediaFormatOption(MediaFormat.VIDEO, Quality.P360, 9_000_000, "18", "avc1")
+    dash = MediaFormatOption(MediaFormat.VIDEO, Quality.P360, 2_000_000, "134", "avc1")
+    out = [o for o in normalize_formats([muxed, dash]) if o.format is MediaFormat.VIDEO]
+    assert out[0].provider_format_id == "134"
+
+
+# --- YouTube playlists -----------------------------------------------------
+def test_playlist_urls_are_told_apart_from_single_videos() -> None:
+    """A `watch?v=…&list=…` link means "this video, which happens to be in a list" —
+    expanding it into the whole playlist would be the opposite of what was asked."""
+    from infrastructure.downloader.providers.ytdlp_provider import _is_playlist_url
+
+    for playlist in (
+        "https://www.youtube.com/playlist?list=PLBCF2DAC6FFB574DE",
+        "https://www.youtube.com/@someuser",
+        "https://www.youtube.com/channel/UCabc",
+    ):
+        assert _is_playlist_url(playlist), playlist
+    for single in (
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLxyz",  # video first
+        "https://www.instagram.com/p/DavxiQsHKB0/",
+    ):
+        assert not _is_playlist_url(single), single
+
+
+def test_flat_playlist_entry_is_treated_as_video_not_image() -> None:
+    """REGRESSION: a flat playlist entry has NO formats, so the kind heuristic fell
+    through to IMAGE and every playlist rendered as a wall of "Download Image". An
+    entry with its own video url is a video we simply have not extracted yet."""
+    from infrastructure.downloader.providers.ytdlp_provider import _entry_kind
+
+    flat = {"id": "abc123", "ie_key": "Youtube", "title": "A video", "formats": []}
+    assert _entry_kind(flat) is MediaFormat.VIDEO
+    # Something with neither formats nor its own url is still an image/unknown.
+    assert _entry_kind({"id": "x", "formats": []}) is MediaFormat.IMAGE
+
+
+def test_playlist_entry_resolves_to_its_own_url() -> None:
+    from infrastructure.downloader.providers.ytdlp_provider import _entry_own_url
+
+    assert _entry_own_url({"id": "abc", "ie_key": "Youtube"}) == (
+        "https://www.youtube.com/watch?v=abc"
+    )
+    assert _entry_own_url({"webpage_url": "https://x.test/v/1"}) == "https://x.test/v/1"
+    # A carousel slide has no url of its own — it must NOT be re-extracted, it is
+    # flattened and addressed by --playlist-items instead.
+    assert _entry_own_url({"id": "slide", "formats": [{"format_id": "0"}]}) is None
+
+
+async def test_playlist_listing_is_capped_and_reports_the_real_total(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A playlist can hold thousands. Showing the first N is fine; pretending that is
+    all there is, is not — the caption says "showing 50 of 200"."""
+    from infrastructure.downloader.providers.ytdlp_provider import MAX_PLAYLIST_ITEMS
+
+    big = {
+        "_type": "playlist",
+        "id": "PL1",
+        "title": "Huge playlist",
+        "formats": [],
+        "entries": [
+            {"id": f"vid{i}", "ie_key": "Youtube", "title": f"Video {i}", "formats": []}
+            for i in range(200)
+        ],
+    }
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(big), b"", 0))
+    info = await YtdlpProvider().extract_info(
+        "https://www.youtube.com/playlist?list=PL1"
+    )
+    assert len(info.carousel_items) == MAX_PLAYLIST_ITEMS == 50
+    assert info.raw["playlist_total"] == 200  # the note needs the real number
+    assert all(i.kind is MediaFormat.VIDEO for i in info.carousel_items)

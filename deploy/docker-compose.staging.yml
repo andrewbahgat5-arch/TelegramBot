@@ -1,0 +1,256 @@
+# STAGING stack — a fully independent copy of production, on the same host.
+#
+# WHY THIS FILE EXISTS. Production serves real users. Every feature, fix, refactor,
+# dependency bump, config change and (where possible) migration is proven here FIRST,
+# and production is only touched on the Owner's explicit per-change approval.
+#
+# WHAT KEEPS IT FROM TOUCHING PRODUCTION — four separations, all of them load-bearing:
+#
+#   1. PROJECT NAME  `telegram-bot-staging` (vs `telegram-bot-prod`) — namespaces the
+#      network and the named volumes, so staging gets its own Postgres/Redis data.
+#   2. CONTAINER NAMES  every service is `tgbot_stg_*`. `container_name` is explicit in
+#      the prod file, and an explicit name is GLOBAL to the docker daemon — a duplicate
+#      would collide with the running production container regardless of project name.
+#   3. IMAGE TAG  `${IMAGE_TAG:-staging}`. Production runs `telegram-bot/{bot,worker,
+#      api}:v1`, pinned by `IMAGE_TAG=v1` in the prod `deploy/.env`. Building staging
+#      under that same tag would REPLACE the images production containers run, and the
+#      swap would take effect on prod's next restart — a silent production deploy. The
+#      staging `deploy/.env` must therefore set `IMAGE_TAG=staging`.
+#   4. HOST DIRECTORY  this stack is run from `/opt/telegram-bot-staging/deploy`, so all
+#      the relative binds below (`./secrets/...`, `./yt-dlp.conf`) resolve to staging's
+#      OWN copies. That matters most for cookies: the yt-dlp wrapper WRITES BACK rotated
+#      session cookies to the jar it was given, so a shared bind would let staging
+#      mutate — or expire — the cookies production depends on.
+#
+# DELIBERATELY NOT COPIED FROM PRODUCTION:
+#   * warp2 / warp3 / warp-lb — staging gets ONE warp (~500 MB instead of ~1.5 GB).
+#     Because the LB is gone, staging's .env.staging must point the WARP proxy at
+#     `socks5://warp:1080` directly, NOT at `warp-lb`.
+#   * uptime-kuma — nothing needs to be paged about on staging, and it frees port 3010.
+#
+# Its own egress (own warp) is the point, not an economy: a staging test burst sharing
+# production's egress IP can trip YouTube's per-IP bot-check and take production down
+# with it. That has already happened once.
+#
+# Usage (from /opt/telegram-bot-staging/deploy):
+#   docker compose --profile bot-api -f docker-compose.staging.yml build bot worker api
+#   docker compose -f docker-compose.staging.yml run --rm --no-deps --entrypoint "" bot \
+#       alembic upgrade head
+#   docker compose --profile bot-api -f docker-compose.staging.yml up -d
+
+name: telegram-bot-staging
+
+x-app: &app
+  env_file:
+    - .env.staging
+  environment:
+    # Same D-020 rule as production: the app reaches Postgres only via PgBouncer.
+    DB_HOST: pgbouncer
+    DB_PORT: "6432"
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: tgbot_stg_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-telegram_bot_staging}
+      POSTGRES_USER: ${DB_USER:-telegram_bot}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (deploy/.env)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-telegram_bot} -d ${DB_NAME:-telegram_bot_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7
+    container_name: tgbot_stg_redis
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: tgbot_stg_pgbouncer
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-telegram_bot}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set (deploy/.env)}
+      DB_NAME: ${DB_NAME:-telegram_bot_staging}
+      LISTEN_PORT: "6432"
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: "200"
+      DEFAULT_POOL_SIZE: "10"
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: ${DB_USER:-telegram_bot}
+      STATS_USERS: ${DB_USER:-telegram_bot}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api:
+    <<: *app
+    image: telegram-bot/api:${IMAGE_TAG:-staging}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.api
+    container_name: tgbot_stg_api
+    # 8090 by default so it cannot collide with production's 8080.
+    ports:
+      - "${API_BIND_PORT:-8090}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/v1/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+
+  worker:
+    <<: *app
+    image: telegram-bot/worker:${IMAGE_TAG:-staging}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.worker
+    container_name: tgbot_stg_worker
+    volumes:
+      - downloads:/tmp/downloads
+      - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
+      # Staging's OWN cookie copies — the wrapper writes rotated cookies back into
+      # whatever jar it is handed, so these must never be production's files.
+      - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
+      - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
+      - botapi:/var/lib/telegram-bot-api:ro
+    group_add:
+      - "101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  bot:
+    <<: *app
+    image: telegram-bot/bot:${IMAGE_TAG:-staging}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.bot
+    container_name: tgbot_stg_bot
+    volumes:
+      - ./yt-dlp.conf:/etc/yt-dlp.conf:ro
+      - ./secrets/cookies.txt:/etc/yt-dlp/cookies.txt
+      - ./secrets/cookies.d:/etc/yt-dlp/cookies.d
+      - botapi:/var/lib/telegram-bot-api:ro
+    group_add:
+      - "101"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  # Staging's own WARP tunnel — its own egress IP, so a staging test burst can never
+  # cost production its YouTube reputation. Single instance (no pool, no LB).
+  warp:
+    image: caomingjun/warp
+    container_name: tgbot_stg_warp
+    restart: unless-stopped
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    device_cgroup_rules:
+      - "c 10:200 rwm"
+    environment:
+      WARP_SLEEP: "5"
+    volumes:
+      - warpdata:/var/lib/cloudflare-warp
+
+  bgutil-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider
+    container_name: tgbot_stg_bgutil_pot
+    restart: unless-stopped
+
+  # Staging's own Bot API server, so nothing on staging can ever require restarting
+  # the one production uses for its uploads.
+  bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: tgbot_stg_bot_api
+    profiles: ["bot-api"]
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:?TELEGRAM_API_ID must be set when the bot-api profile is enabled}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:?TELEGRAM_API_HASH must be set when the bot-api profile is enabled}
+    volumes:
+      - botapi:/var/lib/telegram-bot-api
+    restart: unless-stopped
+
+  # Errors & Logs dashboard (DESIGN_MONITORING.md, Decision 3). Grafana rather than a
+  # hand-built UI: it ships a Postgres datasource, filterable table panels and cell
+  # data links, which is exactly this feature — and at ~100 MB it costs a fraction of
+  # a JVM BI tool on a box already running two full stacks.
+  #
+  # BOUND TO 127.0.0.1 ON PURPOSE. The tables show user URLs, usernames and chat ids;
+  # this port is never exposed to the internet. Reach it with an SSH tunnel:
+  #     ssh -L 3001:localhost:3011 root@<host>   →   http://localhost:3001
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: tgbot_stg_grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3011}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
+      # Nothing here should reach the internet: no signups, no phone-home, no news feed.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Consumed by the provisioned datasource file.
+      GRAFANA_DB_USER: ${GRAFANA_DB_USER:-grafana_ro}
+      GRAFANA_DB_NAME: ${DB_NAME:-telegram_bot_staging}
+      GRAFANA_DB_PASSWORD: ${GRAFANA_DB_PASSWORD:?GRAFANA_DB_PASSWORD must be set}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  grafanadata:
+  warpdata:
+  pgdata:
+  redisdata:
+  downloads:
+  botapi:

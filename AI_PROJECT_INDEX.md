@@ -53,6 +53,12 @@ a residential proxy used **only for YouTube** (per-platform egress routing).
 > changed.** When the workflow or topology changes, update this section (see the "keep in
 > sync" mandate at the top).
 
+> **⚠️ STAGING IS MANDATORY (Owner rule, 2026-07-19).** Every feature, bug fix, refactor,
+> dependency update, config change and — where possible — migration is implemented and
+> verified on the **staging** stack first. **Never modify, restart, redeploy or overwrite
+> production without the Owner's explicit, per-change approval** — being confident the
+> change is correct is *not* authorisation. See `deploy/STAGING.md`.
+
 **Workflow (always in this order):**
 
 1. **Develop locally.** Make all code changes on the local development machine (the git
@@ -60,7 +66,11 @@ a residential proxy used **only for YouTube** (per-platform egress routing).
 2. **Test locally.** Run the suite locally before deploying — `pytest tests/unit` (fast), plus
    `tests/integration` / `tests/e2e` where relevant; type-check with `mypy`, lint with `ruff`.
    Record outcomes in `TEST_RESULTS.md`. Never deploy an untested change.
-3. **Deploy to production.** Push the change, then roll it out to the production server(s):
+3. **Deploy to STAGING and verify there.** `/opt/telegram-bot-staging` — its own compose
+   project, `tgbot_stg_*` containers, `:staging` images, own DB, own WARP egress, own bot
+   token. Run the real flow against the staging bot. See `deploy/STAGING.md`.
+4. **Wait for the Owner's explicit approval.**
+5. **Only then, deploy to production.** Push the change, then roll it out to the production server(s):
    **run `sh deploy/capture-logs.sh` first** (recreating a container destroys its logs),
    upload the changed files to the same paths under `/opt/telegram-bot`, rebuild the affected
    image(s), and recreate. See `deploy/VPS_DEPLOYMENT_CHANGES.md` (host + Windows/paramiko
@@ -72,7 +82,8 @@ a residential proxy used **only for YouTube** (per-platform egress routing).
 | Tier | Role |
 |---|---|
 | **Local machine** | Development environment — write + test changes here first. |
-| **Production Server #1** | **Main Telegram Bot** — runs the app stack (bot/worker/api + Postgres/Redis/PgBouncer, WARP pool, residential-proxy egress) via Docker Compose at `/opt/telegram-bot`. |
+| **Staging** | **Default development target** — a fully independent copy of the app stack at `/opt/telegram-bot-staging` on the same host as Production #1 (project `telegram-bot-staging`, `tgbot_stg_*` containers, `:staging` images, own DB/Redis/WARP/bot token). All changes are proven here before production. See `deploy/STAGING.md`. |
+| **Production Server #1** | **Main Telegram Bot** — runs the app stack (bot/worker/api + Postgres/Redis/PgBouncer, WARP pool, residential-proxy egress) via Docker Compose at `/opt/telegram-bot`. **Off-limits without explicit Owner approval.** |
 | **Production Server #2** | **Telegram Bot API server** — the self-hosted Telegram Bot API (2 GB upload cap) the bot talks to via `BOT_API_BASE_URL`. See `deploy/LOCAL_BOT_API.md`. |
 
 > **Current state note (2026-07-18):** as presently deployed, the self-hosted Bot API runs as
@@ -172,6 +183,16 @@ Read when: extending audiences, placements, or the ad/broadcast wizard. · Relat
 - Related: `infrastructure/downloader/routing.py`, `deploy/ytdlp-wrapper.sh`,
   `services/admin_notification_service.py`, `deploy/VPS_DEPLOYMENT_CHANGES.md`.
 
+**DESIGN_MONITORING.md**
+- Purpose: **design draft** for the monitoring split — Telegram carries *critical only*,
+  a localhost-bound web dashboard carries Errors + Logs, dependency health alerts on
+  **state transitions** (one alert down, one on recovery) rather than per exception, one
+  `error_logs` table with two filtered views, 30-day retention. Owner-approved direction,
+  written before code per Hard Rule 4 (it changes the `error_logs` schema).
+- Read when: touching alerting, error reporting, `error_logs`, or the admin dashboard.
+- Related: `core/error_report.py`, `services/error_report_service.py`, `core/alerting.py`,
+  `api/routes/admin.py`, uptime-kuma in `deploy/docker-compose.prod.yml`.
+
 **I18N_IMPLEMENTATION_REVIEW.md** — Purpose: self-contained review of the i18n system. · Read
 when: adding strings or changing localization. · Related: `core/i18n.py`, `core/locales/`.
 
@@ -207,6 +228,12 @@ when: any deploy/rollback/recovery task. · Related: `deploy/RELEASE_CHECKLIST.m
 hit, root cause, fix, and the Windows/paramiko deploy workflow; names the host and procedure
 (no secrets). · Read when: deploying to / debugging the current VPS. · Related: `deploy/README.md`,
 `deploy/docker-compose.prod.yml`, `deploy/yt-dlp.conf`.
+
+**deploy/STAGING.md** — Purpose: the **staging environment** — what it is, the four
+separations that keep it off production (project name, container names, image tag, host
+directory), the D-032 boot guard, the runbook, and the promotion flow. · Read when: doing
+**any** development work (staging is the default target), or before touching production. ·
+Related: `deploy/docker-compose.staging.yml`, `deploy/README.md`.
 
 **deploy/RAILWAY_DEPLOYMENT.md** — Purpose: how to deploy on Railway (alternative host). · Read
 when: deploying to Railway. · Related: `deploy/README.md`.
@@ -281,6 +308,7 @@ not a project-content doc. · Read when: understanding the intended engineering 
 | `alembic.ini` + `migrations/` | Database migrations (`migrations/env.py`, `migrations/versions/`). |
 | `deploy/docker-compose.yml` | Local/dev Docker stack. |
 | `deploy/docker-compose.prod.yml` | Production stack (13 services: bot/worker/api, postgres/redis/pgbouncer, bot-api, WARP pool + HAProxy LB, bgutil PO-token, uptime-kuma). Use the `bot-api` profile. |
+| `deploy/docker-compose.staging.yml` | **Staging stack** — run from `/opt/telegram-bot-staging/deploy`. Project `telegram-bot-staging`, `tgbot_stg_*` containers, `IMAGE_TAG=staging`, single WARP, no LB/uptime-kuma. Its `deploy/.env` **must** keep `IMAGE_TAG=staging`: building under production's `v1` would replace the images production runs. See `deploy/STAGING.md`. |
 | `deploy/Dockerfile.bot` · `Dockerfile.worker` · `Dockerfile.api` | Per-process images (worker also bakes ffmpeg + aria2 + Deno/POT). |
 | `deploy/yt-dlp.conf` | yt-dlp runtime config (POT provider, EJS, retries). **Egress proxy is chosen per platform in code** (`routing.py`), not here. |
 | `deploy/ytdlp-wrapper.sh` | Wraps yt-dlp to give each run a private cookie copy. |

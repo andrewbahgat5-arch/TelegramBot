@@ -38,6 +38,42 @@ class MediaFormatOption:
     # lossless targets accurately (WAV = asr·channels·2·duration); None for video.
     asr: int | None = None
     channels: int | None = None
+    # Source bitrate (kbps) when reported. At an identical tier and codec this is the
+    # only signal for which stream is actually better — sources like Instagram publish
+    # a whole ladder at one resolution and report no filesize at all.
+    bitrate_kbps: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CarouselItem:
+    """One selectable item of a multi-item post (an Instagram carousel slide).
+
+    A carousel arrives from the provider as a playlist whose ``entries`` hold the real
+    media; the post itself has no formats. This is the provider-agnostic summary the
+    gallery browses: enough to render a preview and the right action buttons WITHOUT
+    re-extracting, so paging between items is instant and extraction happens only when
+    the user actually picks something to download.
+
+    ``kind`` is the item's dominant media type, reusing :class:`MediaFormat` rather than
+    a parallel enum — it is derived from the options the item actually yields, so a new
+    platform or extractor needs no special-casing here.
+    """
+
+    index: int  # 1-based, matches yt-dlp --playlist-items
+    title: str
+    kind: MediaFormat
+    height: int | None = None
+    duration: int | None = None
+    # Best available preview for this item (see _entry_thumbnail's priority order).
+    thumbnail_url: str | None = None
+    # Whether an audio track can actually be obtained for this item. Not every video
+    # has one: Instagram serves anonymous carousel items as "video only" on every
+    # format, so offering "Download Audio" there is a button that cannot work.
+    has_audio: bool = False
+
+    @property
+    def is_video(self) -> bool:
+        return self.kind is MediaFormat.VIDEO
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +120,15 @@ class MediaInfo:
     thumbnail_url: str | None = None
     formats: tuple[MediaFormatOption, ...] = ()
     raw: dict[str, Any] = field(default_factory=dict)
+    # --- multi-item posts (Instagram carousels, and any provider "playlist") ---
+    # Populated ONLY on the index result for a multi-item post: the user has not
+    # chosen an item yet, so ``formats`` is empty and the caller must offer these.
+    carousel_items: tuple[CarouselItem, ...] = ()
+    # Set when this MediaInfo IS one item of a multi-item post. 1-based, matching
+    # yt-dlp's ``--playlist-items`` numbering, which is how ``download`` re-addresses
+    # the item: carousel entries share the post URL and some format ids repeat across
+    # entries, so the index is the only unambiguous handle.
+    carousel_index: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

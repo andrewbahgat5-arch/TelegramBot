@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import os
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -24,10 +25,16 @@ from typing import Any, TypeVar
 import orjson
 
 from core.logging import get_logger
-from core.urls import detect_platform
-from domain.entities.media import DownloadedFile, MediaFormatOption, MediaInfo
+from core.urls import detect_platform, extract_video_id
+from domain.entities.media import (
+    CarouselItem,
+    DownloadedFile,
+    MediaFormatOption,
+    MediaInfo,
+)
 from domain.enums import MediaFormat, Quality
 from domain.exceptions import (
+    AuthRequiredError,
     ExtractionFailedError,
     InfrastructureError,
     NoDownloadableMediaError,
@@ -99,6 +106,11 @@ _BOT_CHECK_RE = re.compile(r"confirm you.{0,3}re not a bot", re.IGNORECASE)
 # no-formats result may still be deliverable as a photo. YouTube is absent by design:
 # there are no image posts there, and a blocked extraction emits a storyboard that must
 # never be delivered as a photo (see _to_media_info).
+# A playlist can hold thousands of videos. Listing every one costs time and cache
+# space, and nobody pages through 5000 items in Telegram — so the gallery shows the
+# first N and SAYS SO, rather than silently truncating.
+MAX_PLAYLIST_ITEMS = 50
+
 _IMAGE_CAPABLE_PLATFORMS = frozenset(
     {"generic", "twitter", "tiktok", "instagram", "facebook"}
 )
@@ -153,6 +165,37 @@ _NOTE_TIER_RE = re.compile(r"(\d{3,4})\s*p")
 # genuine-content failures are permanent (do not retry); everything transient is retried /
 # failed over. (UX sprint #12 reclassification.)
 _UNSUPPORTED_MARKERS = ("unsupported url", "is not a valid url")
+# The site will only serve this to a logged-in session. Permanent for us by design —
+# we hold no session for these platforms, so retry/failover/cookie-swap cannot help,
+# and the user needs to be told that plainly (AuthRequiredError) rather than getting a
+# generic "extraction failed" they will keep retrying.
+#
+# Checked BEFORE _CONTENT_MARKERS and _TRANSIENT_MARKERS. Two deliberate calls:
+#   * Instagram's "Requested content is not available, rate-limit reached or login
+#     required" also contains the transient marker "rate-limit". Anonymous Instagram
+#     extraction is login-gated in practice, so auth wins — "try again later" would be
+#     a lie on a post that can never work anonymously.
+#   * "sign in to confirm your age" is listed in full, NOT as a "sign in to confirm"
+#     prefix, so it cannot swallow YouTube's "sign in to confirm you're not a bot" —
+#     that is the anti-bot wall (a route problem, transient) and must stay transient.
+_AUTH_REQUIRED_MARKERS = (
+    "login required",
+    "requires authentication",
+    "for the authentication",  # "...use --cookies for the authentication"
+    "--cookies-from-browser",
+    "you must be logged in",
+    "log in to",
+    "logged-in",  # Instagram: "accessible in your browser without being logged-in"
+    "empty media response",  # Instagram's anonymous-request answer
+    "only available for registered users",
+    "sign in to confirm your age",
+    "age-restricted",
+    "age restricted",
+    "this post is private",
+    "account is private",
+    "friends-only",
+    "followers only",
+)
 # Permanent: the content itself is gone/blocked — retrying cannot help.
 _CONTENT_MARKERS = (
     "video unavailable",
@@ -354,7 +397,7 @@ class YtdlpProvider:
             raise last_exc
         raise ExtractionFailedError("No usable egress for this request.")
 
-    async def extract_info(self, url: str) -> MediaInfo:
+    async def extract_info(self, url: str, *, item_index: int | None = None) -> MediaInfo:
         # --ignore-no-formats-error: image-only sources (e.g. a Pinterest image pin) have no
         # *video* formats; without this yt-dlp exits non-zero ("No video formats found") and
         # we lose the metadata + image. With it, the info dict (incl. thumbnails) is returned
@@ -362,7 +405,17 @@ class YtdlpProvider:
         # NO --no-warnings here: with --ignore-no-formats-error a blocked extraction still
         # exits 0, and the suppressed warning text is the only record of WHY there are no
         # formats (e.g. YouTube's bot-check wall) — we need it to classify the failure.
-        base = [self._bin, "-J", "--no-playlist", "--ignore-no-formats-error"]
+        # A PLAYLIST url (youtube.com/playlist?list=…, a channel, a mix) is listed
+        # flat: its entries are stubs with no formats whatever we ask for, so paying for
+        # full extraction buys nothing. Measured on a 13-video playlist: 17.3s / 816 KB
+        # full vs 2.4s / 18 KB flat, for identical entries. The chosen video is then
+        # extracted normally, by its own URL, when the user picks it.
+        #
+        # --no-playlist stays for everything else: it is what stops a `watch?v=…&list=…`
+        # link from expanding into the whole playlist when the user asked for one video.
+        listing = _is_playlist_url(url) and item_index is None
+        base = [self._bin, "-J", "--ignore-no-formats-error"]
+        base += ["--flat-playlist"] if listing else ["--no-playlist"]
         platform = detect_platform(url)
 
         async def run(endpoint: EgressEndpoint) -> tuple[bytes, bytes]:
@@ -380,11 +433,62 @@ class YtdlpProvider:
 
         stdout, stderr = await self._run_egress_plan(platform, None, run, metadata_only=True)
         try:
-            info: dict[str, Any] = orjson.loads(stdout)
+            parsed: Any = orjson.loads(stdout)
         except orjson.JSONDecodeError as exc:
             raise ExtractionFailedError("Could not parse media metadata.") from exc
+        if not isinstance(parsed, dict):
+            # An extractor that matched the URL but returned nothing prints a bare `null`
+            # and exits 0 (yt-dlp: "Extractor telegram:embed returned nothing"). That is
+            # valid JSON, so the decode above passes and the old code called
+            # _to_media_info(url, None) → AttributeError on None.get, escaping the
+            # provider as an untyped crash. The site is matched but unusable → permanent.
+            reason = _reason(stderr.decode(errors="replace"))
+            raise URLNotSupportedError(
+                "This link is not supported." + (f" [{reason}]" if reason else "")
+            )
+        info: dict[str, Any] = parsed
+        # A multi-item post (Instagram carousel) arrives as a playlist: the post itself
+        # has NO formats and the real media lives in `entries`. Reading only the
+        # top-level formats made every carousel look empty — a public 5x1440p post
+        # surfaced to the user as "no downloadable media".
+        entries = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
+        total_entries = len(entries)
+        entries = entries[:MAX_PLAYLIST_ITEMS]
+        if entries:
+            try:
+                return self._from_carousel(
+                    url, info, entries, item_index, total=total_entries
+                )
+            except _NeedsOwnExtractionError as needs:
+                # A playlist entry: extract it on its OWN url. That is an ordinary
+                # single-video extraction, so it reuses this whole method — cookies,
+                # egress plan, retries, classification — rather than duplicating any of
+                # it. The index is kept so the item still has a distinct identity and
+                # the gallery can send the user back to the right slot.
+                item = await self.extract_info(needs.url)
+                return dataclasses.replace(
+                    item,
+                    video_id=f"{item.video_id}#{needs.index}",
+                    carousel_index=needs.index,
+                )
         try:
             return self._to_media_info(url, info)
+        except NoDownloadableMediaError:
+            # "Nothing downloadable here" and "you are not allowed to see what is here"
+            # are indistinguishable from the info dict alone — a login-walled Instagram
+            # post returns the same empty-formats shape as a text-only tweet. Under
+            # --ignore-no-formats-error the run exits 0, so _map_error never sees this
+            # stderr; it is read here instead. Auth wins when the site said so.
+            stderr_text = stderr.decode(errors="replace").strip()
+            if any(m in stderr_text.lower() for m in _AUTH_REQUIRED_MARKERS):
+                _log.info(
+                    "ytdlp_auth_required", platform=platform, stderr=stderr_text[:300]
+                )
+                raise AuthRequiredError(
+                    "This content requires a logged-in session."
+                    + (f" [{_reason(stderr_text)}]" if stderr_text else "")
+                ) from None
+            raise
         except ProviderRetryElsewhere:
             # No playable formats on a named platform — the stderr warnings say why.
             stderr_text = stderr.decode(errors="replace").strip()
@@ -400,6 +504,79 @@ class YtdlpProvider:
                     "ytdlp_no_formats_stderr", platform=platform, stderr=stderr_text[:300]
                 )
             raise
+
+    def _from_carousel(
+        self,
+        url: str,
+        post: dict[str, Any],
+        entries: list[dict[str, Any]],
+        item_index: int | None,
+        total: int | None = None,
+    ) -> MediaInfo:
+        """Turn a multi-item post into either an item INDEX or one chosen ITEM.
+
+        Two shapes come out of here:
+
+        * ``item_index is None`` and there is more than one entry → an *index* result:
+          no formats, but ``carousel_items`` listing what the user may pick. The caller
+          shows an item picker, then calls back with the index.
+        * an index (or a single-entry post) → the real :class:`MediaInfo` for that entry,
+          tagged with ``carousel_index`` so ``download`` can re-address it.
+
+        A single-entry post skips the picker entirely — asking someone to choose between
+        one option is just an extra tap.
+        """
+        platform = detect_platform(url)
+        if item_index is None and len(entries) > 1:
+            post_artwork = _best_image_url(post)
+            items = tuple(
+                CarouselItem(
+                    index=i,
+                    title=str(entry.get("title") or f"Item {i}"),
+                    kind=_entry_kind(entry),
+                    height=_best_entry_height(entry),
+                    duration=_opt_int(entry.get("duration")),
+                    # Priority 4 (the post's own artwork) is the last resort, so an item
+                    # whose entry carries no preview still renders inside the gallery.
+                    thumbnail_url=_entry_thumbnail(entry) or post_artwork,
+                    has_audio=_entry_has_audio(entry),
+                )
+                for i, entry in enumerate(entries, start=1)
+            )
+            return MediaInfo(
+                platform=platform,
+                video_id=str(post.get("id") or extract_video_id(url, platform) or ""),
+                title=str(post.get("title") or "Untitled"),
+                source_url=url,
+                thumbnail_url=items[0].thumbnail_url if items else post_artwork,
+                formats=(),
+                raw={**post, "playlist_total": total or len(entries)},
+                carousel_items=items,
+            )
+
+        index = 1 if item_index is None else item_index
+        if not 1 <= index <= len(entries):
+            raise URLNotSupportedError(
+                f"That item does not exist in this post (1-{len(entries)})."
+            )
+        entry = entries[index - 1]
+        # Two shapes of multi-item source, and they need opposite handling:
+        #
+        #   * A carousel entry (Instagram) carries its formats inline but NO url of its
+        #     own — every slide shares the post's webpage_url — so it is flattened here
+        #     and re-addressed at download time by --playlist-items.
+        #   * A playlist entry (YouTube) is the reverse: no formats, but a real video
+        #     url. Flattening it yields "no playable formats"; it has to be extracted
+        #     on its own url, which is just an ordinary single-video extraction.
+        own_url = _entry_own_url(entry)
+        if own_url and not (entry.get("formats") or []):
+            raise _NeedsOwnExtractionError(own_url, index)
+        item = self._to_media_info(url, {**entry, "webpage_url": url})
+        return dataclasses.replace(
+            item,
+            video_id=f"{item.video_id or post.get('id') or ''}#{index}",
+            carousel_index=index,
+        )
 
     async def _run_with_retries(
         self, args: list[str], *, timeout_s: float, env: dict[str, str] | None = None
@@ -427,18 +604,31 @@ class YtdlpProvider:
         progress_cb: DownloadProgress | None = None,
     ) -> DownloadedFile:
         dest.mkdir(parents=True, exist_ok=True)
-        out_template = str(dest / f"{media.video_id}.%(ext)s")
+        # A carousel item's video_id carries a "#<n>" suffix to keep its cache/DB row
+        # distinct from its siblings. That must not reach the filesystem, where "#" is
+        # awkward in paths and output templates — the stem is sanitised for disk only.
+        stem = _output_stem(media)
+        out_template = str(dest / f"{stem}.%(ext)s")
+        # Selecting one item of a multi-item post: entries share the post URL and some
+        # format ids repeat across entries, so the 1-based playlist index is the only
+        # unambiguous handle. --playlist-items and --no-playlist contradict each other,
+        # so the item flag REPLACES it below.
+        item_args = (
+            ["--playlist-items", str(media.carousel_index)]
+            if media.carousel_index is not None
+            else ["--no-playlist"]
+        )
         if format_ is MediaFormat.IMAGE:
             # Fetch the image URL directly (no format selector / no merge). The URL was
             # stashed on the IMAGE option at extraction time. Images are tiny — no bar.
             image_url = _selected_image_url(media)
             if not image_url:
                 raise ExtractionFailedError("No image URL to download.")
-            args = [self._bin, "--no-playlist", "--no-warnings", "-o", out_template, image_url]
+            args = [self._bin, *item_args, "--no-warnings", "-o", out_template, image_url]
             await self._run(args, timeout_s=self._download_timeout)
         else:
             selector = _format_selector(media, format_, quality)
-            base = [self._bin, "-f", selector, "--no-playlist", "--no-warnings"]
+            base = [self._bin, "-f", selector, *item_args, "--no-warnings"]
             if format_ is MediaFormat.VIDEO:
                 # Merge into an mp4 container so Telegram plays it inline (sendVideo). The
                 # selector already prefers H.264/AAC; VP9/AV1-only tiers stay in their
@@ -451,9 +641,9 @@ class YtdlpProvider:
             tail = ["-o", out_template, media.source_url]
             size = _selected_size_bytes(media, format_, quality)
             await self._download_via_egress(
-                base, tail, dest, media.video_id, media.platform, size, progress_cb
+                base, tail, dest, stem, media.platform, size, progress_cb
             )
-        produced = sorted(dest.glob(f"{media.video_id}.*"), key=lambda p: p.stat().st_size)
+        produced = sorted(dest.glob(f"{stem}.*"), key=lambda p: p.stat().st_size)
         if not produced:
             raise ExtractionFailedError("Download produced no file.")
         path = produced[-1]
@@ -718,6 +908,118 @@ def _is_storyboard(fmt: dict[str, Any]) -> bool:
     )
 
 
+def _output_stem(media: MediaInfo) -> str:
+    """Filesystem-safe stem for a download. Carousel ids carry a "#<n>" suffix."""
+    return media.video_id.replace("#", "_")
+
+
+class _NeedsOwnExtractionError(Exception):
+    """Control flow: this entry must be extracted on its own url, not flattened."""
+
+    def __init__(self, url: str, index: int) -> None:
+        super().__init__(url)
+        self.url = url
+        self.index = index
+
+
+def _is_playlist_url(url: str) -> bool:
+    """A url whose primary subject is a LIST rather than one video.
+
+    ``watch?v=…&list=…`` is deliberately excluded: the user asked for that video, and
+    --no-playlist is what keeps it from expanding into the whole list.
+    """
+    lowered = url.lower()
+    if "/playlist?" in lowered or ("list=" in lowered and "watch?" not in lowered):
+        return True
+    return any(marker in lowered for marker in ("/channel/", "/@", "/c/", "/user/"))
+
+
+def _entry_own_url(entry: dict[str, Any]) -> str | None:
+    """The entry's own page url, when it is a separately addressable video."""
+    for key in ("webpage_url", "url"):
+        value = entry.get(key)
+        if isinstance(value, str) and value.startswith("http"):
+            return value
+    entry_id = entry.get("id")
+    if entry.get("ie_key") == "Youtube" and entry_id:
+        return f"https://www.youtube.com/watch?v={entry_id}"
+    return None
+
+
+def _entry_options(entry: dict[str, Any]) -> list[MediaFormatOption]:
+    """The options a carousel entry would actually yield, via the normal parser.
+
+    Deriving the picker label from the entry's RAW format heights was misleading: the
+    raw list advertised 1440p while _parse_formats (which builds what the user can
+    really choose) topped out at 480p, so the button promised a quality that was not
+    on the next screen. Same parser here means the label cannot drift from reality.
+    """
+    return _parse_formats(entry.get("formats") or [], _opt_int(entry.get("duration")))
+
+
+def _entry_kind(entry: dict[str, Any]) -> MediaFormat:
+    """The item's dominant media type, from the options it actually yields.
+
+    Derived, never hardcoded per platform: video wins over audio-only, and anything
+    with no playable stream falls back to IMAGE (a photo slide). A new extractor that
+    returns some novel shape therefore still lands somewhere sensible.
+    """
+    options = _entry_options(entry)
+    if any(o.format is MediaFormat.VIDEO for o in options):
+        return MediaFormat.VIDEO
+    if any(o.format is MediaFormat.AUDIO for o in options):
+        return MediaFormat.AUDIO
+    # A flat playlist entry has no formats at all to infer from, but it does have its
+    # own video url — it is a video we simply have not extracted yet. Without this it
+    # fell through to IMAGE and every playlist rendered as a wall of "Download Image".
+    if _entry_own_url(entry):
+        return MediaFormat.VIDEO
+    return MediaFormat.IMAGE
+
+
+def _entry_has_audio(entry: dict[str, Any]) -> bool:
+    """Whether an audio track is obtainable for this item.
+
+    True when the item yields an AUDIO option — which covers both a separate audio
+    stream (YouTube) and a muxed stream we can extract from (TikTok). False when every
+    format is video-only, as Instagram reports for anonymous carousel items: yt-dlp's
+    own -F table marks all 11 of them "video only", and a download confirms no audio
+    stream in the file. Offering audio there is a dead end.
+    """
+    return any(o.format is MediaFormat.AUDIO for o in _entry_options(entry))
+
+
+def _entry_thumbnail(entry: dict[str, Any]) -> str | None:
+    """Best preview for a gallery item, in the Owner's stated priority order:
+
+    1. the original image (a photo slide IS its own preview — highest fidelity)
+    2. the video thumbnail yt-dlp singled out (``thumbnail``)
+    3. the largest extracted thumbnail from the ``thumbnails`` list
+    4. the post's artwork, applied by the caller as a last resort
+
+    An empty preview is the thing to avoid: the gallery is a photo message, and a
+    message that starts without one can never become a photo message later.
+    """
+    if _entry_kind(entry) is MediaFormat.IMAGE:
+        if image := _best_image_url(entry):
+            return image
+    if thumb := entry.get("thumbnail"):
+        return str(thumb)
+    return _best_image_url(entry)
+
+
+def _best_entry_height(entry: dict[str, Any]) -> int | None:
+    """Tallest video tier actually OFFERED for a carousel entry, for the button label."""
+    heights = [
+        h
+        for o in _entry_options(entry)
+        if o.format is MediaFormat.VIDEO
+        and (m := _NOTE_TIER_RE.match(o.quality.value))
+        and (h := int(m.group(1)))
+    ]
+    return max(heights) if heights else None
+
+
 def _best_image_url(info: dict[str, Any]) -> str | None:
     """The highest-resolution still image for an image-only source (any site), or None.
 
@@ -783,6 +1085,8 @@ def _map_error(stderr: str) -> Exception:
     suffix = f" [{reason}]" if reason else ""
     if any(m in lowered for m in _UNSUPPORTED_MARKERS):
         return URLNotSupportedError(f"This URL is not supported.{suffix}")
+    if any(m in lowered for m in _AUTH_REQUIRED_MARKERS):
+        return AuthRequiredError(f"This content requires a logged-in session.{suffix}")
     if any(m in lowered for m in _CONTENT_MARKERS):
         return ExtractionFailedError(f"This content is unavailable.{suffix}")
     if any(m in lowered for m in _TRANSIENT_MARKERS):
@@ -856,6 +1160,7 @@ def _parse_formats(
                     format_id=str(format_id),
                     codec=_codec_family(fmt.get("vcodec")),
                     is_muxed=has_a,
+                    bitrate_kbps=tbr,
                 )
             )
         elif not has_v and has_a:
@@ -888,6 +1193,7 @@ def _parse_formats(
             approx_size_bytes=_video_size(row, merge_audio_size),
             provider_format_id=row.format_id,
             codec=row.codec,
+            bitrate_kbps=row.bitrate_kbps,
         )
         for row in video_rows
     ]
@@ -915,6 +1221,7 @@ class _VideoRow:
     format_id: str
     codec: str | None
     is_muxed: bool
+    bitrate_kbps: float | None = None
 
 
 def _video_size(row: _VideoRow, best_audio_size: int) -> int | None:
@@ -972,16 +1279,23 @@ def _quality_for_format(width: int | None, height: int | None, format_note: str 
     """Resolve a display quality tier robustly across aspect ratios.
 
     Prefers yt-dlp's own ``format_note`` label (e.g. "2160p60"); otherwise snaps the
-    format's longer edge to the nearest standard tier. Snapping to *nearest* (not a
+    format's SHORTER edge to the nearest standard tier. Snapping to *nearest* (not a
     floor) is what fixes 4K on wide videos (3840x2026 → 2160p, not 1440p).
+
+    The short edge is what names a video in every orientation — 1920x1080 and
+    1080x1920 are both "1080p". Measuring the LONGER edge against a 16:9 ladder, as
+    this used to, silently demoted every portrait video by one or two tiers, which is
+    most of Instagram: 1080x1440 read as 720p, 720x960 as 480p, 540x720 as 360p. The
+    tiers then collapsed together and the user was offered — and shown — a far worse
+    stream than the source actually had.
     """
     if format_note:
         match = _NOTE_TIER_RE.search(format_note)
         if match:
             return _nearest_tier(int(match.group(1)), _TIER_BY_SHORT_EDGE)
     if width and height:
-        # Both edges known: the longer edge identifies the tier for any aspect ratio.
-        return _nearest_tier(max(width, height), _TIER_BY_LONG_EDGE)
+        # Both edges known: the SHORT edge names the tier in any orientation.
+        return _nearest_tier(min(width, height), _TIER_BY_SHORT_EDGE)
     if height:  # height-only: assume landscape, match the short-edge ladder
         return _nearest_tier(height, _TIER_BY_SHORT_EDGE)
     if width:

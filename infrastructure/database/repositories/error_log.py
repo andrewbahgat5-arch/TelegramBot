@@ -23,6 +23,14 @@ class ErrorLogRepository(SqlAlchemyRepository[ErrorLog]):
         job_id: uuid.UUID | None = None,
         correlation_id: uuid.UUID | None = None,
         traceback_text: str | None = None,
+        severity: str | None = None,
+        category: str | None = None,
+        platform: str | None = None,
+        url: str | None = None,
+        url_host: str | None = None,
+        username: str | None = None,
+        chat_id: int | None = None,
+        context_json: dict[str, object] | None = None,
     ) -> None:
         """Persist one error occurrence (Section 15.4 → ``error_logs``).
 
@@ -36,6 +44,14 @@ class ErrorLogRepository(SqlAlchemyRepository[ErrorLog]):
                 job_id=job_id,
                 correlation_id=correlation_id,
                 traceback=traceback_text,
+                severity=severity,
+                category=category[:40] if category else None,
+                platform=platform[:30] if platform else None,
+                url=url,
+                url_host=url_host[:255] if url_host else None,
+                username=username[:64] if username else None,
+                chat_id=chat_id,
+                context=context_json,
             )
         )
 

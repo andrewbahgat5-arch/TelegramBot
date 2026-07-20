@@ -85,8 +85,10 @@ class DownloaderRegistry:
         return state.status if state else ProviderHealth.OK
 
     # --- DownloaderProtocol surface ---------------------------------------
-    async def extract_info(self, url: str) -> MediaInfo:
-        return await self._run(detect_platform(url), lambda p: p.extract_info(url))
+    async def extract_info(self, url: str, *, item_index: int | None = None) -> MediaInfo:
+        return await self._run(
+            detect_platform(url), lambda p: p.extract_info(url, item_index=item_index)
+        )
 
     async def download(
         self,

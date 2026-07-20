@@ -18,8 +18,22 @@ from domain.enums import MediaFormat
 
 
 def build_quality_keyboard(
-    media_id: int, format_: MediaFormat, info: MediaInfo, signer: CallbackSigner, locale: str
+    media_id: int,
+    format_: MediaFormat,
+    info: MediaInfo,
+    signer: CallbackSigner,
+    locale: str,
+    back_callback: str | None = None,
 ) -> InlineKeyboardMarkup:
+    """Quality buttons for ``format_``, plus a Back row.
+
+    ``back_callback`` overrides where Back goes. It exists because this screen is
+    reachable from two places: the plain single-media flow (Back → the Video/Audio
+    choice for this media) and the multi-item gallery (Back → the gallery, at the exact
+    item the user opened). Hardcoding ``pack_back(media_id)`` meant a gallery item's
+    Back went to that ITEM's format screen, so the browser — position, preview and
+    Previous/Next — simply vanished and the user had to resend the link.
+    """
     builder = InlineKeyboardBuilder()
     for option in info.formats:
         if option.format is format_:
@@ -28,10 +42,11 @@ def build_quality_keyboard(
                 callback_data=signer.pack_quality(media_id, format_, option.quality),
             )
     builder.adjust(2)
-    # A Back row returns to the Video/Audio choice without resending the link.
+    # A Back row returns to whatever screen opened this one, never a dead end.
     builder.row(
         InlineKeyboardButton(
-            text=translate("common.back", locale), callback_data=signer.pack_back(media_id)
+            text=translate("common.back", locale),
+            callback_data=back_callback or signer.pack_back(media_id),
         )
     )
     return builder.as_markup()

@@ -39,6 +39,7 @@ class ErrorLogService:
         user_id: int | None = None,
         correlation_id: str | None = None,
         with_traceback: bool = False,
+        report: object | None = None,
     ) -> None:
         """Persist one failure row. ``context`` is a short "where/what" prefix (e.g.
         ``"analyze youtube youtu.be c615f378dd02"``) so rows are greppable without
@@ -52,6 +53,12 @@ class ErrorLogService:
             if with_traceback
             else None
         )
+        # An ErrorReport (core.error_report) carries the classification and the request
+        # context the dashboard filters on. Passed as ``object`` and read defensively so
+        # this service keeps no import dependency on the reporting layer.
+        extra: dict[str, object] = {}
+        if report is not None:
+            extra = _report_columns(report)
         try:
             await self._repo.record(
                 error_type=error_type,
@@ -59,6 +66,7 @@ class ErrorLogService:
                 user_id=user_id,
                 correlation_id=_parse_uuid(correlation_id),
                 traceback_text=trace,
+                **extra,  # type: ignore[arg-type]
             )
         except Exception as exc:  # best-effort: never let logging break the flow
             _log.warning("error_log_write_failed", error=str(exc))
@@ -69,5 +77,51 @@ def _parse_uuid(value: str | None) -> uuid.UUID | None:
         return None
     try:
         return uuid.UUID(value)
+    except ValueError:
+        return None
+
+
+def _report_columns(report: object) -> dict[str, object]:
+    """Flatten an ErrorReport into the observability columns (DESIGN_MONITORING.md).
+
+    Everything the dashboard filters on becomes a column; the long tail (quality,
+    format, stage, worker, duration, cache) goes to ``context`` JSONB so new fields
+    never need another migration.
+    """
+    sev = getattr(report, "severity", None)
+    user = getattr(report, "user", None)
+    req = getattr(report, "request", None)
+    context: dict[str, object] = {}
+    if req is not None:
+        for field in (
+            "media_type", "quality", "format", "item_index",
+            "stage", "duration_ms", "queue_id", "worker_id", "cache_hit",
+        ):
+            value = getattr(req, field, None)
+            if value is not None:
+                context[field] = value
+    for field in ("module", "function", "file", "line"):
+        value = getattr(report, field, None)
+        if value is not None:
+            context[field] = value
+    return {
+        "severity": getattr(sev, "value", None),
+        "category": getattr(report, "kind", None),
+        "platform": getattr(req, "platform", None),
+        "url": getattr(req, "url", None),
+        "url_host": _host_of(getattr(req, "url", None)),
+        "username": getattr(user, "username", None),
+        "chat_id": getattr(user, "chat_id", None),
+        "context_json": context or None,
+    }
+
+
+def _host_of(url: str | None) -> str | None:
+    if not url:
+        return None
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(url.strip()).netloc.lower() or None
     except ValueError:
         return None

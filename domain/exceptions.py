@@ -93,6 +93,20 @@ class NoDownloadableMediaError(UserFacingError):
     error_type = ErrorType.NO_MEDIA_FOUND
 
 
+class AuthRequiredError(UserFacingError):
+    """The site will only serve this item to a logged-in session.
+
+    Private/friends-only/age-restricted posts, and platforms that have closed
+    anonymous extraction outright (Instagram now answers anonymous reel requests
+    with an empty media response). PERMANENT for us: we deliberately hold no
+    logged-in session for these platforms, so no retry, egress failover or cookie
+    swap can change the outcome — reporting it as a generic extraction failure
+    just sent people into retry loops. The catalog text names what IS supported.
+    """
+
+    error_type = ErrorType.AUTH_REQUIRED
+
+
 # --- Download pipeline ----------------------------------------------------
 class DownloadError(AppError):
     """Base for failures in the download/transcode/upload pipeline."""
@@ -173,6 +187,7 @@ class RedisConnectionError(InfrastructureError):
 
 __all__ = [
     "AppError",
+    "AuthRequiredError",
     "CacheConnectionError",
     "CacheError",
     "CacheSerializationError",

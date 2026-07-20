@@ -23,6 +23,7 @@ class ErrorType(StrEnum):
     PERMISSION_DENIED = "permission_denied"
     VIDEO_UNAVAILABLE = "video_unavailable"
     NO_MEDIA_FOUND = "no_media_found"
+    AUTH_REQUIRED = "auth_required"
     # Download pipeline
     EXTRACTION_FAILED = "extraction_failed"
     DOWNLOAD_TIMEOUT = "download_timeout"

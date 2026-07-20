@@ -115,6 +115,14 @@ OwnerFilter = RoleFilter(UserRole.OWNER)
 
 _OWNER_ONLY_SECTIONS = frozenset(section.code for section in SECTIONS if section.owner_only)
 _LIST_LIMIT = 20
+# Mirrors core.error_report.Severity — kept as a plain map so the panel layer does not
+# import the reporting module for four emoji.
+_SEVERITY_ICON = {
+    "critical": "🔴",
+    "error": "🟠",
+    "warning": "🟡",
+    "info": "🔵",
+}
 
 # Platform-analytics period filter, indexed by the compact callback ``arg`` (13.3).
 _PERIODS: tuple[str, ...] = ("today", "week", "month", "all")
@@ -2451,8 +2459,14 @@ async def _errors_text(admin: AdminService, translate: Translator, locale: str) 
         return f"{header}\n\n{translate('panel.errors.empty', locale)}"
     lines = [header, ""]
     for err in errors:
+        # Severity at a glance: this screen is a phone-sized triage view, and the whole
+        # point of the split is being able to tell a 🔴 outage from a 🔵 unsupported
+        # link without reading. Rows predating the 2026071901 migration have no
+        # severity and keep the neutral icon.
+        icon = _SEVERITY_ICON.get(err.severity or "", ui.emoji("warn"))
+        where = f" [{escape(err.platform)}]" if err.platform else ""
         lines.append(
-            f"  {ui.emoji('warn')} <code>{err.created_at:%m-%d %H:%M}</code> · "
+            f"  {icon} <code>{err.created_at:%m-%d %H:%M}</code>{where} · "
             f"{escape(err.error_type)}: {escape(err.message[:60])}"
         )
     lines += ["", ui.footer()]

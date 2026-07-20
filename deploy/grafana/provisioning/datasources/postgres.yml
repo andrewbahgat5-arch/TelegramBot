@@ -1,0 +1,25 @@
+# Grafana reads error_logs directly (DESIGN_MONITORING.md, Decision 3).
+#
+# A DEDICATED READ-ONLY ROLE, not the app user: a dashboard is a query tool and must
+# never be able to write to, or drop, production data. The role is created by
+# deploy/grafana/readonly-role.sql and granted SELECT on error_logs only.
+apiVersion: 1
+
+datasources:
+  - name: telegram-bot
+    type: postgres
+    uid: tgbot_pg
+    access: proxy
+    url: postgres:5432
+    user: ${GRAFANA_DB_USER}
+    jsonData:
+      database: ${GRAFANA_DB_NAME}
+      sslmode: disable          # same private docker network as the app
+      postgresVersion: 1500
+      timescaledb: false
+      # Grafana holds a small pool; error_logs queries are light and infrequent.
+      maxOpenConns: 4
+      maxIdleConns: 2
+    secureJsonData:
+      password: ${GRAFANA_DB_PASSWORD}
+    editable: false

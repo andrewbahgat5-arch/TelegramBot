@@ -99,6 +99,7 @@ from services.cookie_admin_service import CookieAdminService
 from services.cookie_bootstrap import bootstrap_cookie_pool
 from services.cookie_pool_service import CookiePolicy, CookiePoolService, LeaseBackend
 from services.error_log_service import ErrorLogService
+from services.error_report_service import ErrorReportService
 from services.history_service import HistoryService
 from services.job_service import JobService
 from services.notification_service import NotificationService
@@ -133,6 +134,7 @@ def build_dispatcher(
     referral_service_factory: Callable[[AsyncSession], ReferralService],
     preference_service_factory: Callable[[AsyncSession], UserPreferenceService],
     error_log_service_factory: Callable[[AsyncSession], ErrorLogService] | None = None,
+    error_report_service: ErrorReportService | None = None,
     cookie_admin_factory: Callable[[], CookieAdminService] | None = None,
     template_service: TemplateService,
     health_checker_factory: Callable[[Bot], UserHealthChecker],
@@ -164,6 +166,7 @@ def build_dispatcher(
     dp["referral_service_factory"] = referral_service_factory
     dp["preference_service_factory"] = preference_service_factory
     dp["error_log_service_factory"] = error_log_service_factory
+    dp["error_report_service"] = error_report_service
     dp["cookie_admin_factory"] = cookie_admin_factory
     dp["template_service"] = template_service
     dp["health_checker_factory"] = health_checker_factory
@@ -314,6 +317,21 @@ async def main() -> None:
     # Shared raw-text sender for admin event notifications (Owner + Moderators).
     admin_message_sender = TelegramMessageSender(bot)
 
+    # Owner error reports. Delivered to the alerts chat when one is configured,
+    # otherwise straight to the Owner, so a deployment without an alerts chat still
+    # gets told when something breaks.
+    report_chat_id = settings.telegram_alerts_chat_id or settings.bot_owner_telegram_id
+
+    async def send_error_report(text: str) -> None:
+        if report_chat_id is None:
+            return
+        await admin_message_sender.send_message(report_chat_id, text, parse_mode="HTML")
+
+    error_report_service = ErrorReportService(
+        send_error_report if report_chat_id is not None else None,
+        bot_version=getattr(settings, "app_version", None),
+    )
+
     def make_admin_notification(session: AsyncSession) -> AdminNotificationService:
         return AdminNotificationService(admin_message_sender, UserRepository(session))
 
@@ -463,6 +481,7 @@ async def main() -> None:
         # saved/cancelled — "some time passing" can no longer drop it. Reuses the cache DB;
         # aiogram namespaces its keys under an "fsm" prefix, so there is no collision.
         storage=RedisStorage(redis=redis_clients.cache),
+        error_report_service=error_report_service,
     )
 
     _log.info("bot_starting", mode="webhook" if settings.use_webhook else "polling")

@@ -486,7 +486,7 @@ class FakeProvider:
         self._health = health
         self.calls = 0
 
-    async def extract_info(self, url: str) -> MediaInfo:
+    async def extract_info(self, url: str, *, item_index: int | None = None) -> MediaInfo:
         self.calls += 1
         if self._error is not None:
             raise self._error
@@ -1139,7 +1139,7 @@ class FakeFileDownloader:
         self._error = error
         self.calls = 0
 
-    async def extract_info(self, url: str) -> MediaInfo:
+    async def extract_info(self, url: str, *, item_index: int | None = None) -> MediaInfo:
         return MediaInfo(platform="generic", video_id="vid", title="T", source_url=url)
 
     async def download(

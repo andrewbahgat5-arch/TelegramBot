@@ -778,3 +778,68 @@ def test_human_size_units() -> None:
     assert _human_size(500_000) == "488 KB"
     assert _human_size(3_250_000) == "3.1 MB"
     assert _human_size(3 * 1024**3) == "3.0 GB"
+
+
+async def test_auth_walled_link_gets_the_login_required_message() -> None:
+    """A login-walled Instagram/Facebook post must explain that it needs an account and
+    name what IS supported — not the generic "couldn't read that link", which reads as a
+    bug on our side and sent users into retry loops on posts that can never work."""
+    from core.i18n import translate as _translate
+    from domain.exceptions import AuthRequiredError
+
+    analyzer = _analyzer(error=AuthRequiredError("instagram empty media response"))
+    message, ack = _message_with_ack()
+    message.text = "https://www.instagram.com/reel/C8QltIDSLNc/"
+    await handle_url(
+        message,
+        _session(),
+        _user(),
+        lambda s: analyzer,
+        _no_ads,
+        CallbackSigner("k"),
+        translate,
+        "en",
+    )
+    ack.edit_text.assert_awaited_once()
+    shown = ack.edit_text.await_args.args[0]
+    assert shown == _translate("errors.auth_required", "en")
+    assert "logged-in account" in shown
+    assert "Public Instagram Reels" in shown
+
+
+async def test_auth_walled_link_is_logged_but_never_fires_the_burst_alert() -> None:
+    """error_logs still gets the row (diagnosis), but the CRITICAL burst alert must not
+    fire: a run of private links is users being users, not a pipeline outage. Before the
+    exclusion, five such links in ten minutes would page the Owner on a healthy bot."""
+    import bot.handlers.download as dl
+    from domain.exceptions import AuthRequiredError
+
+    # The detector is module-level state shared across tests — start from a clean window
+    # so this asserts about THIS test's failures only.
+    dl._analyze_failure_burst._events.clear()
+    recorder = _RecordingErrorLogService()
+    critical: list[str] = []
+
+    original = dl._log.critical
+    dl._log.critical = lambda event, **kw: critical.append(event)  # type: ignore[method-assign]
+    try:
+        for _ in range(dl._BURST_THRESHOLD + 3):
+            analyzer = _analyzer(error=AuthRequiredError("login required"))
+            message, ack = _message_with_ack()
+            message.text = "https://www.instagram.com/reel/C8QltIDSLNc/"
+            await handle_url(
+                message,
+                _session(),
+                _user(),
+                lambda s, _a=analyzer: _a,  # bind per iteration (B023)
+                _no_ads,
+                CallbackSigner("k"),
+                translate,
+                "en",
+                error_log_service_factory=lambda s: recorder,  # type: ignore[arg-type, return-value]
+            )
+    finally:
+        dl._log.critical = original  # type: ignore[method-assign]
+
+    assert len(recorder.calls) == dl._BURST_THRESHOLD + 3  # every one persisted
+    assert "analyze_failure_burst" not in critical  # but no alert

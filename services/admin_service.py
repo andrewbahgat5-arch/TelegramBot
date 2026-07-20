@@ -126,6 +126,10 @@ class ErrorLogView:
     error_type: str
     message: str
     created_at: datetime.datetime
+    # Observability columns (DESIGN_MONITORING.md). NULL on rows written before the
+    # 2026071901 migration, so every consumer must tolerate their absence.
+    severity: str | None = None
+    platform: str | None = None
 
 
 class AdminService:
@@ -242,4 +246,6 @@ def _error_view(row: Any) -> ErrorLogView:
         error_type=row.error_type,
         message=row.message,
         created_at=row.created_at,
+        severity=getattr(row, "severity", None),
+        platform=getattr(row, "platform", None),
     )
