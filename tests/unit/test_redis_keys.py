@@ -7,7 +7,10 @@ from core.redis_keys import RedisKeys
 
 def test_key_patterns_match_section_11_4() -> None:
     assert RedisKeys.file_id(42, "mp4", "720p") == "fileid:42:mp4:720p"
-    assert RedisKeys.metadata("youtube", "dQw4w9WgXcQ") == "meta:youtube:dQw4w9WgXcQ"
+    # The metadata key carries a schema version so a change to the cached payload shape
+    # auto-invalidates old entries (see RedisKeys.METADATA_SCHEMA_VERSION).
+    v = RedisKeys.METADATA_SCHEMA_VERSION
+    assert RedisKeys.metadata("youtube", "dQw4w9WgXcQ") == f"meta:v{v}:youtube:dQw4w9WgXcQ"
     assert RedisKeys.user(123456789) == "user:123456789"
     assert RedisKeys.download_lock(42, "mp4", "720p") == "lock:42:mp4:720p"
     assert RedisKeys.rate_message(123456789) == "rate:msg:123456789"

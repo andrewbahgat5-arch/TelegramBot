@@ -151,6 +151,7 @@ def _to_cache(media_id: int, info: MediaInfo) -> dict[str, Any]:
                 "duration": i.duration,
                 "thumbnail_url": i.thumbnail_url,
                 "has_audio": i.has_audio,
+                "item_url": i.item_url,
             }
             for i in info.carousel_items
         ],
@@ -186,6 +187,7 @@ def _from_cache(data: dict[str, Any]) -> AnalyzedMedia:
                 duration=i.get("duration"),
                 thumbnail_url=i.get("thumbnail_url"),
                 has_audio=bool(i.get("has_audio")),
+                item_url=i.get("item_url"),
             )
             for i in data.get("carousel_items") or []
         ),

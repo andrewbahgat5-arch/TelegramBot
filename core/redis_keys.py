@@ -24,9 +24,19 @@ class RedisKeys:
     def file_id(media_id: int, format_: str, quality: str) -> str:
         return f"fileid:{media_id}:{format_}:{quality}"
 
+    # Schema version of the cached metadata payload (the dict shape in
+    # services/url_analyzer._to_cache). BUMP THIS whenever that shape changes — a new
+    # field, a renamed key, a different structure. The version is part of the cache key,
+    # so bumping it orphans every old entry (they expire via TTL) and readers only ever
+    # see payloads written by the current code. Without this, adding a field left old
+    # cached entries missing it, which silently served stale data to any user whose
+    # request was cached before the deploy — a real bug (playlist item_url/has_audio,
+    # 2026-07-21) that "worked in a fresh test but broke for a returning user".
+    METADATA_SCHEMA_VERSION: Final[int] = 2
+
     @staticmethod
     def metadata(platform: str, video_id: str) -> str:
-        return f"meta:{platform}:{video_id}"
+        return f"meta:v{RedisKeys.METADATA_SCHEMA_VERSION}:{platform}:{video_id}"
 
     @staticmethod
     def user(telegram_id: int) -> str:

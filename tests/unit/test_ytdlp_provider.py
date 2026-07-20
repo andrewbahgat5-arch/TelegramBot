@@ -1025,3 +1025,75 @@ async def test_playlist_listing_is_capped_and_reports_the_real_total(
     assert len(info.carousel_items) == MAX_PLAYLIST_ITEMS == 50
     assert info.raw["playlist_total"] == 200  # the note needs the real number
     assert all(i.kind is MediaFormat.VIDEO for i in info.carousel_items)
+
+
+async def test_playlist_items_offer_audio_even_though_flat_entries_have_no_formats(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REGRESSION: a flat playlist entry has no inline formats, so audio-detection
+    returned False and the gallery hid the Audio button — a music playlist offered no
+    way to download the song. A YouTube video always has audio; assume it present until
+    the item is actually extracted."""
+    playlist = {
+        "_type": "playlist",
+        "id": "PL1",
+        "title": "Songs",
+        "formats": [],
+        "entries": [
+            {"id": "aaa", "ie_key": "Youtube", "title": "Song A", "formats": []},
+            {"id": "bbb", "ie_key": "Youtube", "title": None, "formats": []},  # sparse
+        ],
+    }
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(playlist), b"", 0))
+    info = await YtdlpProvider().extract_info("https://www.youtube.com/playlist?list=PL1")
+    assert all(i.has_audio for i in info.carousel_items)  # audio button will show
+    # A carousel slide (inline formats, video-only) must STILL be gated off.
+    from infrastructure.downloader.providers.ytdlp_provider import _entry_has_audio
+    video_only_slide = {"formats": [{"format_id": "0", "vcodec": "avc1", "acodec": "none",
+                                     "height": 720}]}
+    assert _entry_has_audio(video_only_slide) is False
+
+
+def test_titleless_playlist_entry_falls_back_to_the_video_id() -> None:
+    """A sparse flat entry (no title) should show its video id, not a meaningless
+    "Item N" — the real title is filled in on selection."""
+    from infrastructure.downloader.providers.ytdlp_provider import _entry_title
+    assert _entry_title({"id": "fIc_VEQ7Vo0", "title": None}, 2) == "Video 2 (fIc_VEQ7Vo0)"
+    assert _entry_title({"id": "x", "title": "Real Title"}, 3) == "Real Title"
+    assert _entry_title({"title": None}, 5) == "Item 5"  # truly nothing
+
+
+async def test_playlist_item_carries_its_own_url_for_direct_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A playlist entry exposes item_url so selecting it can analyze that video
+    DIRECTLY (fast, single-video) — the earlier flow re-ran the whole playlist on the
+    Video click, which timed out and made the button do nothing. A carousel slide, which
+    has no url of its own, keeps item_url = None (it is addressed by --playlist-items)."""
+    # Two entries so extract_info returns the INDEX (the item list) rather than
+    # auto-selecting a lone item — we only need to check how the browse rows are built.
+    playlist = {
+        "_type": "playlist", "id": "PL1", "title": "Songs", "formats": [],
+        "entries": [
+            {"id": "vvv", "ie_key": "Youtube", "title": "Song A", "formats": []},
+            {"id": "www", "ie_key": "Youtube", "title": "Song B", "formats": []},
+        ],
+    }
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(playlist), b"", 0))
+    info = await YtdlpProvider().extract_info("https://www.youtube.com/playlist?list=PL1")
+    assert info.carousel_items[0].item_url == "https://www.youtube.com/watch?v=vvv"
+
+    carousel = {
+        "_type": "playlist", "id": "IGPOST", "title": "Post", "formats": [],
+        "entries": [
+            {"id": "s1", "webpage_url": "https://www.instagram.com/p/IGPOST/",
+             "formats": [{"format_id": "0", "vcodec": "avc1", "acodec": "mp4a", "height": 720}]},
+            {"id": "s2", "webpage_url": "https://www.instagram.com/p/IGPOST/",
+             "formats": [{"format_id": "0", "vcodec": "avc1", "acodec": "mp4a", "height": 720}]},
+        ],
+    }
+    _patch_proc(monkeypatch, _FakeProc(orjson.dumps(carousel), b"", 0))
+    ig = await YtdlpProvider().extract_info("https://www.instagram.com/p/IGPOST/")
+    # The slide's webpage_url equals the POST url, so it is NOT a distinct own url —
+    # it must be addressed by --playlist-items, not re-analyzed on its own.
+    assert ig.carousel_items[0].item_url == "https://www.instagram.com/p/IGPOST/"

@@ -670,31 +670,61 @@ async def handle_gallery(
         await callback.answer(translate("gallery.item_gone", locale), show_alert=True)
         return
 
-    if op in ("n", "s"):
-        # Browsing and selecting are both served from the cached item list — no
-        # extraction — so moving between items and screens is instant. yt-dlp only
-        # runs once the user commits to a media type below.
+    item = items[index - 1]
+
+    if op == "n":
+        # Browsing is served from the cached item list — no extraction — so paging is
+        # instant.
         await _render_gallery(
-            callback.message,
-            parsed.media_id,
-            post.info,
-            index,
-            callback_signer,
-            locale,
-            selected=(op == "s"),
+            callback.message, parsed.media_id, post.info, index,
+            callback_signer, locale, selected=False,
         )
         await callback.answer()
         return
 
-    # Any other op needs the item's real formats, so extract it now.
+    if op == "s" and not item.item_url:
+        # A carousel slide has no url of its own, so selection just flips to the cached
+        # selected-item screen; the real extraction is deferred to the Video/Audio click
+        # (addressed by --playlist-items). Instagram carousels stay instant.
+        await _render_gallery(
+            callback.message, parsed.media_id, post.info, index,
+            callback_signer, locale, selected=True,
+        )
+        await callback.answer()
+        return
+
+    # A playlist song (Select or a media-type click) needs the item's real formats.
+    # A playlist entry has its OWN video url → analyze THAT directly: a fast single-video
+    # extraction and the robust single-video download path, NOT a full re-run of the
+    # whole playlist (which timed out and left the button doing nothing). A carousel
+    # slide has no own url → the post url with --playlist-items.
     try:
-        analyzed = await analyzer.analyze(post.info.source_url, item_index=index)
+        if item.item_url:
+            analyzed = await analyzer.analyze(item.item_url)
+        else:
+            analyzed = await analyzer.analyze(post.info.source_url, item_index=index)
     except UserFacingError as exc:
         await callback.answer(translate(exc.translation_key, locale), show_alert=True)
         return
     except Exception:
         _log.exception("gallery_item_failed", item=index, media_id=parsed.media_id)
         await callback.answer(translate("errors.unexpected", locale), show_alert=True)
+        return
+
+    if op == "s":
+        # Playlist song selected → the SAME screen a single link shows: the rich
+        # metadata caption ("Choose a format:") + Video/Audio, plus Back to the playlist.
+        # The item is now analyzed and cached, so the Video/Audio taps are instant.
+        caption = _media_caption(analyzed.info, translate, locale)
+        keyboard = build_item_keyboard(parsed.media_id, item, callback_signer, locale)
+        mixer = CaptionAdMixer(ad_service_factory(session))
+        decorated, ad_buttons = await mixer.decorate_for_user(
+            user, caption, user.total_downloads
+        )
+        caption = decorated or caption
+        keyboard = append_ad_buttons(keyboard, ad_buttons)
+        await _edit_chooser(callback.message, caption, keyboard)
+        await callback.answer()
         return
 
     if not analyzed.info.formats:

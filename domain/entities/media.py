@@ -70,6 +70,11 @@ class CarouselItem:
     # has one: Instagram serves anonymous carousel items as "video only" on every
     # format, so offering "Download Audio" there is a button that cannot work.
     has_audio: bool = False
+    # The item's OWN addressable URL, when it has one. A YouTube playlist entry is a
+    # real video with its own watch URL; selecting it analyzes THAT url directly (fast,
+    # single-video) instead of re-running the whole playlist. An Instagram carousel
+    # slide has no url of its own (all slides share the post URL) → None.
+    item_url: str | None = None
 
     @property
     def is_video(self) -> bool:

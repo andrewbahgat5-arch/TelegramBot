@@ -465,6 +465,16 @@ class YtdlpProvider:
                 # egress plan, retries, classification — rather than duplicating any of
                 # it. The index is kept so the item still has a distinct identity and
                 # the gallery can send the user back to the right slot.
+                #
+                # Guard against re-extracting the SAME url: if the entry's own url is the
+                # url we already have, recursing would loop forever. Cannot happen for a
+                # normal YouTube playlist (entries are distinct watch urls), but a
+                # malformed source that resolves to a playlist-of-itself must not stack
+                # overflow the worker.
+                if needs.url == url:
+                    raise NoDownloadableMediaError(
+                        "This item could not be resolved to a downloadable video."
+                    ) from needs
                 item = await self.extract_info(needs.url)
                 return dataclasses.replace(
                     item,
@@ -532,7 +542,7 @@ class YtdlpProvider:
             items = tuple(
                 CarouselItem(
                     index=i,
-                    title=str(entry.get("title") or f"Item {i}"),
+                    title=_entry_title(entry, i),
                     kind=_entry_kind(entry),
                     height=_best_entry_height(entry),
                     duration=_opt_int(entry.get("duration")),
@@ -540,6 +550,7 @@ class YtdlpProvider:
                     # whose entry carries no preview still renders inside the gallery.
                     thumbnail_url=_entry_thumbnail(entry) or post_artwork,
                     has_audio=_entry_has_audio(entry),
+                    item_url=_entry_own_url(entry),
                 )
                 for i, entry in enumerate(entries, start=1)
             )
@@ -934,6 +945,23 @@ def _is_playlist_url(url: str) -> bool:
     return any(marker in lowered for marker in ("/channel/", "/@", "/c/", "/user/"))
 
 
+def _entry_title(entry: dict[str, Any], index: int) -> str:
+    """A human label for a browse row.
+
+    Most entries carry a title. A few flat playlist entries do not (yt-dlp returns them
+    sparse); rather than a meaningless "Item N", fall back to the video id, which is at
+    least identifiable. The real title is filled in when the item is selected and fully
+    extracted.
+    """
+    title = entry.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    vid = entry.get("id")
+    if isinstance(vid, str) and vid.strip():
+        return f"Video {index} ({vid.strip()})"
+    return f"Item {index}"
+
+
 def _entry_own_url(entry: dict[str, Any]) -> str | None:
     """The entry's own page url, when it is a separately addressable video."""
     for key in ("webpage_url", "url"):
@@ -980,12 +1008,18 @@ def _entry_kind(entry: dict[str, Any]) -> MediaFormat:
 def _entry_has_audio(entry: dict[str, Any]) -> bool:
     """Whether an audio track is obtainable for this item.
 
-    True when the item yields an AUDIO option — which covers both a separate audio
-    stream (YouTube) and a muxed stream we can extract from (TikTok). False when every
-    format is video-only, as Instagram reports for anonymous carousel items: yt-dlp's
-    own -F table marks all 11 of them "video only", and a download confirms no audio
-    stream in the file. Offering audio there is a dead end.
+    Two cases, because the evidence differs:
+
+    * A **flat playlist entry** (its own video url, but no inline formats — YouTube) can
+      not be inspected without a full extraction, and a YouTube video always has audio.
+      Gating it on the empty flat format list wrongly hid the Audio button, so a music
+      playlist offered no way to download the song. Assume audio present.
+    * An **inline-format entry** (Instagram carousel) CAN be inspected. Trust it: an
+      anonymous IG carousel item is video-only on every format, and offering audio there
+      is a dead end that answers "no formats" whatever the user picks.
     """
+    if _entry_own_url(entry) and not (entry.get("formats") or []):
+        return True  # unextracted video → assume it has audio (YouTube always does)
     return any(o.format is MediaFormat.AUDIO for o in _entry_options(entry))
 
 
