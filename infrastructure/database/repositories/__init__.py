@@ -20,8 +20,10 @@ from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
 from infrastructure.database.repositories.message_template import MessageTemplateRepository
+from infrastructure.database.repositories.plan import PlanRepository
 from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.setting import SettingsRepository
+from infrastructure.database.repositories.subscription import SubscriptionRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.repositories.user_preference import UserPreferenceRepository
 
@@ -42,8 +44,10 @@ __all__ = [
     "JobWaiterRepository",
     "MediaRepository",
     "MessageTemplateRepository",
+    "PlanRepository",
     "ReferralRepository",
     "SettingsRepository",
+    "SubscriptionRepository",
     "UserPreferenceRepository",
     "UserRepository",
 ]

@@ -19,9 +19,11 @@ from infrastructure.database.models.job import Job
 from infrastructure.database.models.job_waiter import JobWaiter
 from infrastructure.database.models.media_metadata import MediaMetadata
 from infrastructure.database.models.message_template import MessageTemplate
+from infrastructure.database.models.plan import Plan
 from infrastructure.database.models.referral import Referral
 from infrastructure.database.models.reward import Reward
 from infrastructure.database.models.setting import Setting
+from infrastructure.database.models.subscription import Subscription
 from infrastructure.database.models.user import User
 from infrastructure.database.models.user_preference import UserPreference
 from infrastructure.database.models.youtube_cookie import YoutubeCookie, YoutubeCookieEvent
@@ -46,9 +48,11 @@ __all__ = [
     "JobWaiter",
     "MediaMetadata",
     "MessageTemplate",
+    "Plan",
     "Referral",
     "Reward",
     "Setting",
+    "Subscription",
     "User",
     "UserPreference",
     "YoutubeCookie",

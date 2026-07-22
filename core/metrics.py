@@ -49,6 +49,13 @@ broadcasts_sent_total = Counter(
     "broadcasts_sent_total", "Broadcast messages sent, by result.", ("result",)
 )
 errors_total = Counter("errors_total", "Errors recorded, by type.", ("type",))
+# V2.1 shadow-mode cutover gate: the resolver's plan must match the legacy is_premium
+# path for every user. Must read 0 over the soak window before V2.2 cutover (V2-D-024).
+entitlement_parity_mismatch_total = Counter(
+    "entitlement_parity_mismatch_total",
+    "Shadow-mode disagreements between the entitlement resolver and the legacy path.",
+    ("field",),
+)
 
 # --- Histograms (Section 15.3) --------------------------------------------
 job_processing_seconds = Histogram(
@@ -88,6 +95,14 @@ i18n_catalog_coverage = Gauge(
     multiprocess_mode="max",
 )
 
+# Active subscriptions by plan (V2.1). Set at startup / on writes.
+subscriptions_active = Gauge(
+    "subscriptions_active",
+    "Active subscriptions, by plan code.",
+    ("plan",),
+    multiprocess_mode="livemostrecent",
+)
+
 
 # --- Recording helpers (stable label sets) --------------------------------
 def record_download(*, platform: str, format_: str, quality: str, result: str) -> None:
@@ -116,6 +131,16 @@ def record_broadcast_sent(result: str, *, count: int = 1) -> None:
 
 def record_error(error_type: str) -> None:
     errors_total.labels(type=error_type).inc()
+
+
+def record_entitlement_parity_mismatch(field: str) -> None:
+    entitlement_parity_mismatch_total.labels(field=field).inc()
+
+
+def set_subscriptions_active(counts: dict[str, int]) -> None:
+    """Publish active-subscription counts per plan to the gauge (startup / on writes)."""
+    for plan, count in counts.items():
+        subscriptions_active.labels(plan=plan).set(count)
 
 
 def observe_job_processing(seconds: float) -> None:

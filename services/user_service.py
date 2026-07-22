@@ -26,6 +26,7 @@ from domain.enums import UserRole
 from domain.protocols.repositories import UserRepositoryProtocol
 from services.admin_notification_service import AdminNotificationService
 from services.cache_service import CacheService
+from services.entitlement_shadow import ShadowParity
 
 _log = get_logger("services.user_service")
 
@@ -99,6 +100,7 @@ class UserService:
         owner_telegram_id: int,
         debounce_seconds: int = LAST_ACTIVITY_DEBOUNCE_SECONDS,
         admin_notification: AdminNotificationService | None = None,
+        shadow_parity: ShadowParity | None = None,
     ) -> None:
         self._repo = repo
         self._cache = cache
@@ -107,6 +109,9 @@ class UserService:
         # Optional: fan out important user events (new user, block, return, ban) to
         # the Owner + all Moderators. None in tests / non-bot processes.
         self._admin_notification = admin_notification
+        # Optional: V2.1 shadow-mode entitlement parity check, run on cache-miss only.
+        # Read-only and fully defensive — it must never affect the returned snapshot.
+        self._shadow_parity = shadow_parity
 
     async def get_or_create_user(
         self,
@@ -142,7 +147,26 @@ class UserService:
         await self._cache.set_user(telegram_id, snapshot.to_cache_dict())
         if created and self._admin_notification is not None:
             await self._admin_notification.notify_new_user(snapshot)
+        await self._shadow_parity_check(row)
         return snapshot
+
+    async def _shadow_parity_check(self, row: Any) -> None:
+        """V2.1 shadow-mode entitlement parity (cache-miss path only).
+
+        Fully defensive: any failure here logs and is swallowed — shadow observability
+        must never break user resolution / auth.
+        """
+        checker = self._shadow_parity
+        if checker is None:
+            return
+        try:
+            await checker.check(
+                user_id=row.id,
+                is_premium=row.is_premium,
+                premium_expires_at=row.premium_expires_at,
+            )
+        except Exception:
+            _log.warning("shadow_parity_failed", telegram_id=row.telegram_id, exc_info=True)
 
     async def record_activity(self, snapshot: UserSnapshot) -> None:
         """Persist ``last_activity_at`` at most once per debounce window per user."""

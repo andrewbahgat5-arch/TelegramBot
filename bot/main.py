@@ -48,6 +48,7 @@ from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
 from core.sentry import init_sentry, set_component
+from domain.entities.plan import Plan
 from infrastructure.cookies import CookieRepositoryAdapter, LocalCookieStore
 from infrastructure.cookies.policy_settings import CookiePolicyProvider
 from infrastructure.database.ad_event_recorder import AdEventRecorder
@@ -69,9 +70,11 @@ from infrastructure.database.repositories.error_log import ErrorLogRepository
 from infrastructure.database.repositories.job import JobRepository
 from infrastructure.database.repositories.job_waiter import JobWaiterRepository
 from infrastructure.database.repositories.media import MediaRepository
+from infrastructure.database.repositories.plan import PlanRepository
 from infrastructure.database.repositories.referral import ReferralRepository
 from infrastructure.database.repositories.reward import RewardRepository
 from infrastructure.database.repositories.setting import SettingsRepository
+from infrastructure.database.repositories.subscription import SubscriptionRepository
 from infrastructure.database.repositories.user import UserRepository
 from infrastructure.database.repositories.user_preference import UserPreferenceRepository
 from infrastructure.database.session import create_session_factory
@@ -98,6 +101,8 @@ from services.caption_ad_mixer import CaptionAdMixer
 from services.cookie_admin_service import CookieAdminService
 from services.cookie_bootstrap import bootstrap_cookie_pool
 from services.cookie_pool_service import CookiePolicy, CookiePoolService, LeaseBackend
+from services.entitlement_service import EntitlementService, PlanCatalog
+from services.entitlement_shadow import ShadowParity
 from services.error_log_service import ErrorLogService
 from services.error_report_service import ErrorReportService
 from services.history_service import HistoryService
@@ -233,6 +238,24 @@ async def main() -> None:
     template_service = TemplateService(MessageTemplateStore(session_factory))
     await template_service.load()
 
+    # Entitlement resolver (V2.1). Plans are a process singleton, loaded + validated once
+    # at boot: a malformed plan's entitlements fail startup here (fail-fast, V2-D-004),
+    # like the locale-catalog guard. In V2.1 the resolver runs in SHADOW — nothing reads
+    # its output; it only feeds the parity metric (V2-D-024).
+    async with session_factory() as _plan_session:
+        plan_rows = await PlanRepository(_plan_session).list_all()
+        active_by_plan = await SubscriptionRepository(_plan_session).count_active_by_plan()
+    plan_catalog = PlanCatalog(Plan.from_row(r) for r in plan_rows)
+    entitlement_service = EntitlementService(plan_catalog)
+    metrics.set_subscriptions_active(
+        {p.code: 0 for p in (plan_catalog.by_code("free"), plan_catalog.by_code("premium")) if p}
+        | {
+            plan.code: count
+            for plan_id, count in active_by_plan
+            if (plan := plan_catalog.by_id(plan_id)) is not None
+        }
+    )
+
     # The registry is a process singleton (holds provider health state). It reads
     # provider settings via an adapter that opens its own short-lived sessions.
     registry = DownloaderRegistry(
@@ -342,6 +365,9 @@ async def main() -> None:
             cache_service,
             owner_telegram_id=settings.bot_owner_telegram_id,
             admin_notification=make_admin_notification(session),
+            # V2.1 shadow parity: resolve entitlements the new way on cache-miss and
+            # compare to the legacy is_premium path (read-only, defensive).
+            shadow_parity=ShadowParity(entitlement_service, SubscriptionRepository(session)),
         )
 
     def make_reward_service(session: AsyncSession) -> RewardService:
