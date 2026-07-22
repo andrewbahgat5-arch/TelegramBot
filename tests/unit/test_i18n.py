@@ -232,3 +232,85 @@ def test_real_error_and_notification_keys_present() -> None:
         "language.updated",
     ):
         assert i18n.translate(key, "en") != key
+
+
+# --- placeholder-set validation (V2-D-026, Sprint V2.0) ---------------------
+def test_configure_rejects_alien_placeholder_in_non_default_locale(tmp_path: Path) -> None:
+    """A translation referencing a placeholder the default template lacks fails boot —
+    it would otherwise surface to users as a raw ``{...}`` template."""
+    _write_catalog(tmp_path, "en", {"_meta": _meta("en"), "greet": "Hi, {name}!"})
+    _write_catalog(
+        tmp_path, "ar", {"_meta": _meta("ar", direction="rtl"), "greet": "مرحبا، {naem}!"}
+    )
+    with pytest.raises(i18n.LocaleCatalogError, match="naem"):
+        i18n.configure("en", locales_dir=tmp_path)
+
+
+def test_configure_allows_translation_to_omit_a_placeholder(tmp_path: Path) -> None:
+    """Subset is fine: a translation may drop a placeholder, just never invent one."""
+    _write_catalog(tmp_path, "en", {"_meta": _meta("en"), "greet": "Hi {name}, {count} new"})
+    _write_catalog(tmp_path, "ar", {"_meta": _meta("ar", direction="rtl"), "greet": "مرحبا {name}"})
+    i18n.configure("en", locales_dir=tmp_path)  # must not raise
+    assert i18n.translate("greet", "ar", name="X", count=3) == "مرحبا X"
+
+
+def test_configure_ignores_format_spec_and_escapes_in_placeholder_check(tmp_path: Path) -> None:
+    """Format specs (``{n:>5}``), conversions, and ``{{``/``}}`` escapes are not
+    alien placeholders."""
+    _write_catalog(tmp_path, "en", {"_meta": _meta("en"), "k": "{n} items"})
+    _write_catalog(
+        tmp_path, "ar", {"_meta": _meta("ar", direction="rtl"), "k": "{{}} {n!r} {n:>3}"}
+    )
+    i18n.configure("en", locales_dir=tmp_path)  # must not raise
+
+
+def test_real_catalogs_pass_placeholder_validation() -> None:
+    """Acceptance: the shipped en/ar catalogs boot cleanly under the new check."""
+    i18n.configure("en")  # raises if ar introduced an alien placeholder
+
+
+# --- per-locale coverage metric (V2-D-026, Sprint V2.0) ---------------------
+def test_coverage_default_locale_is_one(tmp_path: Path) -> None:
+    _write_catalog(tmp_path, "en", {"_meta": _meta("en"), "a": "A", "b": "B"})
+    i18n.configure("en", locales_dir=tmp_path)
+    assert i18n.catalog_coverage()["en"] == 1.0
+
+
+def test_coverage_reflects_partial_translation(tmp_path: Path) -> None:
+    _write_catalog(tmp_path, "en", {"_meta": _meta("en"), "a": "A", "b": "B", "c": "C", "d": "D"})
+    _write_catalog(tmp_path, "ar", {"_meta": _meta("ar", direction="rtl"), "a": "أ", "b": "ب"})
+    i18n.configure("en", locales_dir=tmp_path)
+    assert i18n.catalog_coverage()["ar"] == 0.5  # 2 of 4 user-facing keys
+
+
+def test_coverage_carves_out_admin_namespaces(tmp_path: Path) -> None:
+    """Admin/owner-only keys are excluded from the denominator, so leaving them
+    untranslated does not depress a locale's user-facing coverage."""
+    _write_catalog(
+        tmp_path,
+        "en",
+        {"_meta": _meta("en"), "a": "A", "panel.x": "X", "admin.y": "Y", "cookies.z": "Z"},
+    )
+    # ar translates only the one user-facing key "a" -> full user-facing coverage.
+    _write_catalog(tmp_path, "ar", {"_meta": _meta("ar", direction="rtl"), "a": "أ"})
+    i18n.configure("en", locales_dir=tmp_path)
+    assert i18n.catalog_coverage()["ar"] == 1.0
+
+
+def test_real_catalogs_report_full_coverage() -> None:
+    """en/ar are at full key parity, so both report 1.0."""
+    i18n.configure("en")
+    coverage = i18n.catalog_coverage()
+    assert coverage["en"] == 1.0
+    assert coverage["ar"] == 1.0
+
+
+def test_configure_publishes_coverage_to_metric_gauge() -> None:
+    """The composition root wires catalog_coverage() into the i18n_catalog_coverage
+    gauge; exercise that path and confirm the series is exposed."""
+    from core import metrics
+
+    i18n.configure("en")
+    metrics.set_i18n_coverage(i18n.catalog_coverage())
+    body, _ = metrics.render()
+    assert b"i18n_catalog_coverage" in body

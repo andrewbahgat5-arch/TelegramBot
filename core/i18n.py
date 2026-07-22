@@ -19,6 +19,7 @@ that aren't available in every context, e.g. plain unit tests) — call
 from __future__ import annotations
 
 import json
+import string
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,19 @@ _log = get_logger("core.i18n")
 _DEFAULT_LOCALES_DIR: Final[Path] = Path(__file__).parent / "locales"
 _META_KEY: Final[str] = "_meta"
 _VALID_DIRECTIONS: Final[frozenset[str]] = frozenset({"ltr", "rtl"})
+
+# Coverage carve-out (V2-D-026): admin/owner-only surfaces are intentionally left
+# untranslated in most locales, so counting them would drown the *user-facing*
+# coverage signal the metric exists to expose. The V2 plan names this the "admin.*
+# carve-out"; in this codebase the admin-facing keys live under these namespaces —
+# the inline admin panel (``panel.``, Sprint 9.6/14), admin notifications
+# (``adminnotify.``), the cookie-pool panel (``cookies.``), and ``admin.`` itself.
+_ADMIN_COVERAGE_PREFIXES: Final[tuple[str, ...]] = (
+    "admin.",
+    "panel.",
+    "adminnotify.",
+    "cookies.",
+)
 
 # Handler/keyboard-layer type alias for the composition-root-injected `translate`
 # (`dp["translate"]`, Sprint 11.5) — one shared name instead of repeating the bare
@@ -58,6 +72,7 @@ class _State:
     catalogs: dict[str, dict[str, str]]
     metas: dict[str, LocaleMeta]
     default_locale: str
+    coverage: dict[str, float]
 
 
 _state: _State | None = None
@@ -117,9 +132,15 @@ def configure(default_locale: str, *, locales_dir: Path | None = None) -> None:
             f"DEFAULT_LOCALE={default_locale!r}'s catalog is marked _meta.enabled=false"
         )
     _reject_orphaned_keys(catalogs, default_locale)
+    _reject_alien_placeholders(catalogs, default_locale)
 
     global _state
-    _state = _State(catalogs=catalogs, metas=metas, default_locale=default_locale)
+    _state = _State(
+        catalogs=catalogs,
+        metas=metas,
+        default_locale=default_locale,
+        coverage=_compute_coverage(catalogs, default_locale),
+    )
     _overrides.clear()
 
 
@@ -159,6 +180,18 @@ def list_enabled_locales() -> list[LocaleMeta]:
     """Every discovered locale with ``_meta.enabled: true``, for the picker keyboard."""
     state = _require_state()
     return [meta for meta in state.metas.values() if meta.enabled]
+
+
+def catalog_coverage() -> dict[str, float]:
+    """Per-locale translation coverage in ``[0.0, 1.0]`` (V2-D-026).
+
+    The fraction of the default locale's **user-facing** keys (admin/owner-only
+    namespaces carved out, see :data:`_ADMIN_COVERAGE_PREFIXES`) that the locale
+    translates. The default locale is always ``1.0``. Computed once at
+    :func:`configure` time; the composition root publishes it to the
+    ``i18n_catalog_coverage`` gauge. Returns a fresh copy.
+    """
+    return dict(_require_state().coverage)
 
 
 def _require_state() -> _State:
@@ -242,3 +275,61 @@ def _reject_orphaned_keys(catalogs: dict[str, dict[str, str]], default_locale: s
                 f"locale {code!r} defines key(s) {sorted(orphaned)} absent from the default "
                 f"locale {default_locale!r} catalog — likely a typo"
             )
+
+
+def _placeholder_names(template: str) -> set[str]:
+    """The set of ``{name}`` field names referenced by a ``.format()`` template.
+
+    Format spec, conversion, attribute (``{a.b}``) and index (``{a[0]}``) syntax are
+    stripped to the top-level field name; literal text and auto-numbered ``{}`` fields
+    contribute nothing. ``{{``/``}}`` escapes are handled by :class:`string.Formatter`.
+    """
+    names: set[str] = set()
+    for _literal, field_name, _spec, _conv in string.Formatter().parse(template):
+        if field_name:  # None => literal chunk; "" => auto-positional; both irrelevant
+            names.add(field_name.split(".", 1)[0].split("[", 1)[0])
+    return names
+
+
+def _reject_alien_placeholders(catalogs: dict[str, dict[str, str]], default_locale: str) -> None:
+    """Every non-default template's placeholders must be a subset of the default's.
+
+    Callers pass the kwargs the *default* template declares; a translation that
+    references a placeholder the default does not have would raise ``KeyError`` inside
+    :func:`translate` and degrade to a raw, brace-riddled template shown to the user
+    (the exact defect V2-D-026 makes statically checkable). Orphaned keys are already
+    rejected, so every key here also exists in the default catalog. A translation may
+    *omit* placeholders (subset), it may never *invent* them.
+    """
+    default = catalogs[default_locale]
+    for code, catalog in catalogs.items():
+        if code == default_locale:
+            continue
+        for key, template in catalog.items():
+            expected = _placeholder_names(default.get(key, ""))
+            alien = _placeholder_names(template) - expected
+            if alien:
+                raise LocaleCatalogError(
+                    f"locale {code!r} key {key!r} references placeholder(s) {sorted(alien)} "
+                    f"absent from the default locale {default_locale!r} template "
+                    f"(expected a subset of {sorted(expected)}) — would surface to users as a "
+                    "raw template"
+                )
+
+
+def _compute_coverage(catalogs: dict[str, dict[str, str]], default_locale: str) -> dict[str, float]:
+    """Fraction of default user-facing keys each locale translates (V2-D-026).
+
+    Admin/owner-only namespaces are excluded (:data:`_ADMIN_COVERAGE_PREFIXES`) so the
+    metric tracks the user-facing surface. The default locale is ``1.0`` by definition.
+    """
+    default_keys = [
+        k for k in catalogs[default_locale] if not k.startswith(_ADMIN_COVERAGE_PREFIXES)
+    ]
+    total = len(default_keys)
+    if total == 0:
+        return {code: 1.0 for code in catalogs}
+    return {
+        code: sum(1 for k in default_keys if k in catalog) / total
+        for code, catalog in catalogs.items()
+    }

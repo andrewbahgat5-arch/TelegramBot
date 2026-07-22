@@ -78,6 +78,16 @@ redis_connected = Gauge(
     multiprocess_mode="livemostrecent",
 )
 
+# Per-locale translation coverage (V2-D-026), set once at startup by the composition
+# root from ``core.i18n.catalog_coverage()``. Computed identically in every process,
+# so ``max`` collapses the per-pid series to one under multiprocess aggregation.
+i18n_catalog_coverage = Gauge(
+    "i18n_catalog_coverage",
+    "Fraction of user-facing default-locale keys translated, per locale (0..1).",
+    ("locale",),
+    multiprocess_mode="max",
+)
+
 
 # --- Recording helpers (stable label sets) --------------------------------
 def record_download(*, platform: str, format_: str, quality: str, result: str) -> None:
@@ -122,6 +132,12 @@ def observe_upload(seconds: float) -> None:
 
 def observe_telegram_send(seconds: float) -> None:
     telegram_send_seconds.observe(seconds)
+
+
+def set_i18n_coverage(coverage: dict[str, float]) -> None:
+    """Publish per-locale translation coverage to the gauge (called once at startup)."""
+    for locale, value in coverage.items():
+        i18n_catalog_coverage.labels(locale=locale).set(value)
 
 
 def set_live_gauges(

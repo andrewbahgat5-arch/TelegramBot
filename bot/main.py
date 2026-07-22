@@ -43,7 +43,7 @@ from bot.middlewares.db_session import DbSessionMiddleware
 from bot.middlewares.i18n import LocaleMiddleware
 from bot.middlewares.logging import LoggingMiddleware
 from bot.middlewares.throttle import ThrottleMiddleware
-from core import i18n
+from core import i18n, metrics
 from core.alerting import TelegramAlertProcessor
 from core.config import Settings
 from core.logging import configure_logging, get_logger
@@ -211,6 +211,7 @@ async def main() -> None:
     settings = Settings()  # type: ignore[call-arg]
     configure_logging(settings.log_level, settings.log_format)
     i18n.configure(settings.default_locale)
+    metrics.set_i18n_coverage(i18n.catalog_coverage())
     # Bind the Start-home "Contact us" deep link from config (single source).
     start_handler.SUPPORT_CONTACT_URL = settings.support_contact_url
     if settings.sentry_enabled:
